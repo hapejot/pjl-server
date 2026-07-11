@@ -1,10 +1,13 @@
+use std::collections::HashMap;
+
 use axum::{
     Json, Router,
-    extract::{Path, Query},
+    extract::{Path, Query, connect_info::Connected},
     http::{HeaderName, header},
     response::IntoResponse,
-    routing::{get, head},
+    routing::get,
 };
+use odata::query::{FilterExpr, ODataQuery};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::trace;
@@ -178,12 +181,6 @@ pub struct PropertyValue {
     #[serde(rename = "Record", skip_serializing_if = "Option::is_none")]
     pub record: Option<Record>,
 }
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename = "Root")]
-struct AnnotationsRoot {
-    #[serde(rename = "Annotations", default)]
-    annotations: Vec<Annotations>,
-}
 ////////////////////////////////////////////////////////////////////////////////////////
 /// router entry point
 pub fn router() -> Router {
@@ -193,8 +190,23 @@ pub fn router() -> Router {
         .route("/{name}", get(handler).post(handler).patch(handler))
 }
 
-async fn handler(Path(name): Path<String>, Query(params): Query<Value>) -> Json<Value> {
-    trace!("name: {}: {:?}", name, params);
+async fn handler(
+    Path(name): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Json<Value> {
+    let p = ODataQuery {
+        filter: params.get("$filter").map(|x| FilterExpr::parse(x).unwrap()),
+        orderby: Some(vec![]),
+        top: params.get("$top").map(|x| x.parse().unwrap()),
+        skip: params.get("$skip").map(|x| x.parse().unwrap()),
+        select: params
+            .get("$select")
+            .map(|x| x.split(",").map(|y| y.to_string()).collect()),
+        expand: vec![],
+        count: params.get("$count").is_some(),
+        search: params.get("$search").cloned(),
+    };
+    trace!("name: {}: {:?}", name, p);
     Json(json!({"name":name}))
 }
 async fn index() -> Json<Value> {

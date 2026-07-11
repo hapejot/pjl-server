@@ -1,0 +1,237 @@
+{
+  "_version": "1.65.0",
+  "sap.app": {
+    "applicationVersion": {
+      "version": "1.0.0"
+    },
+    "crossNavigation": {
+      "inbounds": {
+        "EntityConfigs-display": {
+          "action": "display",
+          "semanticObject": "EntityConfigs",
+          "signature": {
+            "additionalParameters": "allowed",
+            "parameters": {}
+          }
+        }
+      }
+    },
+    "dataSources": {
+      "mainService": {
+        "settings": {
+          "odataVersion": "4.0"
+        },
+        "type": "OData",
+        "uri": "/Service/"
+      }
+    },
+    "description": "Fiori Elements List Report + Object Page",
+    "i18n": "i18n/i18n.properties",
+    "id": "entityconfigs.app",
+    "title": "Entity-Konfigurationen",
+    "type": "application"
+  },
+  "sap.ui5": {
+    "dependencies": {
+      "libs": {
+        "sap.f": {},
+        "sap.fe.templates": {},
+        "sap.m": {},
+        "sap.ui.core": {}
+      },
+      "minUI5Version": "1.139.0"
+    },
+    "flexEnabled": true,
+    "models": {
+      "": {
+        "dataSource": "mainService",
+        "settings": {
+          "autoExpandSelect": true,
+          "earlyRequests": true,
+          "operationMode": "Server"
+        }
+      },
+      "@i18n": {
+        "type": "sap.ui.model.resource.ResourceModel",
+        "uri": "i18n/i18n.properties"
+      }
+    },
+    "rootView": {
+      "id": "appRootView",
+      "type": "XML",
+      "viewName": "sap.fe.core.rootView.Fcl"
+    },
+    "routing": {
+      "config": {
+        "controlAggregation": "beginColumnPages",
+        "controlId": "appContent",
+        "flexibleColumnLayout": {
+          "defaultThreeColumnLayoutType": "ThreeColumnsMidExpanded",
+          "defaultTwoColumnLayoutType": "TwoColumnsMidExpanded"
+        },
+        "routerClass": "sap.f.routing.Router"
+      },
+      "routes": [
+        {
+          "name": "default",
+          "pattern": ":?query:",
+          "target": "EntityConfigsList"
+        },
+        {
+          "name": "EntityConfigsList",
+          "pattern": "EntityConfigs:?query:",
+          "target": "EntityConfigsList"
+        },
+        {
+          "name": "EntityConfigsObjectPage",
+          "pattern": "EntityConfigs({key}):?query:",
+          "target": [
+            "EntityConfigsList",
+            "EntityConfigsObjectPage"
+          ]
+        },
+        {
+          "name": "EntityFieldsObjectPage",
+          "pattern": "EntityConfigs({key})/Fields({key2}):?query:",
+          "target": [
+            "EntityConfigsList",
+            "EntityConfigsObjectPage",
+            "EntityFieldsObjectPage"
+          ]
+        },
+        {
+          "name": "EntityFacetsObjectPage",
+          "pattern": "EntityConfigs({key})/Facets({key2}):?query:",
+          "target": [
+            "EntityConfigsList",
+            "EntityConfigsObjectPage",
+            "EntityFacetsObjectPage"
+          ]
+        },
+        {
+          "name": "EntityNavigationsObjectPage",
+          "pattern": "EntityConfigs({key})/Navigations({key2}):?query:",
+          "target": [
+            "EntityConfigsList",
+            "EntityConfigsObjectPage",
+            "EntityNavigationsObjectPage"
+          ]
+        },
+        {
+          "name": "EntityTableFacetsObjectPage",
+          "pattern": "EntityConfigs({key})/TableFacets({key2}):?query:",
+          "target": [
+            "EntityConfigsList",
+            "EntityConfigsObjectPage",
+            "EntityTableFacetsObjectPage"
+          ]
+        }
+      ],
+      "targets": {
+        "EntityConfigsList": {
+          "contextPattern": "",
+          "controlAggregation": "beginColumnPages",
+          "id": "EntityConfigsList",
+          "name": "sap.fe.templates.ListReport",
+          "options": {
+            "settings": {
+              "contextPath": "/EntityConfigs",
+              "initialLoad": "Enabled",
+              "navigation": {
+                "EntityConfigs": {
+                  "detail": {
+                    "route": "EntityConfigsObjectPage"
+                  }
+                }
+              },
+              "variantManagement": "Page"
+            }
+          },
+          "type": "Component"
+        },
+        "EntityConfigsObjectPage": {
+          "contextPattern": "/EntityConfigs({key})",
+          "controlAggregation": "midColumnPages",
+          "id": "EntityConfigsObjectPage",
+          "name": "sap.fe.templates.ObjectPage",
+          "options": {
+            "settings": {
+              "contextPath": "/EntityConfigs",
+              "navigation": {
+                "Facets": {
+                  "detail": {
+                    "route": "EntityFacetsObjectPage"
+                  }
+                },
+                "Fields": {
+                  "detail": {
+                    "route": "EntityFieldsObjectPage"
+                  }
+                },
+                "Navigations": {
+                  "detail": {
+                    "route": "EntityNavigationsObjectPage"
+                  }
+                },
+                "TableFacets": {
+                  "detail": {
+                    "route": "EntityTableFacetsObjectPage"
+                  }
+                }
+              }
+            }
+          },
+          "type": "Component"
+        },
+        "EntityFacetsObjectPage": {
+          "contextPattern": "/EntityConfigs({key})/Facets({key2})",
+          "controlAggregation": "endColumnPages",
+          "id": "EntityFacetsObjectPage",
+          "name": "sap.fe.templates.ObjectPage",
+          "options": {
+            "settings": {
+              "contextPath": "/EntityConfigs/Facets"
+            }
+          },
+          "type": "Component"
+        },
+        "EntityFieldsObjectPage": {
+          "contextPattern": "/EntityConfigs({key})/Fields({key2})",
+          "controlAggregation": "endColumnPages",
+          "id": "EntityFieldsObjectPage",
+          "name": "sap.fe.templates.ObjectPage",
+          "options": {
+            "settings": {
+              "contextPath": "/EntityConfigs/Fields"
+            }
+          },
+          "type": "Component"
+        },
+        "EntityNavigationsObjectPage": {
+          "contextPattern": "/EntityConfigs({key})/Navigations({key2})",
+          "controlAggregation": "endColumnPages",
+          "id": "EntityNavigationsObjectPage",
+          "name": "sap.fe.templates.ObjectPage",
+          "options": {
+            "settings": {
+              "contextPath": "/EntityConfigs/Navigations"
+            }
+          },
+          "type": "Component"
+        },
+        "EntityTableFacetsObjectPage": {
+          "contextPattern": "/EntityConfigs({key})/TableFacets({key2})",
+          "controlAggregation": "endColumnPages",
+          "id": "EntityTableFacetsObjectPage",
+          "name": "sap.fe.templates.ObjectPage",
+          "options": {
+            "settings": {
+              "contextPath": "/EntityConfigs/TableFacets"
+            }
+          },
+          "type": "Component"
+        }
+      }
+    }
+  }
+}

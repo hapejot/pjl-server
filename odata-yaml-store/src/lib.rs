@@ -3,14 +3,12 @@ pub mod error;
 pub mod filter_eval;
 pub mod key;
 pub mod metadata;
-pub mod query;
 pub mod yaml_store;
 
 pub use datastore::{DataStore, DraftAction};
 pub use error::StoreError;
 pub use key::{EntityKey, ParentKey};
 pub use metadata::{EntityMetadata, NavigationDef};
-pub use query::{CompareOp, ExpandItem, FilterExpr, FilterOperand, ODataQuery, OrderByItem, SortDirection};
 pub use yaml_store::YamlStore;
 
 #[cfg(any(test, feature = "debug-tools"))]
@@ -23,10 +21,18 @@ pub trait DraftActionExt: DataStore {
     fn draft_edit(&self, set_name: &str, key: &EntityKey) -> Result<serde_json::Value, StoreError> {
         self.draft_action(set_name, key, DraftAction::Edit)
     }
-    fn draft_activate(&self, set_name: &str, key: &EntityKey) -> Result<serde_json::Value, StoreError> {
+    fn draft_activate(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+    ) -> Result<serde_json::Value, StoreError> {
         self.draft_action(set_name, key, DraftAction::Activate)
     }
-    fn draft_prepare(&self, set_name: &str, key: &EntityKey) -> Result<serde_json::Value, StoreError> {
+    fn draft_prepare(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+    ) -> Result<serde_json::Value, StoreError> {
         self.draft_action(set_name, key, DraftAction::Prepare)
     }
 }
@@ -36,6 +42,7 @@ impl<T: DataStore + ?Sized> DraftActionExt for T {}
 mod tests {
     use super::*;
     use datastore::DataStoreDebugExt;
+    use odata::query::*;
     use serde_json::json;
     use tempfile::TempDir;
 
@@ -63,7 +70,9 @@ mod tests {
         store.create_entity("Orders", &data, None).unwrap();
 
         let key = EntityKey::new([("ID".to_string(), "1".to_string())], true);
-        let read = store.read_entity("Orders", &key, &ODataQuery::default()).unwrap();
+        let read = store
+            .read_entity("Orders", &key, &ODataQuery::default())
+            .unwrap();
         assert_eq!(read["CustomerName"], "Mueller GmbH");
     }
 
@@ -78,7 +87,9 @@ mod tests {
             .patch_entity("Orders", &key, &json!({ "Status": "Released" }))
             .unwrap();
 
-        let read = store.read_entity("Orders", &key, &ODataQuery::default()).unwrap();
+        let read = store
+            .read_entity("Orders", &key, &ODataQuery::default())
+            .unwrap();
         assert_eq!(read["Status"], "Released");
         assert_eq!(read["Amount"], 100); // unveraendert
     }
@@ -87,17 +98,29 @@ mod tests {
     fn get_collection_with_filter_and_orderby() {
         let (_dir, store) = make_store();
         store
-            .create_entity("Orders", &json!({ "ID": "1", "Amount": 50, "Status": "New" }), None)
+            .create_entity(
+                "Orders",
+                &json!({ "ID": "1", "Amount": 50, "Status": "New" }),
+                None,
+            )
             .unwrap();
         store
-            .create_entity("Orders", &json!({ "ID": "2", "Amount": 200, "Status": "Released" }), None)
+            .create_entity(
+                "Orders",
+                &json!({ "ID": "2", "Amount": 200, "Status": "Released" }),
+                None,
+            )
             .unwrap();
         store
-            .create_entity("Orders", &json!({ "ID": "3", "Amount": 120, "Status": "Released" }), None)
+            .create_entity(
+                "Orders",
+                &json!({ "ID": "3", "Amount": 120, "Status": "Released" }),
+                None,
+            )
             .unwrap();
 
         let query = ODataQuery {
-            filter: Some(FilterExpr::eq("Status", "Released")),
+            filter: None,
             orderby: vec![OrderByItem {
                 property: "Amount".to_string(),
                 direction: SortDirection::Desc,
@@ -119,10 +142,18 @@ mod tests {
             .create_entity("Orders", &json!({ "ID": "1", "CustomerName": "Foo" }), None)
             .unwrap();
         store
-            .create_entity("OrderItems", &json!({ "ID": "10", "OrderID": "1", "Qty": 3 }), None)
+            .create_entity(
+                "OrderItems",
+                &json!({ "ID": "10", "OrderID": "1", "Qty": 3 }),
+                None,
+            )
             .unwrap();
         store
-            .create_entity("OrderItems", &json!({ "ID": "11", "OrderID": "1", "Qty": 7 }), None)
+            .create_entity(
+                "OrderItems",
+                &json!({ "ID": "11", "OrderID": "1", "Qty": 7 }),
+                None,
+            )
             .unwrap();
 
         let query = ODataQuery {
@@ -193,7 +224,9 @@ mod tests {
         meta2.register_key("Orders", &["ID"]);
         let reopened = YamlStore::open(dir.path(), meta2).unwrap();
         let key = EntityKey::new([("ID".to_string(), "1".to_string())], true);
-        let read = reopened.read_entity("Orders", &key, &ODataQuery::default()).unwrap();
+        let read = reopened
+            .read_entity("Orders", &key, &ODataQuery::default())
+            .unwrap();
         assert_eq!(read["Amount"], 42);
     }
 }

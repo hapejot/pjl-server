@@ -3,7 +3,7 @@ use crate::error::StoreError;
 use crate::filter_eval::{compare_json_for_sort, evaluate_filter, resolve_property};
 use crate::key::{EntityKey, ParentKey};
 use crate::metadata::EntityMetadata;
-use crate::query::{ODataQuery, SortDirection};
+use odata::query::{ODataQuery, SortDirection};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -40,10 +40,7 @@ fn merge_json(existing: &mut Value, patch: &Value) {
     match (existing, patch) {
         (Value::Object(existing_map), Value::Object(patch_map)) => {
             for (k, v) in patch_map {
-                merge_json(
-                    existing_map.entry(k.clone()).or_insert(Value::Null),
-                    v,
-                );
+                merge_json(existing_map.entry(k.clone()).or_insert(Value::Null), v);
             }
         }
         (existing_slot, patch_value) => {
@@ -100,7 +97,11 @@ impl YamlStore {
     }
 
     fn path_for(&self, set_name: &str, key: &EntityKey) -> PathBuf {
-        let state = if key.is_active_entity { "active" } else { "draft" };
+        let state = if key.is_active_entity {
+            "active"
+        } else {
+            "draft"
+        };
         self.root
             .join(set_name)
             .join(state)
@@ -108,7 +109,12 @@ impl YamlStore {
     }
 
     /// Schreibt atomar: erst temp-Datei, dann rename (verhindert kaputte Dateien bei Crash).
-    fn write_record(&self, set_name: &str, key: &EntityKey, data: &Value) -> Result<(), StoreError> {
+    fn write_record(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+        data: &Value,
+    ) -> Result<(), StoreError> {
         let path = self.path_for(set_name, key);
         fs::create_dir_all(path.parent().unwrap())?;
 
@@ -116,8 +122,8 @@ impl YamlStore {
             key: key.clone(),
             data: data.clone(),
         };
-        let yaml = serde_yaml::to_string(&record)
-            .map_err(|e| StoreError::Serialize(e.to_string()))?;
+        let yaml =
+            serde_yaml::to_string(&record).map_err(|e| StoreError::Serialize(e.to_string()))?;
 
         let tmp_path = path.with_extension("yaml.tmp");
         fs::write(&tmp_path, yaml)?;
@@ -168,7 +174,9 @@ impl YamlStore {
             is_active_entity: true,
         };
         let active_data = self.get_from_cache(set_name, &active_key).ok_or_else(|| {
-            StoreError::NotFound(format!("Aktive Entity {set_name}/{active_key:?} nicht gefunden"))
+            StoreError::NotFound(format!(
+                "Aktive Entity {set_name}/{active_key:?} nicht gefunden"
+            ))
         })?;
 
         let draft_key = active_key.sibling(); // is_active_entity = false
@@ -318,10 +326,7 @@ impl DataStore for YamlStore {
         }
 
         if let Some(select) = &query.select {
-            records = records
-                .iter()
-                .map(|r| project_fields(r, select))
-                .collect();
+            records = records.iter().map(|r| project_fields(r, select)).collect();
         }
 
         Ok(Value::Array(records))
@@ -341,7 +346,12 @@ impl DataStore for YamlStore {
         }
     }
 
-    fn read_entity(&self, set_name: &str, key: &EntityKey, _query: &ODataQuery) -> Result<Value, StoreError> {
+    fn read_entity(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+        _query: &ODataQuery,
+    ) -> Result<Value, StoreError> {
         self.get_from_cache(set_name, key)
             .ok_or_else(|| StoreError::NotFound(format!("{set_name}/{key:?}")))
     }
@@ -372,7 +382,12 @@ impl DataStore for YamlStore {
         Ok(data.clone())
     }
 
-    fn patch_entity(&self, set_name: &str, key: &EntityKey, patch: &Value) -> Result<Value, StoreError> {
+    fn patch_entity(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+        patch: &Value,
+    ) -> Result<Value, StoreError> {
         let mut cache = self.cache.write().unwrap();
         let set = cache.entry(set_name.to_string()).or_default();
         let existing = set
@@ -396,7 +411,12 @@ impl DataStore for YamlStore {
         Ok(())
     }
 
-    fn draft_action(&self, set_name: &str, key: &EntityKey, action: DraftAction) -> Result<Value, StoreError> {
+    fn draft_action(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+        action: DraftAction,
+    ) -> Result<Value, StoreError> {
         match action {
             DraftAction::Edit => self.draft_edit(set_name, key),
             DraftAction::Activate => self.draft_activate(set_name, key),
@@ -410,12 +430,16 @@ impl DataStore for YamlStore {
             .ok_or_else(|| StoreError::NotFound(format!("{set_name}/{sibling_key:?}")))
     }
 
-    fn get_property(&self, set_name: &str, key: &EntityKey, property: &str) -> Result<Value, StoreError> {
+    fn get_property(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+        property: &str,
+    ) -> Result<Value, StoreError> {
         let entity = self.read_entity(set_name, key, &ODataQuery::default())?;
-        entity
-            .get(property)
-            .cloned()
-            .ok_or_else(|| StoreError::NotFound(format!("Property '{property}' auf {set_name}/{key:?}")))
+        entity.get(property).cloned().ok_or_else(|| {
+            StoreError::NotFound(format!("Property '{property}' auf {set_name}/{key:?}"))
+        })
     }
 
     fn commit(&self) {

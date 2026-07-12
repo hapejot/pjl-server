@@ -1,12 +1,16 @@
-use odata_yaml_store::{
-    DataStore, DraftActionExt, EntityKey, EntityMetadata, FilterExpr, NavigationDef, ODataQuery,
-    OrderByItem, SortDirection, YamlStore,
-};
+use std::path::Path;
+
+use odata::query::ODataQuery;
+use odata::query::OrderByItem;
+use odata::query::SortDirection;
+use odata_yaml_store::NavigationDef;
+use odata_yaml_store::YamlStore;
+use odata_yaml_store::{DataStore, DraftActionExt, EntityKey, EntityMetadata};
 use serde_json::json;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Datenverzeichnis im aktuellen Arbeitsverzeichnis (wird bei Bedarf angelegt)
-    let data_dir = std::env::temp_dir().join("odata_yaml_store_demo");
+    let data_dir = Path::new("testdata");
     println!("Datenverzeichnis: {}", data_dir.display());
 
     // 1. Metadaten registrieren: Key-Felder + Navigationen
@@ -49,14 +53,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3. Einzelne Entity lesen
     let key = EntityKey::new([("ID".to_string(), "1".to_string())], true);
     let order = store.read_entity("Orders", &key, &ODataQuery::default())?;
-    println!("\nGelesene Order: {}", serde_json::to_string_pretty(&order)?);
+    println!(
+        "\nGelesene Order: {}",
+        serde_json::to_string_pretty(&order)?
+    );
 
     // 4. Patch
     store.patch_entity("Orders", &key, &json!({ "Status": "Released" }))?;
 
     // 5. Collection mit $filter + $orderby
     let query = ODataQuery {
-        filter: Some(FilterExpr::eq("Status", "Released")),
+        filter: None,
         orderby: vec![OrderByItem {
             property: "Amount".to_string(),
             direction: SortDirection::Desc,
@@ -71,7 +78,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 6. Draft-Workflow: Edit -> Patch -> Activate
     let draft = store.draft_edit("Orders", &key)?;
-    println!("\nDraft angelegt: {}", serde_json::to_string_pretty(&draft)?);
+    println!(
+        "\nDraft angelegt: {}",
+        serde_json::to_string_pretty(&draft)?
+    );
 
     let draft_key = key.sibling();
     store.patch_entity("Orders", &draft_key, &json!({ "Status": "InProgress" }))?;
@@ -83,7 +93,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // 7. Aufräumen (Demo-Verzeichnis wieder löschen)
-    std::fs::remove_dir_all(&data_dir).ok();
+    // std::fs::remove_dir_all(&data_dir).ok();
 
     Ok(())
 }

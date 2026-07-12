@@ -1,6 +1,6 @@
 use crate::error::StoreError;
 use crate::key::{EntityKey, ParentKey};
-use crate::query::ODataQuery;
+use odata::query::ODataQuery;
 use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,7 +22,12 @@ pub trait DataStore: Send + Sync {
     fn count(&self, set_name: &str, query: &ODataQuery, parent: Option<&ParentKey>) -> usize;
 
     // -- Single Entity CRUD --
-    fn read_entity(&self, set_name: &str, key: &EntityKey, query: &ODataQuery) -> Result<Value, StoreError>;
+    fn read_entity(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+        query: &ODataQuery,
+    ) -> Result<Value, StoreError>;
 
     fn create_entity(
         &self,
@@ -31,24 +36,43 @@ pub trait DataStore: Send + Sync {
         parent: Option<&ParentKey>,
     ) -> Result<Value, StoreError>;
 
-    fn patch_entity(&self, set_name: &str, key: &EntityKey, patch: &Value) -> Result<Value, StoreError>;
+    fn patch_entity(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+        patch: &Value,
+    ) -> Result<Value, StoreError>;
 
     fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError>;
 
     // -- Draft Actions --
-    fn draft_action(&self, set_name: &str, key: &EntityKey, action: DraftAction) -> Result<Value, StoreError>;
+    fn draft_action(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+        action: DraftAction,
+    ) -> Result<Value, StoreError>;
 
     // -- Sibling Entity (draft <-> active) --
     fn read_sibling_entity(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError>;
 
     // -- Property --
-    fn get_property(&self, set_name: &str, key: &EntityKey, property: &str) -> Result<Value, StoreError>;
+    fn get_property(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+        property: &str,
+    ) -> Result<Value, StoreError>;
 
     // -- Persistence --
     fn commit(&self);
 
     // -- Default-Methoden (kein Implementierungszwang) --
-    fn update_entities(&self, set_name: &str, updates: &[(EntityKey, Value)]) -> Result<(), StoreError> {
+    fn update_entities(
+        &self,
+        set_name: &str,
+        updates: &[(EntityKey, Value)],
+    ) -> Result<(), StoreError> {
         for (key, patch) in updates {
             self.patch_entity(set_name, key, patch)?;
         }

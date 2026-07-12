@@ -9,7 +9,7 @@ pub struct ODataQuery {
     #[serde(rename = "$filter")]
     pub filter: Option<FilterExpr>,
     #[serde(rename = "$orderby")]
-    pub orderby: Option<Vec<OrderByItem>>,
+    pub orderby: Vec<OrderByItem>,
     #[serde(rename = "$top")]
     pub top: Option<u32>,
     #[serde(rename = "$skip")]
@@ -78,15 +78,15 @@ pub enum FilterOperand {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CompareOp {
-    Eq,
-    Ne,
-    Gt,
-    Ge,
-    Lt,
-    Le,
-}
+// #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+// pub enum CompareOp {
+//     Eq,
+//     Ne,
+//     Gt,
+//     Ge,
+//     Lt,
+//     Le,
+// }
 
 // impl FilterExpr {
 //     pub fn parse(src: &str) -> Self {

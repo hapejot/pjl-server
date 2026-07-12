@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use axum::{
     Json, Router,
-    extract::{Path, Query, connect_info::Connected},
+    extract::{Path, Query},
     http::{HeaderName, header},
     response::IntoResponse,
     routing::get,
@@ -196,7 +196,7 @@ async fn handler(
 ) -> Json<Value> {
     let p = ODataQuery {
         filter: params.get("$filter").map(|x| FilterExpr::parse(x).unwrap()),
-        orderby: Some(vec![]),
+        orderby: vec![],
         top: params.get("$top").map(|x| x.parse().unwrap()),
         skip: params.get("$skip").map(|x| x.parse().unwrap()),
         select: params

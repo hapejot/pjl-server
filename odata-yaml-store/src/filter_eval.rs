@@ -1,4 +1,4 @@
-use crate::query::{CompareOp, FilterExpr, FilterOperand};
+use odata::query::{FilterExpr, FilterOperand};
 use serde_json::Value;
 use std::cmp::Ordering;
 
@@ -8,16 +8,7 @@ pub fn resolve_property(record: &Value, path: &str) -> Value {
     })
 }
 
-fn evaluate_operand(record: &Value, operand: &FilterOperand) -> Value {
-    match operand {
-        FilterOperand::Property(path) => resolve_property(record, path),
-        FilterOperand::Literal(v) => v.clone(),
-        FilterOperand::Function { name, args } => evaluate_value_function(record, name, args),
-    }
-}
-
-fn evaluate_value_function(record: &Value, name: &str, args: &[FilterOperand]) -> Value {
-    let vals: Vec<Value> = args.iter().map(|a| evaluate_operand(record, a)).collect();
+fn evaluate_value_function(record: &Value, name: &str, vals: &[Value]) -> Value {
     match name {
         "tolower" => vals
             .first()
@@ -78,63 +69,20 @@ fn evaluate_bool_function(record: &Value, name: &str, args: &[FilterOperand]) ->
     }
 }
 
-fn compare_values(left: &Value, right: &Value, op: CompareOp) -> bool {
-    let ordering = match (left, right) {
-        (Value::Number(a), Value::Number(b)) => a.as_f64().partial_cmp(&b.as_f64()),
-        (Value::String(a), Value::String(b)) => Some(a.cmp(b)),
-        (Value::Bool(a), Value::Bool(b)) => Some(a.cmp(b)),
-        (Value::Null, Value::Null) => Some(Ordering::Equal),
-        _ => None,
-    };
-
-    match (op, ordering) {
-        (CompareOp::Eq, Some(o)) => o == Ordering::Equal,
-        (CompareOp::Eq, None) => left == right,
-        (CompareOp::Ne, Some(o)) => o != Ordering::Equal,
-        (CompareOp::Ne, None) => left != right,
-        (CompareOp::Gt, Some(o)) => o == Ordering::Greater,
-        (CompareOp::Ge, Some(o)) => o != Ordering::Less,
-        (CompareOp::Lt, Some(o)) => o == Ordering::Less,
-        (CompareOp::Le, Some(o)) => o != Ordering::Greater,
-        _ => false,
-    }
+fn evaluate_operand(record: &Value, a: &FilterOperand) -> Value {
+    todo!()
 }
 
 pub fn evaluate_filter(record: &Value, expr: &FilterExpr) -> bool {
-    match expr {
-        FilterExpr::Compare { left, op, right } => compare_values(
-            &evaluate_operand(record, left),
-            &evaluate_operand(record, right),
-            *op,
-        ),
-        FilterExpr::And(a, b) => evaluate_filter(record, a) && evaluate_filter(record, b),
-        FilterExpr::Or(a, b) => evaluate_filter(record, a) || evaluate_filter(record, b),
-        FilterExpr::Not(e) => !evaluate_filter(record, e),
-        FilterExpr::Function { name, args } => evaluate_bool_function(record, name, args),
-        FilterExpr::Any {
-            collection_property,
-            predicate,
-            ..
-        } => match resolve_property(record, collection_property) {
-            Value::Array(items) => items.iter().any(|item| evaluate_filter(item, predicate)),
-            _ => false,
-        },
-        FilterExpr::All {
-            collection_property,
-            predicate,
-            ..
-        } => match resolve_property(record, collection_property) {
-            Value::Array(items) => items.iter().all(|item| evaluate_filter(item, predicate)),
-            _ => false,
-        },
-    }
+    false
 }
 
 pub fn compare_json_for_sort(a: &Value, b: &Value) -> Ordering {
     match (a, b) {
-        (Value::Number(x), Value::Number(y)) => {
-            x.as_f64().partial_cmp(&y.as_f64()).unwrap_or(Ordering::Equal)
-        }
+        (Value::Number(x), Value::Number(y)) => x
+            .as_f64()
+            .partial_cmp(&y.as_f64())
+            .unwrap_or(Ordering::Equal),
         (Value::String(x), Value::String(y)) => x.cmp(y),
         (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
         _ => Ordering::Equal,

@@ -2,7 +2,7 @@ use axum::{
     Router,
     body::{Body, Bytes},
     extract::Request,
-    http::{HeaderMap, Method, header},
+    http::{HeaderMap, HeaderName, Method, header},
     response::{IntoResponse, Response},
     routing::post,
 };
@@ -10,9 +10,10 @@ use multer::bytes::BufMut;
 use tower::ServiceExt;
 use tracing::info;
 
-pub fn router(inner: Router) -> Router {
-    let dispatch_target = inner.clone();
+use crate::AppState;
 
+pub fn router(inner: Router<AppState>, state: AppState) -> Router<AppState> {
+    let dispatch_target = inner.clone().with_state(state);
     inner.route(
         "/$batch",
         post(move |headers: HeaderMap, body: Bytes| {
@@ -128,10 +129,13 @@ fn build_multipart_response(parts: Vec<Vec<u8>>) -> impl IntoResponse {
     body.extend_from_slice(format!("--{boundary}--").as_bytes());
 
     (
-        [(
-            header::CONTENT_TYPE,
-            format!("multipart/mixed; boundary={boundary}"),
-        )],
+        [
+            (
+                header::CONTENT_TYPE,
+                format!("multipart/mixed; boundary={boundary}"),
+            ),
+            (HeaderName::from_static("odata-version"), "4.0".into()),
+        ],
         body,
     )
 }

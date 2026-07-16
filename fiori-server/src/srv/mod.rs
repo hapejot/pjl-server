@@ -2,15 +2,22 @@ use std::collections::HashMap;
 
 use axum::{
     Json, Router,
-    extract::{Path, Query},
+    extract::{Path, Query, State},
     http::{HeaderName, header},
     response::IntoResponse,
     routing::get,
 };
-use odata::query::{FilterExpr, ODataQuery};
+use odata::{
+    path::parse_odata_path,
+    query::{FilterExpr, ODataQuery},
+};
+use odata_yaml_store::DataStore;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use spec::EntitySpec;
 use tracing::trace;
+
+use crate::AppState;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename = "EntityType")]
@@ -28,10 +35,32 @@ pub struct EntityType {
     pub navigation_properties: Vec<NavigationProperty>,
 }
 
+impl From<&EntitySpec> for EntityType {
+    fn from(value: &EntitySpec) -> Self {
+        Self {
+            name: value.name().into(),
+            key: Key::new(&["ID"]),
+            properties: Vec::new(),
+            navigation_properties: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Key {
     #[serde(rename = "PropertyRef", default)]
     pub property_refs: Vec<PropertyRef>,
+}
+
+impl Key {
+    pub fn new(names: &[&str]) -> Self {
+        Self {
+            property_refs: names
+                .iter()
+                .map(|x| PropertyRef { name: (*x).into() })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -58,6 +87,28 @@ pub struct Property {
     pub default_value: Option<String>,
 }
 
+impl Property {
+    pub fn new(name: &str, datatype: &str) -> Self {
+        Self {
+            name: name.into(),
+            type_: datatype.into(),
+            nullable: None,
+            max_length: None,
+            default_value: None,
+        }
+    }
+
+    pub fn nullable(mut self, nullable: bool) -> Self {
+        self.nullable = Some(nullable);
+        self
+    }
+
+    pub fn max_length(mut self, length: u32) -> Self {
+        self.max_length = Some(length);
+        self
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NavigationProperty {
     #[serde(rename = "@Name")]
@@ -68,6 +119,20 @@ pub struct NavigationProperty {
 
     #[serde(rename = "@ContainsTarget", skip_serializing_if = "Option::is_none")]
     pub contains_target: Option<bool>,
+}
+
+impl NavigationProperty {
+    pub fn new(
+        name: impl Into<String>,
+        type_: impl Into<String>,
+        contains_target: Option<bool>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            type_: type_.into(),
+            contains_target,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -183,17 +248,18 @@ pub struct PropertyValue {
 }
 ////////////////////////////////////////////////////////////////////////////////////////
 /// router entry point
-pub fn router() -> Router {
+pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(index))
         .route("/$metadata", get(metadata))
-        .route("/{name}", get(handler).post(handler).patch(handler))
+        .route("/{*path}", get(handler).post(handler).patch(handler))
 }
 
 async fn handler(
-    Path(name): Path<String>,
+    Path(path): Path<String>,
+    State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
-) -> Json<Value> {
+) -> impl IntoResponse {
     let p = ODataQuery {
         filter: params.get("$filter").map(|x| FilterExpr::parse(x).unwrap()),
         orderby: vec![],
@@ -206,270 +272,86 @@ async fn handler(
         count: params.get("$count").is_some(),
         search: params.get("$search").cloned(),
     };
-    trace!("name: {}: {:?}", name, p);
-    Json(json!({"name":name}))
+    let path_struct = parse_odata_path(&path).unwrap();
+    trace!("name: {:?}: {:?}", path_struct, p);
+    let mut j = json!([]);
+    for s in path_struct.segments {
+        if s.keys.len() == 0 {
+            let r = state.store.get_collection(&s.name, &p, None).unwrap();
+            j = json!({"@odata.context":format!("/Service/$metadata#{path}"),
+                   // "@odata.count": n,
+                   "value": r});
+        } else {
+            let key = odata_yaml_store::EntityKey {
+                fields: s.keys_as_map(),
+                is_active_entity: s.is_active_entity(),
+            };
+
+            j = state.store.read_entity(&s.name, &key).unwrap();
+        }
+    }
+    // let n = r.as_array().map_or_else(|| 0, |x| x.len());
+
+    (
+        [
+            (
+                header::CONTENT_TYPE,
+                "application/json;odata.metadata=minimal;charset=utf-8",
+            ),
+            (HeaderName::from_static("odata-version"), "4.0"),
+        ],
+        j.to_string(),
+    )
 }
 async fn index() -> Json<Value> {
     trace!("index");
     Json(json!({
-      "@odata.context": "/odata/v4/Service/$metadata",
+      "@odata.context": "/Service/$metadata",
       "value": [
-        {
-          "name": "EntityConfigs",
-          "url": "EntityConfigs"
-        },
-        {
-          "name": "EntityFields",
-          "url": "EntityFields"
-        },
-        {
-          "name": "EntityFacets",
-          "url": "EntityFacets"
-        },
-        {
-          "name": "EntityNavigations",
-          "url": "EntityNavigations"
-        },
-        {
-          "name": "EntityRelationships",
-          "url": "EntityRelationships"
-        },
-        {
-          "name": "EntityTableFacets",
-          "url": "EntityTableFacets"
-        },
-        {
-          "name": "FieldValueLists",
-          "url": "FieldValueLists"
-        },
-        {
-          "name": "FieldValueListItems",
-          "url": "FieldValueListItems"
-        }
+        { "name": "EntityConfigs",       "url": "EntityConfigs" },
+        { "name": "EntitySet",           "url": "EntitySet"},
+        { "name": "EntityFields",        "url": "EntityFields" },
+        { "name": "EntityFacets",        "url": "EntityFacets" },
+        { "name": "EntityNavigations",   "url": "EntityNavigations" },
+        { "name": "EntityRelationships", "url": "EntityRelationships" },
+        { "name": "EntityTableFacets",   "url": "EntityTableFacets" },
+        { "name": "FieldValueLists",     "url": "FieldValueLists" },
+        { "name": "FieldValueListItems", "url": "FieldValueListItems" }
       ]
     }))
 }
-async fn metadata() -> impl IntoResponse {
-    let entity = EntityType {
-        name: "EntityConfig".to_string(),
-        key: Key {
-            property_refs: vec![
-                PropertyRef {
-                    name: "ID".to_string(),
-                },
-                PropertyRef {
-                    name: "IsActiveEntity".to_string(),
-                },
-            ],
-        },
-        properties: vec![
-            Property {
-                name: "ID".to_string(),
-                type_: "Edm.Guid".to_string(),
-                nullable: Some(false),
-                max_length: None,
-                default_value: None,
-            },
-            Property {
-                name: "SetName".to_string(),
-                type_: "Edm.String".to_string(),
-                nullable: None,
-                max_length: Some(40),
-                default_value: None,
-            },
-            Property {
-                name: "TypeName".to_string(),
-                type_: "Edm.String".to_string(),
-                nullable: None,
-                max_length: Some(40),
-                default_value: None,
-            },
-            Property {
-                name: "Title".to_string(),
-                type_: "Edm.String".to_string(),
-                nullable: None,
-                max_length: Some(80),
-                default_value: None,
-            },
-            Property {
-                name: "TileDescription".to_string(),
-                type_: "Edm.String".to_string(),
-                nullable: None,
-                max_length: Some(120),
-                default_value: None,
-            },
-            Property {
-                name: "TileIcon".to_string(),
-                type_: "Edm.String".to_string(),
-                nullable: None,
-                max_length: Some(80),
-                default_value: None,
-            },
-            Property {
-                name: "HeaderTypeName".to_string(),
-                type_: "Edm.String".to_string(),
-                nullable: None,
-                max_length: Some(40),
-                default_value: None,
-            },
-            Property {
-                name: "HeaderTypeNamePlural".to_string(),
-                type_: "Edm.String".to_string(),
-                nullable: None,
-                max_length: Some(40),
-                default_value: None,
-            },
-            Property {
-                name: "SelectionFields".to_string(),
-                type_: "Edm.String".to_string(),
-                nullable: None,
-                max_length: Some(200),
-                default_value: None,
-            },
-            Property {
-                name: "DefaultValues".to_string(),
-                type_: "Edm.String".to_string(),
-                nullable: None,
-                max_length: Some(500),
-                default_value: None,
-            },
-            Property {
-                name: "HeaderFacets".to_string(),
-                type_: "Edm.String".to_string(),
-                nullable: None,
-                max_length: Some(2000),
-                default_value: None,
-            },
-            Property {
-                name: "DataPoints".to_string(),
-                type_: "Edm.String".to_string(),
-                nullable: None,
-                max_length: Some(2000),
-                default_value: None,
-            },
-            Property {
-                name: "HeaderTitlePath".to_string(),
-                type_: "Edm.Guid".to_string(),
-                nullable: None,
-                max_length: None,
-                default_value: None,
-            },
-            Property {
-                name: "HeaderDescriptionPath".to_string(),
-                type_: "Edm.Guid".to_string(),
-                nullable: None,
-                max_length: None,
-                default_value: None,
-            },
-            Property {
-                name: "IsActiveEntity".to_string(),
-                type_: "Edm.Boolean".to_string(),
-                nullable: Some(false),
-                max_length: None,
-                default_value: Some("true".to_string()),
-            },
-            Property {
-                name: "HasActiveEntity".to_string(),
-                type_: "Edm.Boolean".to_string(),
-                nullable: Some(false),
-                max_length: None,
-                default_value: Some("false".to_string()),
-            },
-            Property {
-                name: "HasDraftEntity".to_string(),
-                type_: "Edm.Boolean".to_string(),
-                nullable: Some(false),
-                max_length: None,
-                default_value: Some("false".to_string()),
-            },
-        ],
-        navigation_properties: vec![
-            NavigationProperty {
-                name: "Fields".to_string(),
-                type_: "Collection(Service.EntityField)".to_string(),
-                contains_target: None,
-            },
-            NavigationProperty {
-                name: "Facets".to_string(),
-                type_: "Collection(Service.EntityFacet)".to_string(),
-                contains_target: None,
-            },
-            NavigationProperty {
-                name: "Navigations".to_string(),
-                type_: "Collection(Service.EntityNavigation)".to_string(),
-                contains_target: None,
-            },
-            NavigationProperty {
-                name: "TableFacets".to_string(),
-                type_: "Collection(Service.EntityTableFacet)".to_string(),
-                contains_target: None,
-            },
-            NavigationProperty {
-                name: "_HeaderTitlePath".to_string(),
-                type_: "Service.EntityField".to_string(),
-                contains_target: None,
-            },
-            NavigationProperty {
-                name: "_HeaderDescPath".to_string(),
-                type_: "Service.EntityField".to_string(),
-                contains_target: None,
-            },
-            NavigationProperty {
-                name: "SiblingEntity".to_string(),
-                type_: "Service.EntityConfig".to_string(),
-                contains_target: None,
-            },
-            NavigationProperty {
-                name: "DraftAdministrativeData".to_string(),
-                type_: "Service.DraftAdministrativeData".to_string(),
-                contains_target: Some(true),
-            },
-        ],
-    };
-    let entity_set = EntitySet {
-        name: "EntityConfigs".to_string(),
-        entity_type: "Service.EntityConfig".to_string(),
-        navigation_property_bindings: vec![
-            NavigationPropertyBinding {
-                path: "Fields".to_string(),
-                target: "EntityFields".to_string(),
-            },
-            NavigationPropertyBinding {
-                path: "Facets".to_string(),
-                target: "EntityFacets".to_string(),
-            },
-            NavigationPropertyBinding {
-                path: "Navigations".to_string(),
-                target: "EntityNavigations".to_string(),
-            },
-            NavigationPropertyBinding {
-                path: "TableFacets".to_string(),
-                target: "EntityTableFacets".to_string(),
-            },
-            NavigationPropertyBinding {
-                path: "_HeaderTitlePath".to_string(),
-                target: "EntityFields".to_string(),
-            },
-            NavigationPropertyBinding {
-                path: "_HeaderDescPath".to_string(),
-                target: "EntityFields".to_string(),
-            },
-            NavigationPropertyBinding {
-                path: "SiblingEntity".to_string(),
-                target: "EntityConfigs".to_string(),
-            },
-            NavigationPropertyBinding {
-                path: "DraftAdministrativeData".to_string(),
-                target: "DraftAdministrativeData".to_string(),
-            },
-        ],
-    };
-    let xml = r##"<Annotations Target="Service.EntityConfig"><Annotation Term="UI.SelectionFields"><Collection><PropertyPath>SetName</PropertyPath></Collection></Annotation><Annotation Term="UI.LineItem"><Collection><Record Type="UI.DataField"><PropertyValue Property="Value" Path="SetName"/></Record><Record Type="UI.DataField"><PropertyValue Property="Value" Path="Title"/></Record><Record Type="UI.DataField"><PropertyValue Property="Value" Path="TileDescription"/></Record><Record Type="UI.DataField"><PropertyValue Property="Value" Path="TileIcon"/></Record><Record Type="UI.DataField"><PropertyValue Property="Value" Path="HeaderTypeName"/></Record><Record Type="UI.DataField"><PropertyValue Property="Value" Path="HeaderTypeNamePlural"/></Record><Record Type="UI.DataField"><PropertyValue Property="Value" Path="SelectionFields"/></Record><Record Type="UI.DataField"><PropertyValue Property="Value" Path="DefaultValues"/></Record><Record Type="UI.DataField"><PropertyValue Property="Value" Path="HeaderFacets"/></Record><Record Type="UI.DataField"><PropertyValue Property="Value" Path="DataPoints"/></Record></Collection></Annotation><Annotation Term="UI.HeaderInfo"><Record Type="UI.HeaderInfoType"><PropertyValue Property="TypeName" String="EntityConfig"/><PropertyValue Property="TypeNamePlural" String="EntityConfigs"/><PropertyValue Property="Title"><Record Type="UI.DataField"><PropertyValue Property="Value" Path="SetName"/></Record></PropertyValue></Record></Annotation><Annotation Term="UI.HeaderFacets"><Collection></Collection></Annotation><Annotation Term="UI.Facets"><Collection><Record Type="UI.CollectionFacet"><PropertyValue Property="Label" String="Basic"/><PropertyValue Property="ID" String="BasicSection"/><PropertyValue Property="Facets"><Collection><Record Type="UI.ReferenceFacet"><PropertyValue Property="Target" AnnotationPath="@UI.FieldGroup#Basic"/><PropertyValue Property="Label" String="Basic"/></Record></Collection></PropertyValue></Record><Record Type="UI.CollectionFacet"><PropertyValue Property="Label" String="Tile"/><PropertyValue Property="ID" String="TileSection"/><PropertyValue Property="Facets"><Collection><Record Type="UI.ReferenceFacet"><PropertyValue Property="Target" AnnotationPath="@UI.FieldGroup#Tile"/><PropertyValue Property="Label" String="Tile"/></Record></Collection></PropertyValue></Record><Record Type="UI.CollectionFacet"><PropertyValue Property="Label" String="Header"/><PropertyValue Property="ID" String="HeaderSection"/><PropertyValue Property="Facets"><Collection><Record Type="UI.ReferenceFacet"><PropertyValue Property="Target" AnnotationPath="@UI.FieldGroup#Header"/><PropertyValue Property="Label" String="Header"/></Record></Collection></PropertyValue></Record><Record Type="UI.ReferenceFacet"><PropertyValue Property="Label" String="Fields"/><PropertyValue Property="ID" String="FieldsSection"/><PropertyValue Property="Target" AnnotationPath="Fields/@UI.LineItem"/></Record><Record Type="UI.ReferenceFacet"><PropertyValue Property="Label" String="Facets"/><PropertyValue Property="ID" String="FacetsSection"/><PropertyValue Property="Target" AnnotationPath="Facets/@UI.LineItem"/></Record><Record Type="UI.ReferenceFacet"><PropertyValue Property="Label" String="Navigations"/><PropertyValue Property="ID" String="NavigationsSection"/><PropertyValue Property="Target" AnnotationPath="Navigations/@UI.LineItem"/></Record><Record Type="UI.ReferenceFacet"><PropertyValue Property="Label" String="TableFacets"/><PropertyValue Property="ID" String="TableFacetsSection"/><PropertyValue Property="Target" AnnotationPath="TableFacets/@UI.LineItem"/></Record></Collection></Annotation><Annotation Term="UI.FieldGroup" Qualifier="Basic"><Record Type="UI.FieldGroupType"><PropertyValue Property="Data"><Collection><Record Type="UI.DataField"><PropertyValue Property="Value" Path="SetName"/></Record><Record Type="UI.DataField"><PropertyValue Property="Value" Path="TypeName"/></Record><Record Type="UI.DataField"><PropertyValue Property="Value" Path="SelectionFields"/></Record></Collection></PropertyValue></Record></Annotation><Annotation Term="UI.FieldGroup" Qualifier="Tile"><Record Type="UI.FieldGroupType"><PropertyValue Property="Data"><Collection><Record Type="UI.DataField"><PropertyValue Property="Value" Path="Title"/></Record><Record Type="UI.DataField"><PropertyValue Property="Value" Path="TileDescription"/></Record><Record Type="UI.DataField"><PropertyValue Property="Value" Path="TileIcon"/></Record></Collection></PropertyValue></Record></Annotation><Annotation Term="UI.FieldGroup" Qualifier="Header"><Record Type="UI.FieldGroupType"><PropertyValue Property="Data"><Collection><Record Type="UI.DataField"><PropertyValue Property="Value" Path="HeaderTypeName"/></Record><Record Type="UI.DataField"><PropertyValue Property="Value" Path="HeaderTypeNamePlural"/></Record><Record Type="UI.DataFieldWithIntentBasedNavigation"><PropertyValue Property="Value" Path="HeaderTitlePath"/><PropertyValue Property="SemanticObject" String="EntityFields"/><PropertyValue Property="Action" String="display"/><PropertyValue Property="Mapping"><Collection><Record Type="Common.SemanticObjectMappingType"><PropertyValue Property="LocalProperty" PropertyPath="HeaderTitlePath"/><PropertyValue Property="SemanticObjectProperty" String="ID"/></Record></Collection></PropertyValue></Record><Record Type="UI.DataFieldWithIntentBasedNavigation"><PropertyValue Property="Value" Path="HeaderDescriptionPath"/><PropertyValue Property="SemanticObject" String="EntityFields"/><PropertyValue Property="Action" String="display"/><PropertyValue Property="Mapping"><Collection><Record Type="Common.SemanticObjectMappingType"><PropertyValue Property="LocalProperty" PropertyPath="HeaderDescriptionPath"/><PropertyValue Property="SemanticObjectProperty" String="ID"/></Record></Collection></PropertyValue></Record></Collection></PropertyValue></Record></Annotation></Annotations><Annotations Target="Service.EntityConfig/HeaderTitlePath"><Annotation Term="Common.SemanticObject" String="EntityFields"/><Annotation Term="Common.SemanticObjectMapping"><Collection><Record><PropertyValue Property="LocalProperty" PropertyPath="HeaderTitlePath"/><PropertyValue Property="SemanticObjectProperty" String="ID"/></Record></Collection></Annotation></Annotations><Annotations Target="Service.EntityConfig/HeaderDescriptionPath"><Annotation Term="Common.SemanticObject" String="EntityFields"/><Annotation Term="Common.SemanticObjectMapping"><Collection><Record><PropertyValue Property="LocalProperty" PropertyPath="HeaderDescriptionPath"/><PropertyValue Property="SemanticObjectProperty" String="ID"/></Record></Collection></Annotation></Annotations><Annotations Target="Service.EntityContainer/EntityConfigs"><Annotation Term="Org.OData.Capabilities.V1.UpdateRestrictions"><Record><PropertyValue Property="Updatable" Bool="true"/></Record></Annotation><Annotation Term="Org.OData.Capabilities.V1.InsertRestrictions"><Record Type="Capabilities.InsertRestrictionsType"><PropertyValue Property="NonInsertableProperties"><Collection><PropertyPath>ID</PropertyPath><PropertyPath>TypeName</PropertyPath><PropertyPath>IsActiveEntity</PropertyPath><PropertyPath>HasActiveEntity</PropertyPath><PropertyPath>HasDraftEntity</PropertyPath></Collection></PropertyValue></Record></Annotation><Annotation Term="Common.DraftRoot"><Record Type="Common.DraftRootType"><PropertyValue Property="ActivationAction" String="Service.draftActivate"/><PropertyValue Property="EditAction" String="Service.draftEdit"/><PropertyValue Property="PreparationAction" String="Service.draftPrepare"/></Record></Annotation></Annotations><Annotations Target="Service.EntityConfig/ID"><Annotation Term="Common.Label" String="ID"/><Annotation Term="UI.Hidden" Bool="true"/><Annotation Term="Org.OData.Core.V1.Computed" Bool="true"/><Annotation Term="Common.Text" Path="SetName"><Annotation Term="UI.TextArrangement" EnumMember="UI.TextArrangementType/TextOnly"/></Annotation></Annotations><Annotations Target="Service.EntityConfig/SetName"><Annotation Term="Common.Label" String="Set Name"/></Annotations><Annotations Target="Service.EntityConfig/TypeName"><Annotation Term="Common.Label" String="Type Name"/><Annotation Term="Org.OData.Core.V1.Computed" Bool="true"/></Annotations><Annotations Target="Service.EntityConfig/Title"><Annotation Term="Common.Label" String="Title"/></Annotations><Annotations Target="Service.EntityConfig/TileDescription"><Annotation Term="Common.Label" String="Tile Description"/></Annotations><Annotations Target="Service.EntityConfig/TileIcon"><Annotation Term="Common.Label" String="Tile Icon"/></Annotations><Annotations Target="Service.EntityConfig/HeaderTypeName"><Annotation Term="Common.Label" String="Header Type Name"/></Annotations><Annotations Target="Service.EntityConfig/HeaderTypeNamePlural"><Annotation Term="Common.Label" String="Header Type Name Plural"/></Annotations><Annotations Target="Service.EntityConfig/SelectionFields"><Annotation Term="Common.Label" String="Selection Fields"/></Annotations><Annotations Target="Service.EntityConfig/DefaultValues"><Annotation Term="Common.Label" String="Default Values"/></Annotations><Annotations Target="Service.EntityConfig/HeaderFacets"><Annotation Term="Common.Label" String="Header Facets"/></Annotations><Annotations Target="Service.EntityConfig/DataPoints"><Annotation Term="Common.Label" String="Data Points"/></Annotations><Annotations Target="Service.EntityConfig/HeaderTitlePath"><Annotation Term="Common.Label" String="Header Title Field"/><Annotation Term="UI.Hidden" Bool="true"/><Annotation Term="Common.ValueList"><Record Type="Common.ValueListType"><PropertyValue Property="CollectionPath" String="EntityFields"/><PropertyValue Property="Parameters"><Collection><Record Type="Common.ValueListParameterOut"><PropertyValue Property="LocalDataProperty" PropertyPath="HeaderTitlePath"/><PropertyValue Property="ValueListProperty" String="ID"/></Record><Record Type="Common.ValueListParameterDisplayOnly"><PropertyValue Property="ValueListProperty" String="FieldName"/></Record><Record Type="Common.ValueListParameterIn"><PropertyValue Property="LocalDataProperty" PropertyPath="ID"/><PropertyValue Property="ValueListProperty" String="ConfigID"/></Record></Collection></PropertyValue></Record></Annotation></Annotations><Annotations Target="Service.EntityConfig/HeaderDescriptionPath"><Annotation Term="Common.Label" String="Header Description Field"/><Annotation Term="UI.Hidden" Bool="true"/><Annotation Term="Common.ValueList"><Record Type="Common.ValueListType"><PropertyValue Property="CollectionPath" String="EntityFields"/><PropertyValue Property="Parameters"><Collection><Record Type="Common.ValueListParameterOut"><PropertyValue Property="LocalDataProperty" PropertyPath="HeaderDescriptionPath"/><PropertyValue Property="ValueListProperty" String="ID"/></Record><Record Type="Common.ValueListParameterDisplayOnly"><PropertyValue Property="ValueListProperty" String="FieldName"/></Record><Record Type="Common.ValueListParameterIn"><PropertyValue Property="LocalDataProperty" PropertyPath="ID"/><PropertyValue Property="ValueListProperty" String="ConfigID"/></Record></Collection></PropertyValue></Record></Annotation></Annotations><Annotations Target="Service.EntityConfig/IsActiveEntity"><Annotation Term="Org.OData.Core.V1.Computed" Bool="true"/></Annotations><Annotations Target="Service.EntityConfig/HasActiveEntity"><Annotation Term="Org.OData.Core.V1.Computed" Bool="true"/></Annotations><Annotations Target="Service.EntityConfig/HasDraftEntity"><Annotation Term="Org.OData.Core.V1.Computed" Bool="true"/></Annotations><Annotations Target="Service.EntityConfig"><Annotation Term="UI.Identification"><Collection><Record Type="UI.DataFieldForAction"><PropertyValue Property="Action" String="Service.publishConfig"/><PropertyValue Property="Label" String="Konfiguration publizieren"/></Record></Collection></Annotation></Annotations><Annotations Target="Service.EntityConfig/HeaderTitlePath"><Annotation Term="Common.ValueList"><Record Type="Common.ValueListType"><PropertyValue Property="CollectionPath" String="EntityFields"/><PropertyValue Property="Parameters"><Collection><Record Type="Common.ValueListParameterOut"><PropertyValue Property="LocalDataProperty" PropertyPath="HeaderTitlePath"/><PropertyValue Property="ValueListProperty" String="ID"/></Record><Record Type="Common.ValueListParameterDisplayOnly"><PropertyValue Property="ValueListProperty" String="FieldName"/></Record><Record Type="Common.ValueListParameterIn"><PropertyValue Property="LocalDataProperty" PropertyPath="ID"/><PropertyValue Property="ValueListProperty" String="ConfigID"/></Record></Collection></PropertyValue></Record></Annotation></Annotations><Annotations Target="Service.EntityConfig/HeaderDescriptionPath"><Annotation Term="Common.ValueList"><Record Type="Common.ValueListType"><PropertyValue Property="CollectionPath" String="EntityFields"/><PropertyValue Property="Parameters"><Collection><Record Type="Common.ValueListParameterOut"><PropertyValue Property="LocalDataProperty" PropertyPath="HeaderDescriptionPath"/><PropertyValue Property="ValueListProperty" String="ID"/></Record><Record Type="Common.ValueListParameterDisplayOnly"><PropertyValue Property="ValueListProperty" String="FieldName"/></Record><Record Type="Common.ValueListParameterIn"><PropertyValue Property="LocalDataProperty" PropertyPath="ID"/><PropertyValue Property="ValueListProperty" String="ConfigID"/></Record></Collection></PropertyValue></Record></Annotation></Annotations>"##;
-    let parsed: Annotations = quick_xml::de::from_str(&xml).unwrap();
-    for a in &parsed.annotations {
+async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
+    let _entities: Vec<EntityType> = state.ddic.entities().map(|x| x.into()).collect();
+
+    let sample_entity = sample_entity();
+    let sample_entity_set = sample_entity_set();
+    let xml = sample_annotations();
+    let sample_annotations: Annotations = quick_xml::de::from_str(&xml).unwrap();
+    for a in &sample_annotations.annotations {
         trace!("A: {} {:?}", a.term, a.qualifier);
     }
 
+    let meta = edmx_template();
+    let type_defs = vec![quick_xml::se::to_string(&sample_entity).unwrap()];
+    let entity_sets = vec![quick_xml::se::to_string(&sample_entity_set).unwrap()];
+    let annotations = vec![quick_xml::se::to_string(&sample_annotations).unwrap()];
+
+    // let cfg = [cfg1, cfg2, cfg3].concat();
+    let xml = meta
+        .replace("%TYPE-DEFINITIONS%", &type_defs.concat())
+        .replace("%ENTITY-SETS%", &entity_sets.concat())
+        .replace("%ANNOTATIONS%", &annotations.concat())
+        .to_string();
+    (
+        [
+            (header::CONTENT_TYPE, "application/xml; charset=utf-8"),
+            (HeaderName::from_static("odata-version"), "4.0"),
+        ],
+        xml,
+    )
+}
+
+fn edmx_template() -> String {
     let meta = r##"<?xml version="1.0" encoding="utf-8"?>
 <edmx:Edmx Version="4.0" xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx">
 
@@ -530,21 +412,476 @@ async fn metadata() -> impl IntoResponse {
     </Schema>
   </edmx:DataServices>
 </edmx:Edmx>"##;
-    let cfg1 = quick_xml::se::to_string(&entity).unwrap();
-    let cfg2 = quick_xml::se::to_string(&entity_set).unwrap();
-    let cfg3 = quick_xml::se::to_string(&parsed).unwrap();
+    meta.into()
+}
 
-    // let cfg = [cfg1, cfg2, cfg3].concat();
-    let xml = meta
-        .replace("%TYPE-DEFINITIONS%", &cfg1)
-        .replace("%ENTITY-SETS%", &cfg2)
-        .replace("%ANNOTATIONS%", &cfg3)
-        .to_string();
-    (
-        [
-            (header::CONTENT_TYPE, "application/xml; charset=utf-8"),
-            (HeaderName::from_static("odata-version"), "4.0"),
+fn sample_annotations() ->String {
+    let xml = r##"  
+   <Annotations Target="Service.EntityConfig">
+    <Annotation Term="UI.SelectionFields">
+      <Collection>
+        <PropertyPath>SetName</PropertyPath>
+      </Collection>
+    </Annotation>
+    <Annotation Term="UI.LineItem">
+      <Collection>
+        <Record Type="UI.DataField">
+          <PropertyValue Property="Value" Path="SetName" />
+        </Record>
+        <Record Type="UI.DataField">
+          <PropertyValue Property="Value" Path="Title" />
+        </Record>
+        <Record Type="UI.DataField">
+          <PropertyValue Property="Value" Path="TileDescription" />
+        </Record>
+        <Record Type="UI.DataField">
+          <PropertyValue Property="Value" Path="TileIcon" />
+        </Record>
+        <Record Type="UI.DataField">
+          <PropertyValue Property="Value" Path="HeaderTypeName" />
+        </Record>
+        <Record Type="UI.DataField">
+          <PropertyValue Property="Value" Path="HeaderTypeNamePlural" />
+        </Record>
+        <Record Type="UI.DataField">
+          <PropertyValue Property="Value" Path="SelectionFields" />
+        </Record>
+        <Record Type="UI.DataField">
+          <PropertyValue Property="Value" Path="DefaultValues" />
+        </Record>
+        <Record Type="UI.DataField">
+          <PropertyValue Property="Value" Path="HeaderFacets" />
+        </Record>
+        <Record Type="UI.DataField">
+          <PropertyValue Property="Value" Path="DataPoints" />
+        </Record>
+      </Collection>
+    </Annotation>
+    <Annotation Term="UI.HeaderInfo">
+      <Record Type="UI.HeaderInfoType">
+        <PropertyValue Property="TypeName" String="EntityConfig" />
+        <PropertyValue Property="TypeNamePlural" String="EntityConfigs" />
+        <PropertyValue Property="Title">
+          <Record Type="UI.DataField">
+            <PropertyValue Property="Value" Path="SetName" />
+          </Record>
+        </PropertyValue>
+      </Record>
+    </Annotation>
+    <Annotation Term="UI.HeaderFacets">
+      <Collection></Collection>
+    </Annotation>
+    <Annotation Term="UI.Facets">
+      <Collection>
+        <Record Type="UI.CollectionFacet">
+          <PropertyValue Property="Label" String="Basic" />
+          <PropertyValue Property="ID" String="BasicSection" />
+          <PropertyValue Property="Facets">
+            <Collection>
+              <Record Type="UI.ReferenceFacet">
+                <PropertyValue Property="Target" AnnotationPath="@UI.FieldGroup#Basic" />
+                <PropertyValue Property="Label" String="Basic" />
+              </Record>
+            </Collection>
+          </PropertyValue>
+        </Record>
+        <Record Type="UI.CollectionFacet">
+          <PropertyValue Property="Label" String="Tile" />
+          <PropertyValue Property="ID" String="TileSection" />
+          <PropertyValue Property="Facets">
+            <Collection>
+              <Record Type="UI.ReferenceFacet">
+                <PropertyValue Property="Target" AnnotationPath="@UI.FieldGroup#Tile" />
+                <PropertyValue Property="Label" String="Tile" />
+              </Record>
+            </Collection>
+          </PropertyValue>
+        </Record>
+        <Record Type="UI.CollectionFacet">
+          <PropertyValue Property="Label" String="Header" />
+          <PropertyValue Property="ID" String="HeaderSection" />
+          <PropertyValue Property="Facets">
+            <Collection>
+              <Record Type="UI.ReferenceFacet">
+                <PropertyValue Property="Target" AnnotationPath="@UI.FieldGroup#Header" />
+                <PropertyValue Property="Label" String="Header" />
+              </Record>
+            </Collection>
+          </PropertyValue>
+        </Record>
+        <Record Type="UI.ReferenceFacet">
+          <PropertyValue Property="Label" String="Fields" />
+          <PropertyValue Property="ID" String="FieldsSection" />
+          <PropertyValue Property="Target" AnnotationPath="Fields/@UI.LineItem" />
+        </Record>
+        <Record Type="UI.ReferenceFacet">
+          <PropertyValue Property="Label" String="Facets" />
+          <PropertyValue Property="ID" String="FacetsSection" />
+          <PropertyValue Property="Target" AnnotationPath="Facets/@UI.LineItem" />
+        </Record>
+        <Record Type="UI.ReferenceFacet">
+          <PropertyValue Property="Label" String="Navigations" />
+          <PropertyValue Property="ID" String="NavigationsSection" />
+          <PropertyValue Property="Target" AnnotationPath="Navigations/@UI.LineItem" />
+        </Record>
+        <Record Type="UI.ReferenceFacet">
+          <PropertyValue Property="Label" String="TableFacets" />
+          <PropertyValue Property="ID" String="TableFacetsSection" />
+          <PropertyValue Property="Target" AnnotationPath="TableFacets/@UI.LineItem" />
+        </Record>
+      </Collection>
+    </Annotation>
+    <Annotation Term="UI.FieldGroup" Qualifier="Basic">
+      <Record Type="UI.FieldGroupType">
+        <PropertyValue Property="Data">
+          <Collection>
+            <Record Type="UI.DataField">
+              <PropertyValue Property="Value" Path="SetName" />
+            </Record>
+            <Record Type="UI.DataField">
+              <PropertyValue Property="Value" Path="TypeName" />
+            </Record>
+            <Record Type="UI.DataField">
+              <PropertyValue Property="Value" Path="SelectionFields" />
+            </Record>
+          </Collection>
+        </PropertyValue>
+      </Record>
+    </Annotation>
+    <Annotation Term="UI.FieldGroup" Qualifier="Tile">
+      <Record Type="UI.FieldGroupType">
+        <PropertyValue Property="Data">
+          <Collection>
+            <Record Type="UI.DataField">
+              <PropertyValue Property="Value" Path="Title" />
+            </Record>
+            <Record Type="UI.DataField">
+              <PropertyValue Property="Value" Path="TileDescription" />
+            </Record>
+            <Record Type="UI.DataField">
+              <PropertyValue Property="Value" Path="TileIcon" />
+            </Record>
+          </Collection>
+        </PropertyValue>
+      </Record>
+    </Annotation>
+    <Annotation Term="UI.FieldGroup" Qualifier="Header">
+      <Record Type="UI.FieldGroupType">
+        <PropertyValue Property="Data">
+          <Collection>
+            <Record Type="UI.DataField">
+              <PropertyValue Property="Value" Path="HeaderTypeName" />
+            </Record>
+            <Record Type="UI.DataField">
+              <PropertyValue Property="Value" Path="HeaderTypeNamePlural" />
+            </Record>
+            <Record Type="UI.DataFieldWithIntentBasedNavigation">
+              <PropertyValue Property="Value" Path="HeaderTitlePath" />
+              <PropertyValue Property="SemanticObject" String="EntityFields" />
+              <PropertyValue Property="Action" String="display" />
+              <PropertyValue Property="Mapping">
+                <Collection>
+                  <Record Type="Common.SemanticObjectMappingType">
+                    <PropertyValue Property="LocalProperty" PropertyPath="HeaderTitlePath" />
+                    <PropertyValue Property="SemanticObjectProperty" String="ID" />
+                  </Record>
+                </Collection>
+              </PropertyValue>
+            </Record>
+            <Record Type="UI.DataFieldWithIntentBasedNavigation">
+              <PropertyValue Property="Value" Path="HeaderDescriptionPath" />
+              <PropertyValue Property="SemanticObject" String="EntityFields" />
+              <PropertyValue Property="Action" String="display" />
+              <PropertyValue Property="Mapping">
+                <Collection>
+                  <Record Type="Common.SemanticObjectMappingType">
+                    <PropertyValue Property="LocalProperty" PropertyPath="HeaderDescriptionPath" />
+                    <PropertyValue Property="SemanticObjectProperty" String="ID" />
+                  </Record>
+                </Collection>
+              </PropertyValue>
+            </Record>
+          </Collection>
+        </PropertyValue>
+      </Record>
+    </Annotation>
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/HeaderTitlePath">
+    <Annotation Term="Common.SemanticObject" String="EntityFields" />
+    <Annotation Term="Common.SemanticObjectMapping">
+      <Collection>
+        <Record>
+          <PropertyValue Property="LocalProperty" PropertyPath="HeaderTitlePath" />
+          <PropertyValue Property="SemanticObjectProperty" String="ID" />
+        </Record>
+      </Collection>
+    </Annotation>
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/HeaderDescriptionPath">
+    <Annotation Term="Common.SemanticObject" String="EntityFields" />
+    <Annotation Term="Common.SemanticObjectMapping">
+      <Collection>
+        <Record>
+          <PropertyValue Property="LocalProperty" PropertyPath="HeaderDescriptionPath" />
+          <PropertyValue Property="SemanticObjectProperty" String="ID" />
+        </Record>
+      </Collection>
+    </Annotation>
+  </Annotations>
+  <Annotations Target="Service.EntityContainer/EntityConfigs">
+    <Annotation Term="Org.OData.Capabilities.V1.UpdateRestrictions">
+      <Record>
+        <PropertyValue Property="Updatable" Bool="true" />
+      </Record>
+    </Annotation>
+    <Annotation Term="Org.OData.Capabilities.V1.InsertRestrictions">
+      <Record Type="Capabilities.InsertRestrictionsType">
+        <PropertyValue Property="NonInsertableProperties">
+          <Collection>
+            <PropertyPath>ID</PropertyPath>
+            <PropertyPath>TypeName</PropertyPath>
+            <PropertyPath>IsActiveEntity</PropertyPath>
+            <PropertyPath>HasActiveEntity</PropertyPath>
+            <PropertyPath>HasDraftEntity</PropertyPath>
+          </Collection>
+        </PropertyValue>
+      </Record>
+    </Annotation>
+    <Annotation Term="Common.DraftRoot">
+      <Record Type="Common.DraftRootType">
+        <PropertyValue Property="ActivationAction" String="Service.draftActivate" />
+        <PropertyValue Property="EditAction" String="Service.draftEdit" />
+        <PropertyValue Property="PreparationAction" String="Service.draftPrepare" />
+      </Record>
+    </Annotation>
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/ID">
+    <Annotation Term="Common.Label" String="ID" />
+    <Annotation Term="UI.Hidden" Bool="true" />
+    <Annotation Term="Org.OData.Core.V1.Computed" Bool="true" />
+    <Annotation Term="Common.Text" Path="SetName">
+      <Annotation Term="UI.TextArrangement" EnumMember="UI.TextArrangementType/TextOnly" />
+    </Annotation>
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/SetName">
+    <Annotation Term="Common.Label" String="Set Name" />
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/TypeName">
+    <Annotation Term="Common.Label" String="Type Name" />
+    <Annotation Term="Org.OData.Core.V1.Computed" Bool="true" />
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/Title">
+    <Annotation Term="Common.Label" String="Title" />
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/TileDescription">
+    <Annotation Term="Common.Label" String="Tile Description" />
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/TileIcon">
+    <Annotation Term="Common.Label" String="Tile Icon" />
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/HeaderTypeName">
+    <Annotation Term="Common.Label" String="Header Type Name" />
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/HeaderTypeNamePlural">
+    <Annotation Term="Common.Label" String="Header Type Name Plural" />
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/SelectionFields">
+    <Annotation Term="Common.Label" String="Selection Fields" />
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/DefaultValues">
+    <Annotation Term="Common.Label" String="Default Values" />
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/HeaderFacets">
+    <Annotation Term="Common.Label" String="Header Facets" />
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/DataPoints">
+    <Annotation Term="Common.Label" String="Data Points" />
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/HeaderTitlePath">
+    <Annotation Term="Common.Label" String="Header Title Field" />
+    <Annotation Term="UI.Hidden" Bool="true" />
+    <Annotation Term="Common.ValueList">
+      <Record Type="Common.ValueListType">
+        <PropertyValue Property="CollectionPath" String="EntityFields" />
+        <PropertyValue Property="Parameters">
+          <Collection>
+            <Record Type="Common.ValueListParameterOut">
+              <PropertyValue Property="LocalDataProperty" PropertyPath="HeaderTitlePath" />
+              <PropertyValue Property="ValueListProperty" String="ID" />
+            </Record>
+            <Record Type="Common.ValueListParameterDisplayOnly">
+              <PropertyValue Property="ValueListProperty" String="FieldName" />
+            </Record>
+            <Record Type="Common.ValueListParameterIn">
+              <PropertyValue Property="LocalDataProperty" PropertyPath="ID" />
+              <PropertyValue Property="ValueListProperty" String="ConfigID" />
+            </Record>
+          </Collection>
+        </PropertyValue>
+      </Record>
+    </Annotation>
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/HeaderDescriptionPath">
+    <Annotation Term="Common.Label" String="Header Description Field" />
+    <Annotation Term="UI.Hidden" Bool="true" />
+    <Annotation Term="Common.ValueList">
+      <Record Type="Common.ValueListType">
+        <PropertyValue Property="CollectionPath" String="EntityFields" />
+        <PropertyValue Property="Parameters">
+          <Collection>
+            <Record Type="Common.ValueListParameterOut">
+              <PropertyValue Property="LocalDataProperty" PropertyPath="HeaderDescriptionPath" />
+              <PropertyValue Property="ValueListProperty" String="ID" />
+            </Record>
+            <Record Type="Common.ValueListParameterDisplayOnly">
+              <PropertyValue Property="ValueListProperty" String="FieldName" />
+            </Record>
+            <Record Type="Common.ValueListParameterIn">
+              <PropertyValue Property="LocalDataProperty" PropertyPath="ID" />
+              <PropertyValue Property="ValueListProperty" String="ConfigID" />
+            </Record>
+          </Collection>
+        </PropertyValue>
+      </Record>
+    </Annotation>
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/IsActiveEntity">
+    <Annotation Term="Org.OData.Core.V1.Computed" Bool="true" />
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/HasActiveEntity">
+    <Annotation Term="Org.OData.Core.V1.Computed" Bool="true" />
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/HasDraftEntity">
+    <Annotation Term="Org.OData.Core.V1.Computed" Bool="true" />
+  </Annotations>
+  <Annotations Target="Service.EntityConfig">
+    <Annotation Term="UI.Identification">
+      <Collection>
+        <Record Type="UI.DataFieldForAction">
+          <PropertyValue Property="Action" String="Service.publishConfig" />
+          <PropertyValue Property="Label" String="Konfiguration publizieren" />
+        </Record>
+      </Collection>
+    </Annotation>
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/HeaderTitlePath">
+    <Annotation Term="Common.ValueList">
+      <Record Type="Common.ValueListType">
+        <PropertyValue Property="CollectionPath" String="EntityFields" />
+        <PropertyValue Property="Parameters">
+          <Collection>
+            <Record Type="Common.ValueListParameterOut">
+              <PropertyValue Property="LocalDataProperty" PropertyPath="HeaderTitlePath" />
+              <PropertyValue Property="ValueListProperty" String="ID" />
+            </Record>
+            <Record Type="Common.ValueListParameterDisplayOnly">
+              <PropertyValue Property="ValueListProperty" String="FieldName" />
+            </Record>
+            <Record Type="Common.ValueListParameterIn">
+              <PropertyValue Property="LocalDataProperty" PropertyPath="ID" />
+              <PropertyValue Property="ValueListProperty" String="ConfigID" />
+            </Record>
+          </Collection>
+        </PropertyValue>
+      </Record>
+    </Annotation>
+  </Annotations>
+  <Annotations Target="Service.EntityConfig/HeaderDescriptionPath">
+    <Annotation Term="Common.ValueList">
+      <Record Type="Common.ValueListType">
+        <PropertyValue Property="CollectionPath" String="EntityFields" />
+        <PropertyValue Property="Parameters">
+          <Collection>
+            <Record Type="Common.ValueListParameterOut">
+              <PropertyValue Property="LocalDataProperty" PropertyPath="HeaderDescriptionPath" />
+              <PropertyValue Property="ValueListProperty" String="ID" />
+            </Record>
+            <Record Type="Common.ValueListParameterDisplayOnly">
+              <PropertyValue Property="ValueListProperty" String="FieldName" />
+            </Record>
+            <Record Type="Common.ValueListParameterIn">
+              <PropertyValue Property="LocalDataProperty" PropertyPath="ID" />
+              <PropertyValue Property="ValueListProperty" String="ConfigID" />
+            </Record>
+          </Collection>
+        </PropertyValue>
+      </Record>
+    </Annotation>
+  </Annotations>"##;
+    xml.into()
+}
+
+fn sample_entity_set() -> EntitySet {
+    let sample_entity_set = EntitySet {
+        name: "EntityConfigs".to_string(),
+        entity_type: "Service.EntityConfig".to_string(),
+        navigation_property_bindings: vec![
+            NavigationPropertyBinding {
+                path: "Fields".to_string(),
+                target: "EntityFields".to_string(),
+            },
+            NavigationPropertyBinding {
+                path: "Facets".to_string(),
+                target: "EntityFacets".to_string(),
+            },
+            NavigationPropertyBinding {
+                path: "Navigations".to_string(),
+                target: "EntityNavigations".to_string(),
+            },
+            NavigationPropertyBinding {
+                path: "TableFacets".to_string(),
+                target: "EntityTableFacets".to_string(),
+            },
+            NavigationPropertyBinding {
+                path: "_HeaderTitlePath".to_string(),
+                target: "EntityFields".to_string(),
+            },
+            NavigationPropertyBinding {
+                path: "_HeaderDescPath".to_string(),
+                target: "EntityFields".to_string(),
+            },
+            NavigationPropertyBinding {
+                path: "SiblingEntity".to_string(),
+                target: "EntityConfigs".to_string(),
+            },
+            NavigationPropertyBinding {
+                path: "DraftAdministrativeData".to_string(),
+                target: "DraftAdministrativeData".to_string(),
+            },
         ],
-        xml,
-    )
+    };
+    sample_entity_set
+}
+
+fn sample_entity() -> EntityType {
+    let sample_entity = EntityType {
+        name: "EntityConfig".to_string(),
+        key: Key::new(&["ID", "IsActiveEntity"]),
+        properties: vec![
+            Property::new("ID", "Edm.Guid").nullable(false),
+            Property::new("Name", "Edm.String")
+                .nullable(false)
+                .max_length(40),
+            Property::new("Title", "Edm.String").max_length(80),
+            Property::new("Plural", "Edm.String").max_length(80),
+            Property::new("IsActiveEntity", "Edm.Boolean").nullable(false),
+            Property::new("HasActiveEntity", "Edm.Boolean").nullable(false),
+            Property::new("HasDraftEntity", "Edm.Boolean").nullable(false),
+        ],
+        navigation_properties: vec![
+            NavigationProperty::new("Fields", "Collection(Service.EntityField)", None),
+            NavigationProperty::new("Facets", "Collection(Service.EntityFacet)", None),
+            NavigationProperty::new("Navigations", "Collection(Service.EntityNavigation)", None),
+            NavigationProperty::new("TableFacets", "Collection(Service.EntityTableFacet)", None),
+            NavigationProperty::new("_Name", "Service.EntityField", None),
+            NavigationProperty::new("_Title", "Service.EntityField", None),
+            NavigationProperty::new("SiblingEntity", "Service.EntityConfig", None),
+            NavigationProperty::new(
+                "DraftAdministrativeData",
+                "Service.DraftAdministrativeData",
+                Some(true),
+            ),
+        ],
+    };
+    sample_entity
 }

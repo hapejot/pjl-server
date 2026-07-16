@@ -22,19 +22,9 @@ pub trait DataStore: Send + Sync {
     fn count(&self, set_name: &str, query: &ODataQuery, parent: Option<&ParentKey>) -> usize;
 
     // -- Single Entity CRUD --
-    fn read_entity(
-        &self,
-        set_name: &str,
-        key: &EntityKey,
-        query: &ODataQuery,
-    ) -> Result<Value, StoreError>;
+    fn read_entity(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError>;
 
-    fn create_entity(
-        &self,
-        set_name: &str,
-        data: &Value,
-        parent: Option<&ParentKey>,
-    ) -> Result<Value, StoreError>;
+    fn create_entity(&self, set_name: &str, data: &Value) -> Result<Value, StoreError>;
 
     fn patch_entity(
         &self,
@@ -81,7 +71,7 @@ pub trait DataStore: Send + Sync {
 
     fn seed_records(&self, set_name: &str, records: Vec<Value>) {
         for record in records {
-            let _ = self.create_entity(set_name, &record, None);
+            let _ = self.create_entity(set_name, &record);
         }
     }
 }

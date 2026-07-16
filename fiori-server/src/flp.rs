@@ -1,136 +1,97 @@
+use std::collections::HashMap;
+
 use axum::{
     Json, Router,
+    extract::{Path, State},
     http::header,
     response::{Html, IntoResponse},
     routing::get,
 };
 use serde_json::{Value, json};
+use tracing::debug;
+
+use crate::AppState;
 // use serde::{Deserialize, Serialize};
 
-pub fn router() -> Router {
+pub fn router() -> Router<AppState> {
     Router::new()
         .route("/init.js", get(init))
         .route("/site.json", get(site))
 }
-async fn site() -> Json<Value> {
+
+async fn site(State(_state): State<AppState>) -> Json<Value> {
+    let mut apps: HashMap<String, Value> = HashMap::new();
+    for app in _state.ddic.apps() {
+        let app_json = json!({
+            "sap.app":{
+                "crossNavigation":{
+                    "inbounds":{
+                        format!("{}-{}", app.main_entity(), app.action()):{
+                            "action":app.action(),
+                            "semanticObject":app.main_entity(),
+                            "signature":{
+                                "additionalParameters":"allowed",
+                                "parameters":{}}}}},
+                                "id":app.name(),
+                                "subTitle":"...",
+                                "title":app.title()},
+                                "sap.flp":{
+                                    "type":"application"},
+                                    "sap.platform.runtime":{
+                                        "componentProperties":{
+                                            "url":app.url()}},
+                                            "sap.ui":{
+                                                "deviceTypes":{
+                                                    "desktop":true,
+                                                    "phone":true,
+                                                    "tablet":true},
+                                                    "technology":"UI5"},
+                                                    "sap.ui5":{
+                                                        "componentName":app.name()}});
+        apps.insert(app.name().to_string(), app_json);
+    }
+
+    let mut viz: HashMap<String, Value> = HashMap::new();
+    let mut viz_refs: HashMap<String, Value> = HashMap::new();
+    let mut viz_order: Vec<String> = Vec::new();
+    for app in _state.ddic.apps() {
+        let viz_json = json!({
+            "businessApp": app.name(),
+            "target": {
+                "action": app.action(),
+                "semanticObject": app.main_entity()
+            },
+            "vizConfig": {
+                "sap.app": {
+                    "icon": "sap-icon://settings",
+                    "info": "",
+                    "subTitle": "...",
+                    "title": app.title()
+                },
+                "sap.flp": {
+                    "target": {
+                        "appId": app.name(),
+                        "inboundId": format!("{}-{}", app.main_entity(), app.action())
+                    }
+                }
+            },
+            "vizType": "sap.ushell.StaticAppLauncher"
+        });
+        let viz_name = format!("{}-{}-viz", app.main_entity(), app.action());
+        viz.insert(viz_name.clone(), viz_json);
+        viz_refs.insert(
+            viz_name.clone(),
+            json!({
+                "id": viz_name,
+                "vizId": viz_name
+            }),
+        );
+        viz_order.push(viz_name.clone());
+    }
+
     Json(json!({
       "_version": "3.1.0",
-      "applications": {
-        "entityconfigs.app": {
-          "sap.app": {
-            "crossNavigation": {
-              "inbounds": {
-                "EntityConfigs-display": {
-                  "action": "display",
-                  "semanticObject": "EntityConfigs",
-                  "signature": {
-                    "additionalParameters": "allowed",
-                    "parameters": {}
-                  }
-                }
-              }
-            },
-            "id": "entityconfigs.app",
-            "subTitle": "Generische Entitaeten verwalten",
-            "title": "Entity-Konfigurationen"
-          },
-          "sap.flp": {
-            "type": "application"
-          },
-          "sap.platform.runtime": {
-            "componentProperties": {
-              "url": "./apps/EntityConfigs/"
-            }
-          },
-          "sap.ui": {
-            "deviceTypes": {
-              "desktop": true,
-              "phone": true,
-              "tablet": true
-            },
-            "technology": "UI5"
-          },
-          "sap.ui5": {
-            "componentName": "entityconfigs.app"
-          }
-        },
-        "entityrelationships.app": {
-          "sap.app": {
-            "crossNavigation": {
-              "inbounds": {
-                "EntityRelationships-display": {
-                  "action": "display",
-                  "semanticObject": "EntityRelationships",
-                  "signature": {
-                    "additionalParameters": "allowed",
-                    "parameters": {}
-                  }
-                }
-              }
-            },
-            "id": "entityrelationships.app",
-            "subTitle": "Entity-Beziehungen",
-            "title": "Relationships"
-          },
-          "sap.flp": {
-            "type": "application"
-          },
-          "sap.platform.runtime": {
-            "componentProperties": {
-              "url": "./apps/EntityRelationships/"
-            }
-          },
-          "sap.ui": {
-            "deviceTypes": {
-              "desktop": true,
-              "phone": true,
-              "tablet": true
-            },
-            "technology": "UI5"
-          },
-          "sap.ui5": {
-            "componentName": "entityrelationships.app"
-          }
-        },
-        "fieldvaluelists.app": {
-          "sap.app": {
-            "crossNavigation": {
-              "inbounds": {
-                "FieldValueLists-display": {
-                  "action": "display",
-                  "semanticObject": "FieldValueLists",
-                  "signature": {
-                    "additionalParameters": "allowed",
-                    "parameters": {}
-                  }
-                }
-              }
-            },
-            "id": "fieldvaluelists.app",
-            "subTitle": "Feste Wertelisten verwalten",
-            "title": "Wertelisten"
-          },
-          "sap.flp": {
-            "type": "application"
-          },
-          "sap.platform.runtime": {
-            "componentProperties": {
-              "url": "./apps/FieldValueLists/"
-            }
-          },
-          "sap.ui": {
-            "deviceTypes": {
-              "desktop": true,
-              "phone": true,
-              "tablet": true
-            },
-            "technology": "UI5"
-          },
-          "sap.ui5": {
-            "componentName": "fieldvaluelists.app"
-          }
-        }
-      },
+      "applications": apps,
       "menus": {
         "main": {
           "payload": {
@@ -175,30 +136,13 @@ async fn site() -> Json<Value> {
                 "default": true,
                 "id": "apps-section",
                 "layout": {
-                  "vizOrder": [
-                    "EntityConfigs-display-viz",
-                    "EntityRelationships-display-viz",
-                    "FieldValueLists-display-viz"
-                  ]
+                  "vizOrder": viz_order
                 },
                 "locked": false,
                 "preset": true,
                 "title": "Applications",
                 "visible": true,
-                "viz": {
-                  "EntityConfigs-display-viz": {
-                    "id": "EntityConfigs-display-viz",
-                    "vizId": "EntityConfigs-display-viz"
-                  },
-                  "EntityRelationships-display-viz": {
-                    "id": "EntityRelationships-display-viz",
-                    "vizId": "EntityRelationships-display-viz"
-                  },
-                  "FieldValueLists-display-viz": {
-                    "id": "FieldValueLists-display-viz",
-                    "vizId": "FieldValueLists-display-viz"
-                  }
-                }
+                "viz": viz_refs
               }
             }
           }
@@ -212,74 +156,7 @@ async fn site() -> Json<Value> {
         "payload": {}
       },
       "systemAliases": {},
-      "visualizations": {
-        "EntityConfigs-display-viz": {
-          "businessApp": "entityconfigs.app",
-          "target": {
-            "action": "display",
-            "semanticObject": "EntityConfigs"
-          },
-          "vizConfig": {
-            "sap.app": {
-              "icon": "sap-icon://settings",
-              "info": "",
-              "subTitle": "Generische Entitaeten verwalten",
-              "title": "Entity-Konfigurationen"
-            },
-            "sap.flp": {
-              "target": {
-                "appId": "entityconfigs.app",
-                "inboundId": "EntityConfigs-display"
-              }
-            }
-          },
-          "vizType": "sap.ushell.StaticAppLauncher"
-        },
-        "EntityRelationships-display-viz": {
-          "businessApp": "entityrelationships.app",
-          "target": {
-            "action": "display",
-            "semanticObject": "EntityRelationships"
-          },
-          "vizConfig": {
-            "sap.app": {
-              "icon": "sap-icon://connected",
-              "info": "",
-              "subTitle": "Entity-Beziehungen",
-              "title": "Relationships"
-            },
-            "sap.flp": {
-              "target": {
-                "appId": "entityrelationships.app",
-                "inboundId": "EntityRelationships-display"
-              }
-            }
-          },
-          "vizType": "sap.ushell.StaticAppLauncher"
-        },
-        "FieldValueLists-display-viz": {
-          "businessApp": "fieldvaluelists.app",
-          "target": {
-            "action": "display",
-            "semanticObject": "FieldValueLists"
-          },
-          "vizConfig": {
-            "sap.app": {
-              "icon": "sap-icon://value-help",
-              "info": "",
-              "subTitle": "Feste Wertelisten verwalten",
-              "title": "Wertelisten"
-            },
-            "sap.flp": {
-              "target": {
-                "appId": "fieldvaluelists.app",
-                "inboundId": "FieldValueLists-display"
-              }
-            }
-          },
-          "vizType": "sap.ushell.StaticAppLauncher"
-        }
-      },
+      "visualizations": viz,
       "vizTypes": {}
     }))
 }
@@ -290,6 +167,168 @@ async fn init() -> impl IntoResponse {
             "application/javascript; charset=utf-8",
         )],
         include_str!("../static/flp/init.js"),
+    )
+}
+
+pub async fn app_component_handler(
+    Path(app): Path<String>,
+    State(_state): State<AppState>,
+) -> impl IntoResponse {
+    debug!("{}", app);
+
+    let a = _state.ddic.apps().find(|x| x.main_entity() == app).unwrap();
+    debug!("{:?}", a);
+
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        format!(
+            r##"
+sap.ui.define(["sap/fe/core/AppComponent"], function (AppComponent) {{
+    "use strict";
+	return AppComponent.extend("{cmp}.Component", {{ metadata: {{ manifest: "json" }} }});
+}}); "##,
+            cmp = a.name()
+        ),
+    )
+}
+
+pub async fn app_manifest_handler(
+    Path(app): Path<String>,
+    State(_state): State<AppState>,
+) -> Json<Value> {
+    debug!("{}", app);
+
+    let a = _state.ddic.apps().find(|x| x.main_entity() == app).unwrap();
+    debug!("{:?}", a);
+    let sem = format!("{}-{}", a.main_entity(), a.action());
+    let r = json!(
+    {
+      "_version": "1.65.0",
+      "sap.app": {
+        "applicationVersion": {
+          "version": "1.0.0"
+        },
+        "crossNavigation": {
+          "inbounds": {
+            sem: {
+              "action": a.action(),
+              "semanticObject": a.main_entity(),
+              "signature": {
+                "additionalParameters": "allowed",
+                "parameters": {}
+              }
+            }
+          }
+        },
+        "dataSources": {
+          "mainService": {
+            "settings": {
+              "odataVersion": "4.0"
+            },
+            "type": "OData",
+            "uri": "/Service/"
+          }
+        },
+        "description": "Fiori Elements List Report + Object Page",
+        "i18n": "i18n/i18n.properties",
+        "id": a.name(),
+        "title": a.title(),
+        "type": "application"
+      },
+      "sap.ui5": {
+        "dependencies": {
+          "libs": {
+            "sap.f": {},
+            "sap.fe.templates": {},
+            "sap.m": {},
+            "sap.ui.core": {}
+          },
+          "minUI5Version": "1.139.0"
+        },
+        "flexEnabled": true,
+        "models": {
+          "": {
+            "dataSource": "mainService",
+            "settings": {
+              "autoExpandSelect": true,
+              "earlyRequests": true,
+              "operationMode": "Server"
+            }
+          },
+          "@i18n": {
+            "type": "sap.ui.model.resource.ResourceModel",
+            "uri": "i18n/i18n.properties"
+          }
+        },
+        "rootView": {
+          "id": "appRootView",
+          "type": "XML",
+          "viewName": "sap.fe.core.rootView.Fcl"
+        },
+        "routing": {
+          "config": {
+            "controlAggregation": "beginColumnPages",
+            "controlId": "appContent",
+            "flexibleColumnLayout": {
+              "defaultThreeColumnLayoutType": "ThreeColumnsMidExpanded",
+              "defaultTwoColumnLayoutType": "TwoColumnsMidExpanded"
+            },
+            "routerClass": "sap.f.routing.Router"
+          },
+          "routes": [
+            {
+              "name": "default",
+              "pattern": ":?query:",
+              "target": format!("{}List", a.main_entity())
+            },
+          ],
+          "targets": {
+            format!("{}List", a.main_entity()): {
+              "contextPattern": "",
+              "controlAggregation": "beginColumnPages",
+              "id": format!("{}List", a.main_entity()),
+              "name": "sap.fe.templates.ListReport",
+              "options": {
+                "settings": {
+                  "contextPath": format!("/{}", a.main_entity()),
+                  "initialLoad": "Enabled",
+                  "navigation": {
+                    // a.main_entity(): {
+                    //   "detail": {
+                    //     "route": "EntityConfigsObjectPage"
+                    //   }
+                    // }
+                  },
+                  "variantManagement": "Page"
+                }
+              },
+              "type": "Component"
+            },
+          }
+        }
+      }
+    });
+    Json(r)
+}
+
+pub async fn app_handler(
+    Path((app, path)): Path<(String, String)>,
+    State(_state): State<AppState>,
+) -> impl IntoResponse {
+    debug!("{} {}", app, path);
+
+    let a = _state.ddic.apps().find(|x| x.main_entity() == app);
+    debug!("{:?}", a);
+
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        "",
     )
 }
 

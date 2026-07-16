@@ -8,7 +8,8 @@ pub fn resolve_property(record: &Value, path: &str) -> Value {
     })
 }
 
-fn evaluate_value_function(record: &Value, name: &str, vals: &[Value]) -> Value {
+#[allow(dead_code)]
+fn evaluate_value_function(_record: &Value, name: &str, vals: &[Value]) -> Value {
     match name {
         "tolower" => vals
             .first()
@@ -40,6 +41,7 @@ fn evaluate_value_function(record: &Value, name: &str, vals: &[Value]) -> Value 
     }
 }
 
+#[allow(dead_code)]
 fn evaluate_bool_function(record: &Value, name: &str, args: &[FilterOperand]) -> bool {
     let vals: Vec<Value> = args.iter().map(|a| evaluate_operand(record, a)).collect();
     let as_str = |v: &Value| v.as_str().unwrap_or("").to_string();
@@ -69,11 +71,11 @@ fn evaluate_bool_function(record: &Value, name: &str, args: &[FilterOperand]) ->
     }
 }
 
-fn evaluate_operand(record: &Value, a: &FilterOperand) -> Value {
+fn evaluate_operand(_record: &Value, _a: &FilterOperand) -> Value {
     todo!()
 }
 
-pub fn evaluate_filter(record: &Value, expr: &FilterExpr) -> bool {
+pub fn evaluate_filter(_record: &Value, _expr: &FilterExpr) -> bool {
     false
 }
 

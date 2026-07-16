@@ -259,6 +259,7 @@ impl DataStore for YamlStore {
             let nav_def = self
                 .metadata
                 .lookup_navigation(&parent.set_name, &parent.navigation_property)?;
+            println!("nav: {:?}", nav_def);
             // Vereinfachung: Foreign Key referenziert genau EIN Feld des Parent-Keys.
             let parent_key_value = parent
                 .key
@@ -266,7 +267,8 @@ impl DataStore for YamlStore {
                 .values()
                 .next()
                 .ok_or_else(|| StoreError::Metadata("Parent-Key ist leer".into()))?;
-
+            println!("parent key value {:?}", parent_key_value);
+            println!("records: {}", records.len());
             records.retain(|r| {
                 r.get(&nav_def.foreign_key_field)
                     .map(json_value_to_key_string)
@@ -346,22 +348,12 @@ impl DataStore for YamlStore {
         }
     }
 
-    fn read_entity(
-        &self,
-        set_name: &str,
-        key: &EntityKey,
-        _query: &ODataQuery,
-    ) -> Result<Value, StoreError> {
+    fn read_entity(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
         self.get_from_cache(set_name, key)
             .ok_or_else(|| StoreError::NotFound(format!("{set_name}/{key:?}")))
     }
 
-    fn create_entity(
-        &self,
-        set_name: &str,
-        data: &Value,
-        _parent: Option<&ParentKey>,
-    ) -> Result<Value, StoreError> {
+    fn create_entity(&self, set_name: &str, data: &Value) -> Result<Value, StoreError> {
         let key = self.entity_key_of(set_name, data)?;
 
         if self.get_from_cache(set_name, &key).is_some() {
@@ -436,7 +428,7 @@ impl DataStore for YamlStore {
         key: &EntityKey,
         property: &str,
     ) -> Result<Value, StoreError> {
-        let entity = self.read_entity(set_name, key, &ODataQuery::default())?;
+        let entity = self.read_entity(set_name, key)?;
         entity.get(property).cloned().ok_or_else(|| {
             StoreError::NotFound(format!("Property '{property}' auf {set_name}/{key:?}"))
         })

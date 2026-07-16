@@ -4,16 +4,15 @@ use odata::query::ODataQuery;
 use odata::query::OrderByItem;
 use odata::query::SortDirection;
 use odata_yaml_store::NavigationDef;
+use odata_yaml_store::ParentKey;
 use odata_yaml_store::YamlStore;
 use odata_yaml_store::{DataStore, DraftActionExt, EntityKey, EntityMetadata};
 use serde_json::json;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Datenverzeichnis im aktuellen Arbeitsverzeichnis (wird bei Bedarf angelegt)
     let data_dir = Path::new("testdata");
     println!("Datenverzeichnis: {}", data_dir.display());
 
-    // 1. Metadaten registrieren: Key-Felder + Navigationen
     let mut metadata = EntityMetadata::new();
     metadata.register_key("Orders", &["ID"]);
     metadata.register_key("OrderItems", &["ID"]);
@@ -28,40 +27,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let store = YamlStore::open(&data_dir, metadata)?;
 
-    // 2. Entities anlegen
-    store.create_entity(
+    let _ = store.create_entity(
         "Orders",
         &json!({ "ID": "1", "CustomerName": "Mueller GmbH", "Amount": 150, "Status": "New" }),
-        None,
-    )?;
-    store.create_entity(
+    );
+    let _ = store.create_entity(
         "Orders",
         &json!({ "ID": "2", "CustomerName": "Schmidt AG", "Amount": 480, "Status": "Released" }),
-        None,
-    )?;
-    store.create_entity(
+    );
+    let _ = store.create_entity(
         "OrderItems",
         &json!({ "ID": "10", "OrderID": "1", "Material": "M-100", "Qty": 5 }),
-        None,
-    )?;
-    store.create_entity(
+    );
+    let _ = store.create_entity(
         "OrderItems",
         &json!({ "ID": "11", "OrderID": "1", "Material": "M-200", "Qty": 2 }),
-        None,
-    )?;
+    );
+    let _ = store.create_entity(
+        "OrderItems",
+        &json!({ "ID": "10", "OrderID": "2", "Material": "M-200", "Qty": 2 }),
+    );
 
-    // 3. Einzelne Entity lesen
     let key = EntityKey::new([("ID".to_string(), "1".to_string())], true);
-    let order = store.read_entity("Orders", &key, &ODataQuery::default())?;
+    let order = store.read_entity("Orders", &key)?;
     println!(
         "\nGelesene Order: {}",
         serde_json::to_string_pretty(&order)?
     );
 
-    // 4. Patch
     store.patch_entity("Orders", &key, &json!({ "Status": "Released" }))?;
 
-    // 5. Collection mit $filter + $orderby
     let query = ODataQuery {
         filter: None,
         orderby: vec![OrderByItem {
@@ -76,7 +71,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         serde_json::to_string_pretty(&released)?
     );
 
-    // 6. Draft-Workflow: Edit -> Patch -> Activate
     let draft = store.draft_edit("Orders", &key)?;
     println!(
         "\nDraft angelegt: {}",
@@ -92,8 +86,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         serde_json::to_string_pretty(&activated)?
     );
 
-    // 7. Aufräumen (Demo-Verzeichnis wieder löschen)
-    // std::fs::remove_dir_all(&data_dir).ok();
+    let key = EntityKey::new([("ID".to_string(), "1".to_string())], true);
+    let navigation_property = "Items".to_string();
+    let parent = ParentKey {
+        set_name: "Orders".into(),
+        key,
+        navigation_property,
+    };
+    let items = store.get_collection("OrderItems", &ODataQuery::default(), Some(&parent));
+    println!("items: {:#?}", items);
 
     Ok(())
 }

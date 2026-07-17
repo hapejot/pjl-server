@@ -1,4 +1,4 @@
-use crate::package::Package;
+use crate::{EntitySpec, data_dictionary::DataDictonary, package::Package};
 
 #[derive(Debug)]
 pub struct App {
@@ -28,7 +28,7 @@ impl App {
             package,
         }
     }
-
+    // getters
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -45,8 +45,10 @@ impl App {
         "display"
     }
 
-    pub fn main_entity(&self) -> &str {
-        &self.main_entity
+    // resolvers
+    pub fn main_entity<'a>(&self, _ddic: &'a DataDictonary) -> &'a EntitySpec {
+        _ddic.entities()
+            .find(|e| e.name() == self.main_entity).expect(&format!("Entity {} not found", self.main_entity))
     }
 
     pub fn subtitle(&self) -> Option<&String> {

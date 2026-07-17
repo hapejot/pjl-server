@@ -156,6 +156,7 @@ pub enum FieldSpec {
     },
 }
 
+
 impl FieldSpec {
     // ── Constructors ─────────────────────────────────────────────────
 
@@ -390,4 +391,8 @@ impl EntitySpec {
     pub fn fields(&self) -> impl Iterator<Item = &FieldSpec> {
         self.fields.iter()
     }
+    
+    pub fn setname(&self) -> String {
+        format!("{}Set", self.name)
+    }   
 }

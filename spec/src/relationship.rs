@@ -110,4 +110,16 @@ impl Relationship {
             package: package.into(),
         }
     }
+    
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    
+    pub fn one(&self) -> &str {
+        &self.one
+    }
+    
+    pub fn many(&self) -> &str {
+        &self.many
+    }
 }

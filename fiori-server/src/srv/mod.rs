@@ -14,7 +14,7 @@ use odata::{
 use odata_yaml_store::DataStore;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use spec::EntitySpec;
+use spec::{EntitySpec, data_dictionary::DataDictonary};
 use tracing::trace;
 
 use crate::AppState;
@@ -35,16 +35,67 @@ pub struct EntityType {
     pub navigation_properties: Vec<NavigationProperty>,
 }
 
-impl From<&EntitySpec> for EntityType {
-    fn from(value: &EntitySpec) -> Self {
+impl EntityType {
+    pub fn from_entity(ddic: &DataDictonary, x: &EntitySpec) -> Self {
+        let mut properties = Vec::new();
+
+        properties.push(Property::new("ID", "Edm.Guid").nullable(false));
+        properties.push(Property::new("IsActiveEntity", "Edm.Boolean").nullable(false));
+        properties.push(Property::new("HasActiveEntity", "Edm.Boolean").nullable(false));
+        properties.push(Property::new("HasDraftEntity", "Edm.Boolean").nullable(false));
+
+        for f in x.fields() {
+            properties.push(Property::new(f.name(), f.edm_type()));
+        }
+        let mut navigation_properties = Vec::new();
+        navigation_properties.push(NavigationProperty::new(
+            "_DraftAdministrativeData",
+            "Service.DraftAdministrativeData",
+            Some(true),
+        ));
+        for r in ddic.relationships().filter(|r| r.many() == x.name()) {
+            navigation_properties.push(NavigationProperty::new(
+                r.name(),
+                format!("Service.{}", r.one()),
+                Some(false),
+            ));
+        }
+        for r in ddic.relationships().filter(|r| r.one() == x.name()) {
+            navigation_properties.push(NavigationProperty::new(
+                r.name(),
+                format!("Collection(Service.{})", r.many()),
+                Some(false),
+            ));
+        }
         Self {
-            name: value.name().into(),
+            name: x.name().into(),
             key: Key::new(&["ID"]),
-            properties: Vec::new(),
-            navigation_properties: Vec::new(),
+            properties,
+            navigation_properties,
         }
     }
 }
+
+// impl From<&EntitySpec> for EntityType {
+//     fn from(value: &EntitySpec) -> Self {
+//         Self {
+//             name: value.name().into(),
+//             key: Key::new(&["ID"]),
+//             properties: Vec::new(),
+//             navigation_properties: Vec::new(),
+//         }
+//     }
+// }
+
+// impl From<&EntitySpec> for EntitySet {
+//     fn from(value: &EntitySpec) -> Self {
+//         Self {
+//             name: value.setname().into(),
+//             entity_type: format!("Service.{}", value.name()),
+//             navigation_property_bindings: Vec::new(),
+//         }
+//     }
+// }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Key {
@@ -147,6 +198,23 @@ pub struct EntitySet {
     #[serde(rename = "NavigationPropertyBinding", default)]
     pub navigation_property_bindings: Vec<NavigationPropertyBinding>,
 }
+impl EntitySet {
+    fn from_entity(ddic: &DataDictonary, x: &EntitySpec) -> EntitySet {
+        let mut navigation_property_bindings = Vec::new();
+        for r in ddic.relationships().filter(|r| r.many() == x.name()) {
+            navigation_property_bindings.push(NavigationPropertyBinding {
+                path: r.one().into(),
+                target: format!("Service.{}", r.one()),
+            });
+        }
+
+        EntitySet {
+            name: x.setname().into(),
+            entity_type: format!("Service.{}", x.name()),
+            navigation_property_bindings,
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NavigationPropertyBinding {
@@ -165,6 +233,25 @@ pub struct Annotations {
 
     #[serde(rename = "Annotation", default)]
     pub annotations: Vec<Annotation>,
+}
+impl Annotations {
+    fn from_entity(x: &EntitySpec) -> Vec<Annotations> {
+        let mut annotations = Vec::new();
+        for f in x.fields() {
+            annotations.push(Self::from_field(x.name(), f));
+        }
+        annotations
+    }
+
+    fn from_field(name: &str, f: &spec::FieldSpec) -> Annotations {
+        let target = format!("Service.{}{}", name, f.name());
+        let annotations = Vec::new();
+
+        Annotations {
+            target,
+            annotations,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -321,10 +408,24 @@ async fn index() -> Json<Value> {
     }))
 }
 async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
-    let _entities: Vec<EntityType> = state.ddic.entities().map(|x| x.into()).collect();
-
-    let sample_entity = sample_entity();
-    let sample_entity_set = sample_entity_set();
+    let _entities: Vec<EntityType> = state
+        .ddic
+        .entities()
+        .map(|x| EntityType::from_entity(&state.ddic, x))
+        .collect();
+    let _entity_sets: Vec<EntitySet> = state
+        .ddic
+        .entities()
+        .map(|x| EntitySet::from_entity(&state.ddic, x))
+        .collect();
+    let _annotations: Vec<Annotations> = state
+        .ddic
+        .entities()
+        .map(|x| Annotations::from_entity(x))
+        .flatten()
+        .collect();
+    let _sample_entity = sample_entity();
+    let _sample_entity_set = sample_entity_set();
     let xml = sample_annotations();
     let sample_annotations: Annotations = quick_xml::de::from_str(&xml).unwrap();
     for a in &sample_annotations.annotations {
@@ -332,15 +433,46 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
     }
 
     let meta = edmx_template();
-    let type_defs = vec![quick_xml::se::to_string(&sample_entity).unwrap()];
-    let entity_sets = vec![quick_xml::se::to_string(&sample_entity_set).unwrap()];
-    let annotations = vec![quick_xml::se::to_string(&sample_annotations).unwrap()];
+    let mut type_defs = vec![]; //quick_xml::se::to_string(&sample_entity).unwrap()];
+    for x in _entities {
+        type_defs.push(quick_xml::se::to_string(&x).unwrap());
+    }
+    let mut entity_sets = vec![]; //quick_xml::se::to_string(&sample_entity_set).unwrap()];
+    for x in _entity_sets {
+        entity_sets.push(quick_xml::se::to_string(&x).unwrap());
+    }
+    let mut annotations = vec![];
+    for x in _annotations {
+        annotations.push(quick_xml::se::to_string(&x).unwrap());
+    }
+
+    let mut actions = vec![];
+    for x in state.ddic.apps() {
+        let entity_name = x.main_entity(&state.ddic).name();
+        actions.push(format!(
+            r##"<Action Name="draftEdit" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.{}"/><Parameter Name="PreserveChanges" Type="Edm.Boolean"/><ReturnType Type="Service.{}"/></Action>"##,
+            entity_name, entity_name
+        ));
+        actions.push(format!(
+            r##"<Action Name="draftActivate" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.{}"/><ReturnType Type="Service.{}"/></Action>"##,
+            entity_name, entity_name
+        ));
+        actions.push(format!(
+            r##"<Action Name="draftPrepare" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.{}"/><Parameter Name="SideEffectsQualifier" Type="Edm.String"/><ReturnType Type="Service.{}"/></Action>"##,
+            entity_name, entity_name
+        ));
+        actions.push(format!(
+            r##"<Action Name="publishConfig" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.{}"/><ReturnType Type="Service.{}"/></Action>"##,
+            entity_name, entity_name
+        ));
+    }
 
     // let cfg = [cfg1, cfg2, cfg3].concat();
     let xml = meta
         .replace("%TYPE-DEFINITIONS%", &type_defs.concat())
         .replace("%ENTITY-SETS%", &entity_sets.concat())
         .replace("%ANNOTATIONS%", &annotations.concat())
+        .replace("%ACTIONS%", &actions.concat())
         .to_string();
     (
         [
@@ -382,15 +514,8 @@ fn edmx_template() -> String {
 <EntityType Name="FieldValueList"><Key><PropertyRef Name="ID"/><PropertyRef Name="IsActiveEntity"/></Key><Property Name="ID"                Type="Edm.Guid" Nullable="false"/><Property Name="ListName"          Type="Edm.String" MaxLength="40"/><Property Name="Description"       Type="Edm.String" MaxLength="120"/><Property Name="IsActiveEntity"   Type="Edm.Boolean" Nullable="false" DefaultValue="true"/><Property Name="HasActiveEntity"  Type="Edm.Boolean" Nullable="false" DefaultValue="false"/><Property Name="HasDraftEntity"   Type="Edm.Boolean" Nullable="false" DefaultValue="false"/><NavigationProperty Name="Items" Type="Collection(Service.FieldValueListItem)"/><NavigationProperty Name="_ReferencingFields" Type="Collection(Service.EntityField)"/><NavigationProperty Name="SiblingEntity" Type="Service.FieldValueList"/><NavigationProperty Name="DraftAdministrativeData" Type="Service.DraftAdministrativeData" ContainsTarget="true"/></EntityType>
 <EntityType Name="FieldValueListItem"><Key><PropertyRef Name="ID"/><PropertyRef Name="IsActiveEntity"/></Key><Property Name="ID"                Type="Edm.Guid" Nullable="false"/><Property Name="Code"              Type="Edm.String" MaxLength="40"/><Property Name="Description"       Type="Edm.String" MaxLength="120"/><Property Name="SortOrder"         Type="Edm.Int32"/><Property Name="ListID"            Type="Edm.Guid"/><Property Name="IsActiveEntity"   Type="Edm.Boolean" Nullable="false" DefaultValue="true"/><Property Name="HasActiveEntity"  Type="Edm.Boolean" Nullable="false" DefaultValue="false"/><Property Name="HasDraftEntity"   Type="Edm.Boolean" Nullable="false" DefaultValue="false"/><NavigationProperty Name="_List" Type="Service.FieldValueList"/><NavigationProperty Name="SiblingEntity" Type="Service.FieldValueListItem"/><NavigationProperty Name="DraftAdministrativeData" Type="Service.DraftAdministrativeData" ContainsTarget="true"/></EntityType>
 <EntityType Name="DraftAdministrativeData"><Key><PropertyRef Name="DraftUUID"/></Key><Property Name="DraftUUID"              Type="Edm.Guid" Nullable="false"/><Property Name="CreationDateTime"       Type="Edm.DateTimeOffset" Precision="7"/><Property Name="CreatedByUser"          Type="Edm.String" MaxLength="256"/><Property Name="DraftIsCreatedByMe"     Type="Edm.Boolean"/><Property Name="LastChangeDateTime"     Type="Edm.DateTimeOffset" Precision="7"/><Property Name="LastChangedByUser"      Type="Edm.String" MaxLength="256"/><Property Name="InProcessByUser"        Type="Edm.String" MaxLength="256"/><Property Name="DraftIsProcessedByMe"   Type="Edm.Boolean"/></EntityType>
-<Action Name="draftEdit" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityConfig"/><Parameter Name="PreserveChanges" Type="Edm.Boolean"/><ReturnType Type="Service.EntityConfig"/></Action><Action Name="draftActivate" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityConfig"/><ReturnType Type="Service.EntityConfig"/></Action><Action Name="draftPrepare" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityConfig"/><Parameter Name="SideEffectsQualifier" Type="Edm.String"/><ReturnType Type="Service.EntityConfig"/></Action><Action Name="publishConfig" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityConfig"/><ReturnType Type="Service.EntityConfig"/></Action>
-<Action Name="draftEdit" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityField"/><Parameter Name="PreserveChanges" Type="Edm.Boolean"/><ReturnType Type="Service.EntityField"/></Action><Action Name="draftActivate" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityField"/><ReturnType Type="Service.EntityField"/></Action><Action Name="draftPrepare" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityField"/><Parameter Name="SideEffectsQualifier" Type="Edm.String"/><ReturnType Type="Service.EntityField"/></Action>
-<Action Name="draftEdit" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityFacet"/><Parameter Name="PreserveChanges" Type="Edm.Boolean"/><ReturnType Type="Service.EntityFacet"/></Action><Action Name="draftActivate" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityFacet"/><ReturnType Type="Service.EntityFacet"/></Action><Action Name="draftPrepare" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityFacet"/><Parameter Name="SideEffectsQualifier" Type="Edm.String"/><ReturnType Type="Service.EntityFacet"/></Action>
-<Action Name="draftEdit" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityNavigation"/><Parameter Name="PreserveChanges" Type="Edm.Boolean"/><ReturnType Type="Service.EntityNavigation"/></Action><Action Name="draftActivate" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityNavigation"/><ReturnType Type="Service.EntityNavigation"/></Action><Action Name="draftPrepare" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityNavigation"/><Parameter Name="SideEffectsQualifier" Type="Edm.String"/><ReturnType Type="Service.EntityNavigation"/></Action>
-<Action Name="draftEdit" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityRelationship"/><Parameter Name="PreserveChanges" Type="Edm.Boolean"/><ReturnType Type="Service.EntityRelationship"/></Action><Action Name="draftActivate" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityRelationship"/><ReturnType Type="Service.EntityRelationship"/></Action><Action Name="draftPrepare" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityRelationship"/><Parameter Name="SideEffectsQualifier" Type="Edm.String"/><ReturnType Type="Service.EntityRelationship"/></Action>
-<Action Name="draftEdit" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityTableFacet"/><Parameter Name="PreserveChanges" Type="Edm.Boolean"/><ReturnType Type="Service.EntityTableFacet"/></Action><Action Name="draftActivate" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityTableFacet"/><ReturnType Type="Service.EntityTableFacet"/></Action><Action Name="draftPrepare" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.EntityTableFacet"/><Parameter Name="SideEffectsQualifier" Type="Edm.String"/><ReturnType Type="Service.EntityTableFacet"/></Action>
-<Action Name="draftEdit" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.FieldValueList"/><Parameter Name="PreserveChanges" Type="Edm.Boolean"/><ReturnType Type="Service.FieldValueList"/></Action><Action Name="draftActivate" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.FieldValueList"/><ReturnType Type="Service.FieldValueList"/></Action><Action Name="draftPrepare" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.FieldValueList"/><Parameter Name="SideEffectsQualifier" Type="Edm.String"/><ReturnType Type="Service.FieldValueList"/></Action>
-<Action Name="draftEdit" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.FieldValueListItem"/><Parameter Name="PreserveChanges" Type="Edm.Boolean"/><ReturnType Type="Service.FieldValueListItem"/></Action><Action Name="draftActivate" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.FieldValueListItem"/><ReturnType Type="Service.FieldValueListItem"/></Action><Action Name="draftPrepare" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.FieldValueListItem"/><Parameter Name="SideEffectsQualifier" Type="Edm.String"/><ReturnType Type="Service.FieldValueListItem"/></Action>
-      <EntityContainer Name="EntityContainer">
+%ACTIONS%
+<EntityContainer Name="EntityContainer">
       %ENTITY-SETS%
 <EntitySet Name="EntityFields" EntityType="Service.EntityField"><NavigationPropertyBinding Path="_Config" Target="EntityConfigs"/><NavigationPropertyBinding Path="_ValueList" Target="FieldValueLists"/><NavigationPropertyBinding Path="SiblingEntity" Target="EntityFields"/><NavigationPropertyBinding Path="DraftAdministrativeData" Target="DraftAdministrativeData"/></EntitySet>
 <EntitySet Name="EntityFacets" EntityType="Service.EntityFacet"><NavigationPropertyBinding Path="_Config" Target="EntityConfigs"/><NavigationPropertyBinding Path="SiblingEntity" Target="EntityFacets"/><NavigationPropertyBinding Path="DraftAdministrativeData" Target="DraftAdministrativeData"/></EntitySet>
@@ -415,7 +540,7 @@ fn edmx_template() -> String {
     meta.into()
 }
 
-fn sample_annotations() ->String {
+fn sample_annotations() -> String {
     let xml = r##"  
    <Annotations Target="Service.EntityConfig">
     <Annotation Term="UI.SelectionFields">

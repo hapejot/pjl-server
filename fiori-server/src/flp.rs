@@ -26,28 +26,19 @@ async fn site(State(_state): State<AppState>) -> Json<Value> {
             "sap.app":{
                 "crossNavigation":{
                     "inbounds":{
-                        format!("{}-{}", app.main_entity(), app.action()):{
+                        format!("{}-{}", app.main_entity(&_state.ddic).name(), app.action()):{
                             "action":app.action(),
-                            "semanticObject":app.main_entity(),
+                            "semanticObject":app.main_entity(&_state.ddic).name(),
                             "signature":{
                                 "additionalParameters":"allowed",
                                 "parameters":{}}}}},
-                                "id":app.name(),
-                                "subTitle":"...",
-                                "title":app.title()},
-                                "sap.flp":{
-                                    "type":"application"},
-                                    "sap.platform.runtime":{
-                                        "componentProperties":{
-                                            "url":app.url()}},
-                                            "sap.ui":{
-                                                "deviceTypes":{
-                                                    "desktop":true,
-                                                    "phone":true,
-                                                    "tablet":true},
-                                                    "technology":"UI5"},
-                                                    "sap.ui5":{
-                                                        "componentName":app.name()}});
+                "id":app.name(),
+                "subTitle":"...",
+                "title":app.title()},
+            "sap.flp":{ "type":"application"},
+            "sap.platform.runtime":{ "componentProperties": {"url": format!("./apps/{}/", app.main_entity(&_state.ddic).name())}},                                            
+            "sap.ui":{"deviceTypes":{"desktop":true,"phone":true,"tablet":true}, "technology":"UI5"},
+            "sap.ui5":{"componentName":app.name()}});
         apps.insert(app.name().to_string(), app_json);
     }
 
@@ -59,7 +50,7 @@ async fn site(State(_state): State<AppState>) -> Json<Value> {
             "businessApp": app.name(),
             "target": {
                 "action": app.action(),
-                "semanticObject": app.main_entity()
+                "semanticObject": app.main_entity(&_state.ddic).name()
             },
             "vizConfig": {
                 "sap.app": {
@@ -71,13 +62,13 @@ async fn site(State(_state): State<AppState>) -> Json<Value> {
                 "sap.flp": {
                     "target": {
                         "appId": app.name(),
-                        "inboundId": format!("{}-{}", app.main_entity(), app.action())
+                        "inboundId": format!("{}-{}", app.main_entity(&_state.ddic).name(), app.action())
                     }
                 }
             },
             "vizType": "sap.ushell.StaticAppLauncher"
         });
-        let viz_name = format!("{}-{}-viz", app.main_entity(), app.action());
+        let viz_name = format!("{}-{}-viz", app.main_entity(&_state.ddic).name(), app.action());
         viz.insert(viz_name.clone(), viz_json);
         viz_refs.insert(
             viz_name.clone(),
@@ -176,7 +167,7 @@ pub async fn app_component_handler(
 ) -> impl IntoResponse {
     debug!("{}", app);
 
-    let a = _state.ddic.apps().find(|x| x.main_entity() == app).unwrap();
+    let a = _state.ddic.apps().find(|x| x.main_entity(&_state.ddic).name() == app).unwrap();
     debug!("{:?}", a);
 
     (
@@ -201,9 +192,9 @@ pub async fn app_manifest_handler(
 ) -> Json<Value> {
     debug!("{}", app);
 
-    let a = _state.ddic.apps().find(|x| x.main_entity() == app).unwrap();
+    let a = _state.ddic.apps().find(|x| x.main_entity(&_state.ddic).name() == app).unwrap();
     debug!("{:?}", a);
-    let sem = format!("{}-{}", a.main_entity(), a.action());
+    let sem = format!("{}-{}", a.main_entity(&_state.ddic).name(), a.action());
     let r = json!(
     {
       "_version": "1.65.0",
@@ -215,7 +206,7 @@ pub async fn app_manifest_handler(
           "inbounds": {
             sem: {
               "action": a.action(),
-              "semanticObject": a.main_entity(),
+              "semanticObject": a.main_entity(&_state.ddic).name(),
               "signature": {
                 "additionalParameters": "allowed",
                 "parameters": {}
@@ -282,18 +273,18 @@ pub async fn app_manifest_handler(
             {
               "name": "default",
               "pattern": ":?query:",
-              "target": format!("{}List", a.main_entity())
+              "target": format!("{}List", a.main_entity(&_state.ddic).name())
             },
           ],
           "targets": {
-            format!("{}List", a.main_entity()): {
+            format!("{}List", a.main_entity(&_state.ddic).name()): {
               "contextPattern": "",
               "controlAggregation": "beginColumnPages",
-              "id": format!("{}List", a.main_entity()),
+              "id": format!("{}List", a.main_entity(&_state.ddic).name()),
               "name": "sap.fe.templates.ListReport",
               "options": {
                 "settings": {
-                  "contextPath": format!("/{}", a.main_entity()),
+                  "contextPath": format!("/{}", a.main_entity(&_state.ddic).setname()),
                   "initialLoad": "Enabled",
                   "navigation": {
                     // a.main_entity(): {
@@ -320,7 +311,7 @@ pub async fn app_handler(
 ) -> impl IntoResponse {
     debug!("{} {}", app, path);
 
-    let a = _state.ddic.apps().find(|x| x.main_entity() == app);
+    let a = _state.ddic.apps().find(|x| x.main_entity(&_state.ddic).name() == app);
     debug!("{:?}", a);
 
     (

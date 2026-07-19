@@ -3,11 +3,13 @@ use std::path::Path;
 use odata::query::ODataQuery;
 use odata::query::OrderByItem;
 use odata::query::SortDirection;
+use odata_yaml_store::DraftAction;
 use odata_yaml_store::NavigationDef;
 use odata_yaml_store::ParentKey;
 use odata_yaml_store::YamlStore;
 use odata_yaml_store::{DataStore, DraftActionExt, EntityKey, EntityMetadata};
 use serde_json::json;
+use uuid::Uuid;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data_dir = Path::new("testdata");
@@ -48,7 +50,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &json!({ "ID": "10", "OrderID": "2", "Material": "M-200", "Qty": 2 }),
     );
 
-    let key = EntityKey::new([("ID".to_string(), "1".to_string())], true);
+    let key = EntityKey::new(
+        Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+        true,
+    );
     let order = store.read_entity("Orders", &key)?;
     println!(
         "\nGelesene Order: {}",
@@ -65,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }],
         ..Default::default()
     };
-    let released = store.get_collection("Orders", &query, None)?;
+    let released = store.get_collection("Orders", &query)?;
     println!(
         "\nReleased Orders (sortiert nach Amount desc): {}",
         serde_json::to_string_pretty(&released)?
@@ -86,15 +91,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         serde_json::to_string_pretty(&activated)?
     );
 
-    let key = EntityKey::new([("ID".to_string(), "1".to_string())], true);
+    let key = EntityKey::new(
+        Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+        true,
+    );
     let navigation_property = "Items".to_string();
     let parent = ParentKey {
         set_name: "Orders".into(),
-        key,
+        key: key.clone(),
         navigation_property,
     };
-    let items = store.get_collection("OrderItems", &ODataQuery::default(), Some(&parent));
+    let items = store.get_collection("OrderItems", &ODataQuery::default());
     println!("items: {:#?}", items);
+
+    let d = store.draft_action("Order", &key, DraftAction::Prepare);
+    println!("{d:?}");
 
     Ok(())
 }

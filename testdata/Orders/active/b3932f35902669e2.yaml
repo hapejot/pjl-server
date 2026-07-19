@@ -1,0 +1,9 @@
+key:
+  fields:
+    ID: '2'
+  is_active_entity: true
+data:
+  Amount: 480
+  CustomerName: Schmidt AG
+  ID: '2'
+  Status: Released

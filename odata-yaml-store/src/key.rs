@@ -1,45 +1,60 @@
+use odata::path::PathSegment;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::hash::{Hash, Hasher};
+use serde_json::Value;
+use std::{error::Error, hash::Hash};
+use uuid::Uuid;
 
-/// Fachlicher Schluessel einer Entity, inkl. RAP-Draft-Dimension.
-///
-/// `fields` ist eine BTreeMap, damit die Reihenfolge der Key-Felder
-/// deterministisch ist (wichtig fuer den Hash in `storage_id`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct EntityKey {
-    pub fields: BTreeMap<String, String>,
+    pub id: Uuid,
     pub is_active_entity: bool,
 }
 
 impl EntityKey {
-    pub fn new(
-        fields: impl IntoIterator<Item = (String, String)>,
-        is_active_entity: bool,
-    ) -> Self {
+    pub fn new(id: Uuid, is_active_entity: bool) -> Self {
         Self {
-            fields: fields.into_iter().collect(),
+            id,
             is_active_entity,
         }
     }
 
-    /// Deterministischer, dateisystemsicherer Name fuer diesen Key.
-    /// Composite Keys / GUIDs koennen Sonderzeichen enthalten, daher wird gehasht.
     pub fn storage_id(&self) -> String {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.hash(&mut hasher);
-        format!("{:016x}", hasher.finish())
+        format!("{:}", self.id)
     }
 
-    /// Liefert den gegenteiligen Key (aktiv <-> Draft) mit denselben fachlichen Feldern.
     pub fn sibling(&self) -> EntityKey {
         EntityKey {
-            fields: self.fields.clone(),
+            id: self.id,
             is_active_entity: !self.is_active_entity,
+        }
+    }
+
+    pub fn new_from_json(value: &Value) -> Option<EntityKey> {
+        let id = value.get("ID").and_then(|x| x.as_str());
+        let is_active = value.get("IsActiveEntity").and_then(|x| x.as_bool());
+        match (id, is_active) {
+            (None, None) => None,
+            (None, Some(_)) => None,
+            (Some(id), None) => Uuid::parse_str(&id)
+                .ok()
+                .and_then(|x| Some(EntityKey::new(x, true))),
+            (Some(id), Some(a)) => Uuid::parse_str(&id)
+                .ok()
+                .and_then(|x| Some(EntityKey::new(x, a))),
         }
     }
 }
 
+impl From<PathSegment> for EntityKey {
+    fn from(value: PathSegment) -> Self {
+        let k = value
+            .keys
+            .iter()
+            .find(|x| x.name == Some("ID".into()))
+            .and_then(|x| Uuid::parse_str(&x.value.to_string_value()).ok());
+        EntityKey::new(k.unwrap(), true)
+    }
+}
 /// Referenz auf die uebergeordnete Entity bei Compositions (z.B. Header -> Items).
 #[derive(Debug, Clone)]
 pub struct ParentKey {

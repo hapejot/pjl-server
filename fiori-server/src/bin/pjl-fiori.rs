@@ -14,12 +14,16 @@ async fn main() {
         .with(fmt::layer()) // hübsche Konsolenausgabe
         .with(EnvFilter::from_default_env()) // Steuerung über RUST_LOG
         .init();
+
+    let ddic = Arc::new(DataDictonary::new());
     let mut metadata = EntityMetadata::new();
-    metadata.register_key("EntityConfigs", &["ID"]);
+    for entity in ddic.entities() {
+        metadata.register_key(&entity.setname(), &["ID"]);
+    }
     let store = Arc::new(YamlStore::open("data", metadata).unwrap());
     let state = AppState {
         store,
-        ddic: Arc::new(DataDictonary::new()),
+        ddic,
     };
     let app = Router::new()
         // .nest("/users", services::users::router())

@@ -1,5 +1,5 @@
 use crate::error::StoreError;
-use crate::key::{EntityKey, ParentKey};
+use crate::key::EntityKey;
 use odata::query::ODataQuery;
 use serde_json::Value;
 
@@ -12,14 +12,9 @@ pub enum DraftAction {
 
 pub trait DataStore: Send + Sync {
     // -- Collections --
-    fn get_collection(
-        &self,
-        set_name: &str,
-        query: &ODataQuery,
-        parent: Option<&ParentKey>,
-    ) -> Result<Value, StoreError>;
+    fn get_collection(&self, set_name: &str, query: &ODataQuery) -> Result<Value, StoreError>;
 
-    fn count(&self, set_name: &str, query: &ODataQuery, parent: Option<&ParentKey>) -> usize;
+    fn count(&self, set_name: &str, query: &ODataQuery) -> usize;
 
     // -- Single Entity CRUD --
     fn read_entity(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError>;

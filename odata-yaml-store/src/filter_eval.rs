@@ -2,10 +2,14 @@ use odata::query::{FilterExpr, FilterOperand};
 use serde_json::Value;
 use std::cmp::Ordering;
 
-pub fn resolve_property(record: &Value, path: &str) -> Value {
-    path.split('/').fold(record.clone(), |acc, segment| {
-        acc.get(segment).cloned().unwrap_or(Value::Null)
-    })
+use crate::yaml_store::DataRecord;
+
+pub fn resolve_property(record: &DataRecord, path: &str) -> Value {
+    let mut parts = path.split('/');
+    parts
+        .nth(0)
+        .and_then(|segment| record.get(segment))
+        .unwrap_or(Value::Null)
 }
 
 #[allow(dead_code)]
@@ -75,8 +79,19 @@ fn evaluate_operand(_record: &Value, _a: &FilterOperand) -> Value {
     todo!()
 }
 
-pub fn evaluate_filter(_record: &Value, _expr: &FilterExpr) -> bool {
-    false
+pub fn evaluate_filter(_record: &DataRecord, _expr: &FilterExpr) -> bool {
+    match _expr {
+        FilterExpr::Identifier(_) => todo!(),
+        FilterExpr::Path(items) => todo!(),
+        FilterExpr::String(_) => todo!(),
+        FilterExpr::Number(_) => todo!(),
+        FilterExpr::Bool(_) => todo!(),
+        FilterExpr::Guid(_) => todo!(),
+        FilterExpr::Null => todo!(),
+        FilterExpr::FunctionCall { name, args } => todo!(),
+        FilterExpr::UnaryNot(filter_expr) => todo!(),
+        FilterExpr::BinaryOp { op, left, right } => todo!(),
+    }
 }
 
 pub fn compare_json_for_sort(a: &Value, b: &Value) -> Ordering {

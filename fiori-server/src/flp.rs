@@ -68,7 +68,11 @@ async fn site(State(_state): State<AppState>) -> Json<Value> {
             },
             "vizType": "sap.ushell.StaticAppLauncher"
         });
-        let viz_name = format!("{}-{}-viz", app.main_entity(&_state.ddic).name(), app.action());
+        let viz_name = format!(
+            "{}-{}-viz",
+            app.main_entity(&_state.ddic).name(),
+            app.action()
+        );
         viz.insert(viz_name.clone(), viz_json);
         viz_refs.insert(
             viz_name.clone(),
@@ -167,7 +171,11 @@ pub async fn app_component_handler(
 ) -> impl IntoResponse {
     debug!("{}", app);
 
-    let a = _state.ddic.apps().find(|x| x.main_entity(&_state.ddic).name() == app).unwrap();
+    let a = _state
+        .ddic
+        .apps()
+        .find(|x| x.main_entity(&_state.ddic).name() == app)
+        .unwrap();
     debug!("{:?}", a);
 
     (
@@ -192,43 +200,156 @@ pub async fn app_manifest_handler(
 ) -> Json<Value> {
     debug!("{}", app);
 
-    let a = _state.ddic.apps().find(|x| x.main_entity(&_state.ddic).name() == app).unwrap();
+    let a = _state
+        .ddic
+        .apps()
+        .find(|x| x.main_entity(&_state.ddic).name() == app)
+        .unwrap();
     debug!("{:?}", a);
+    let main_entity = a.main_entity(&_state.ddic);
+    let main_name = main_entity.name().to_string();
+    let main_set = main_entity.setname();
+    let list_target = format!("{}List", main_name);
+    let object_target = format!("{}ObjectPage", main_name);
+
+    let mut routes: Vec<Value> = Vec::new();
+    routes.push(json!(
+    {
+      "name": list_target.clone(),
+      "pattern": ":?query:",
+      "target": list_target.clone()
+    }));
+    routes.push(json!(
+      {
+        "name": object_target.clone(),
+        "pattern": format!("{}({{key}}):?query:", main_set.clone()),
+        "target": [
+          list_target.clone(),
+          object_target.clone()
+        ]
+      }
+    ));
+
+    let mut targets: serde_json::Map<String, Value> = serde_json::Map::new();
+    targets.insert(
+        list_target.clone(),
+        json!({
+          "type": "Component",
+          "id": list_target.clone(),
+          "controlAggregation": "beginColumnPages",
+          "name": "sap.fe.templates.ListReport",
+          "options": {
+            "settings": {
+              "entitySet": main_set.clone(),
+              "contextPath": format!("/{}", &main_set),
+              "initialLoad": "Enabled",
+              "navigation": {
+                main_set.clone(): {
+                  "detail": {
+                    "route": object_target.clone()
+                  }
+                }
+              },
+              "variantManagement": "Page"
+            }
+          },
+        }),
+    );
+    targets.insert(
+        object_target.clone(),
+        json!({
+            "type": "Component",
+            "controlAggregation": "midColumnPages",
+            "id": object_target.clone(),
+            "name": "sap.fe.templates.ObjectPage",
+            "options": {
+              "settings": {
+                "entitySet": main_set.clone(),
+                "contextPath": format!("/{}", &main_set),
+              }
+            },
+        }),
+    );
+
+    let mut object_navigation: serde_json::Map<String, Value> = serde_json::Map::new();
+
+    for rel in _state.ddic.relationships().filter(|r| r.one() == main_name) {
+        let nav = rel.name().to_string();
+        let child_entity = rel.many().to_string();
+        let child_object_target = format!("{}ObjectPage", child_entity);
+
+        routes.push(json!({
+          "name": child_object_target,
+          "pattern": format!("{}({{key}})/{}({{key2}}):?query:", main_set, nav),
+          "target": [
+            list_target,
+            object_target,
+            child_object_target
+          ]
+        }));
+
+        targets.insert(
+            child_object_target.clone(),
+            json!({
+              "contextPattern": format!("/{}({{key}})/{}({{key2}})", main_set, nav),
+              "controlAggregation": "endColumnPages",
+              "id": child_object_target,
+              "name": "sap.fe.templates.ObjectPage",
+              "options": {
+                "settings": {
+                  "contextPath": format!("/{}/{}", main_set, nav)
+                }
+              },
+              "type": "Component"
+            }),
+        );
+
+        object_navigation.insert(
+            nav,
+            json!({
+              "detail": {
+                "route": child_entity.to_string() + "ObjectPage"
+              }
+            }),
+        );
+    }
+
     let sem = format!("{}-{}", a.main_entity(&_state.ddic).name(), a.action());
+    let sap_app = json!({
+      "applicationVersion": {
+        "version": "1.0.0"
+      },
+      "crossNavigation": {
+        "inbounds": {
+          sem: {
+            "action": a.action(),
+            "semanticObject": a.main_entity(&_state.ddic).name(),
+            "signature": {
+              "additionalParameters": "allowed",
+              "parameters": {}
+            }
+          }
+        }
+      },
+      "dataSources": {
+        "mainService": {
+          "settings": {
+            "odataVersion": "4.0"
+          },
+          "type": "OData",
+          "uri": "/Service/"
+        }
+      },
+      "description": "Fiori Elements List Report + Object Page",
+      "i18n": "i18n/i18n.properties",
+      "id": a.name(),
+      "title": a.title(),
+      "type": "application"
+    });
     let r = json!(
     {
       "_version": "1.65.0",
-      "sap.app": {
-        "applicationVersion": {
-          "version": "1.0.0"
-        },
-        "crossNavigation": {
-          "inbounds": {
-            sem: {
-              "action": a.action(),
-              "semanticObject": a.main_entity(&_state.ddic).name(),
-              "signature": {
-                "additionalParameters": "allowed",
-                "parameters": {}
-              }
-            }
-          }
-        },
-        "dataSources": {
-          "mainService": {
-            "settings": {
-              "odataVersion": "4.0"
-            },
-            "type": "OData",
-            "uri": "/Service/"
-          }
-        },
-        "description": "Fiori Elements List Report + Object Page",
-        "i18n": "i18n/i18n.properties",
-        "id": a.name(),
-        "title": a.title(),
-        "type": "application"
-      },
+      "sap.app": sap_app,
       "sap.ui5": {
         "dependencies": {
           "libs": {
@@ -269,39 +390,12 @@ pub async fn app_manifest_handler(
             },
             "routerClass": "sap.f.routing.Router"
           },
-          "routes": [
-            {
-              "name": "default",
-              "pattern": ":?query:",
-              "target": format!("{}List", a.main_entity(&_state.ddic).name())
-            },
-          ],
-          "targets": {
-            format!("{}List", a.main_entity(&_state.ddic).name()): {
-              "contextPattern": "",
-              "controlAggregation": "beginColumnPages",
-              "id": format!("{}List", a.main_entity(&_state.ddic).name()),
-              "name": "sap.fe.templates.ListReport",
-              "options": {
-                "settings": {
-                  "contextPath": format!("/{}", a.main_entity(&_state.ddic).setname()),
-                  "initialLoad": "Enabled",
-                  "navigation": {
-                    // a.main_entity(): {
-                    //   "detail": {
-                    //     "route": "EntityConfigsObjectPage"
-                    //   }
-                    // }
-                  },
-                  "variantManagement": "Page"
-                }
-              },
-              "type": "Component"
-            },
-          }
+          "routes": routes,
+          "targets": targets
         }
       }
     });
+
     Json(r)
 }
 
@@ -311,7 +405,10 @@ pub async fn app_handler(
 ) -> impl IntoResponse {
     debug!("{} {}", app, path);
 
-    let a = _state.ddic.apps().find(|x| x.main_entity(&_state.ddic).name() == app);
+    let a = _state
+        .ddic
+        .apps()
+        .find(|x| x.main_entity(&_state.ddic).name() == app);
     debug!("{:?}", a);
 
     (

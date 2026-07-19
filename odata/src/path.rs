@@ -8,7 +8,6 @@ pub struct PathSegment {
     pub name: String,
     pub keys: Vec<KeyValue>, // leer, falls keine Klammer vorhanden
 }
-
 impl PathSegment {
     pub fn is_active_entity(&self) -> bool {
         self.keys.iter().any(|x| {
@@ -34,6 +33,13 @@ impl PathSegment {
             })
             .collect()
     }
+
+    pub fn id(&self) -> Option<Uuid> {
+        self.keys
+            .iter()
+            .find(|x| x.name == Some("ID".into()))
+            .and_then(|x| Uuid::parse_str(&x.value.to_string_value()).ok())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,7 +57,7 @@ pub enum KeyLiteral {
 }
 
 impl KeyLiteral {
-    fn to_string_value(&self) -> String {
+    pub fn to_string_value(&self) -> String {
         match self {
             KeyLiteral::String(s) => s.clone(),
             KeyLiteral::Number(n) => n.to_string(),
@@ -63,6 +69,7 @@ impl KeyLiteral {
 
 use regex::Regex;
 use std::sync::LazyLock;
+use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct PathParseError {

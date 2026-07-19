@@ -26,8 +26,8 @@ impl DataDictonary {
             .field(FieldSpec::atom("max_length", "MaxLength", "Edm.Int"))
             .field(FieldSpec::atom("precision", "Precision", "Edm.Int"))
             .field(FieldSpec::atom("scale", "Scale", "Edm.Int"))
-            .field(FieldSpec::atom("computed", "Package", "Edm.Bool"))
-            .field(FieldSpec::atom("immutable", "Immutable", "Edm.Bool"))
+            .field(FieldSpec::atom("computed", "Package", "Edm.Boolean"))
+            .field(FieldSpec::atom("immutable", "Immutable", "Edm.Boolean"))
             .field(FieldSpec::atom("package", "Package", "Edm.String"));
 
         let relation_ent = EntitySpec::new("Relation", core.name(), "Relations")

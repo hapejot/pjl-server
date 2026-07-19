@@ -1,0 +1,11 @@
+key:
+  fields:
+    ID: '1'
+  is_active_entity: true
+data:
+  Amount: 150
+  CustomerName: Mueller GmbH
+  HasActiveEntity: false
+  ID: '1'
+  IsActiveEntity: true
+  Status: InProgress

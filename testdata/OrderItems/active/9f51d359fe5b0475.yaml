@@ -1,9 +1,0 @@
-key:
-  fields:
-    ID: '10'
-  is_active_entity: true
-data:
-  ID: '10'
-  Material: M-100
-  OrderID: '1'
-  Qty: 5

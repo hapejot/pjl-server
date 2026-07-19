@@ -96,7 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         true,
     );
     let navigation_property = "Items".to_string();
-    let parent = ParentKey {
+    let _parent = ParentKey {
         set_name: "Orders".into(),
         key: key.clone(),
         navigation_property,

@@ -1,16 +1,13 @@
 use crate::datastore::{DataStore, DraftAction};
 use crate::error::StoreError;
-use crate::filter_eval::{compare_json_for_sort, evaluate_filter, resolve_property};
-use crate::key::{EntityKey, ParentKey};
+use crate::filter_eval::evaluate_filter;
+use crate::key::EntityKey;
 use crate::metadata::EntityMetadata;
-use odata::path::KeyValue;
-use odata::query::{ODataQuery, SortDirection};
+use odata::query::ODataQuery;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
-use std::sync::RwLock;
-use std::{fs, io};
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -68,9 +65,10 @@ impl From<DataRecord> for EntityKey {
 pub struct YamlStore {
     root: PathBuf,
     pub metadata: EntityMetadata,
-    cache: RwLock<HashMap<String, HashMap<Uuid, DataRecord>>>,
+    // cache: RwLock<HashMap<String, HashMap<Uuid, DataRecord>>>,
 }
 
+#[allow(dead_code)]
 fn json_value_to_key_string(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
@@ -83,6 +81,7 @@ fn json_value_to_key_string(v: &Value) -> String {
 
 /// Rekursiver Merge: Objekte werden Feld fuer Feld gemergt, alles andere
 /// (Arrays, Skalare) wird vom Patch komplett ueberschrieben.
+#[allow(dead_code)]
 fn merge_json(existing: &mut Value, patch: &Value) {
     match (existing, patch) {
         (Value::Object(existing_map), Value::Object(patch_map)) => {
@@ -102,7 +101,7 @@ impl YamlStore {
         let store = Self {
             root,
             metadata,
-            cache: RwLock::new(HashMap::new()),
+            // cache: RwLock::new(HashMap::new()),
         };
         // store.load_all()?;
         Ok(store)
@@ -124,7 +123,7 @@ impl YamlStore {
         };
         let p = self.root.join(set_name).join(state);
         if !p.exists() {
-            fs::create_dir_all(p.clone());
+            let _create_dir_all = fs::create_dir_all(p.clone());
         }
         p
     }
@@ -153,6 +152,7 @@ impl YamlStore {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn enrich_with_technical_fields(
         &self,
         _set_name: &str,
@@ -293,8 +293,8 @@ impl DataStore for YamlStore {
 
     fn patch_entity(
         &self,
-        set_name: &str,
-        key: &EntityKey,
+        _set_name: &str,
+        _key: &EntityKey,
         patch: &Value,
     ) -> Result<Value, StoreError> {
         Ok(patch.clone())
@@ -332,11 +332,12 @@ impl DataStore for YamlStore {
 
     fn commit(&self) {}
 
-    fn read_sibling_entity(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
+    fn read_sibling_entity(&self, _set_name: &str, _key: &EntityKey) -> Result<Value, StoreError> {
         todo!()
     }
 }
 
+#[allow(dead_code)]
 fn project_fields(record: &Value, select: &[String]) -> Value {
     let Value::Object(map) = record else {
         return record.clone();

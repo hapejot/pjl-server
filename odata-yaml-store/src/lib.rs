@@ -41,7 +41,7 @@ impl<T: DataStore + ?Sized> DraftActionExt for T {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use datastore::DataStoreDebugExt;
+
     use odata::query::*;
     use serde_json::json;
     use tempfile::TempDir;

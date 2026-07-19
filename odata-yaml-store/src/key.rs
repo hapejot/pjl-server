@@ -1,7 +1,7 @@
 use odata::path::PathSegment;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{error::Error, hash::Hash};
+use std::hash::Hash;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -45,8 +45,8 @@ impl EntityKey {
     }
 }
 
-impl From<PathSegment> for EntityKey {
-    fn from(value: PathSegment) -> Self {
+impl From<&PathSegment> for EntityKey {
+    fn from(value: &PathSegment) -> Self {
         let k = value
             .keys
             .iter()

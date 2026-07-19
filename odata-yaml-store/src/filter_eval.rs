@@ -82,15 +82,22 @@ fn evaluate_operand(_record: &Value, _a: &FilterOperand) -> Value {
 pub fn evaluate_filter(_record: &DataRecord, _expr: &FilterExpr) -> bool {
     match _expr {
         FilterExpr::Identifier(_) => todo!(),
-        FilterExpr::Path(items) => todo!(),
+        FilterExpr::Path(_items) => todo!(),
         FilterExpr::String(_) => todo!(),
         FilterExpr::Number(_) => todo!(),
         FilterExpr::Bool(_) => todo!(),
         FilterExpr::Guid(_) => todo!(),
         FilterExpr::Null => todo!(),
-        FilterExpr::FunctionCall { name, args } => todo!(),
-        FilterExpr::UnaryNot(filter_expr) => todo!(),
-        FilterExpr::BinaryOp { op, left, right } => todo!(),
+        FilterExpr::FunctionCall {
+            name: _name,
+            args: _args,
+        } => todo!(),
+        FilterExpr::UnaryNot(_filter_expr) => todo!(),
+        FilterExpr::BinaryOp {
+            op: _op,
+            left: _left,
+            right: _right,
+        } => todo!(),
     }
 }
 

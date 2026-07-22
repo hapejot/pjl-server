@@ -8,14 +8,45 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::RwLock;
+use tracing::info;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct DraftAdministrativeData {
+    #[serde(rename = "DraftUUID", default)]
+    pub draft_uuid: Uuid,
+    #[serde(rename = "DraftIsCreatedByMe", default)]
+    pub draft_is_created_by_me: bool,
+    #[serde(rename = "DraftInProcessByUser", default)]
+    pub draft_in_process_by_user: String,
+    #[serde(rename = "LastChangedByUser", default)]
+    pub last_changed_by_user: String,
+}
+#[derive(Serialize, Deserialize, Clone)]
+pub struct DraftMessage {
+    pub target: String,
+    pub message: String,
+    pub code: String,
+
+    #[serde(rename = "numericSeverity")]
+    pub severity: usize,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct DataRecord {
+    #[serde(rename = "ID")]
     id: Uuid,
+    #[serde(rename = "IsActiveEntity")]
     is_active_entity: bool,
+    #[serde(rename = "HasActiveEntity", default)]
     has_active_entity: bool,
-    sibling: Option<Uuid>,
+    #[serde(rename = "HasDraftEntity", default = "bool::default")]
+    has_draft_entity: bool,
+    #[serde(rename = "DraftAdministrativeData", default)]
+    draft_admin_data: Option<DraftAdministrativeData>,
+    #[serde(rename = "DraftMessages", default)]
+    draft_messages: Vec<DraftMessage>,
     #[serde(flatten)]
     fields: Map<String, Value>,
 }
@@ -35,14 +66,25 @@ impl DataRecord {
             .remove("IsActiveEntity")
             .and_then(|x| x.as_bool())
             .unwrap_or_else(|| true);
-        let has_active_entity = false;
-        let sibling = None;
+        let has_active_entity = fields
+            .remove("HasActiveEntity")
+            .and_then(|x| x.as_bool())
+            .unwrap_or_else(|| false);
+        let draft_admin_data = fields
+            .remove("DraftAdministrativeData")
+            .and_then(|x| serde_json::from_value(x).ok());
+        let has_draft_entity = fields
+            .remove("HasDraftEntity")
+            .and_then(|x| x.as_bool())
+            .unwrap_or_else(|| false);
         let fields = fields.clone();
         let r = DataRecord {
             id,
             is_active_entity,
             has_active_entity,
-            sibling,
+            has_draft_entity,
+            draft_admin_data,
+            draft_messages: vec![],
             fields,
         };
         Ok(r)
@@ -52,6 +94,21 @@ impl DataRecord {
         match segment {
             "ID" => Some(json!(self.id)),
             x => self.fields.get(x).cloned(),
+        }
+    }
+
+    fn touch(&mut self, s: &str) {
+        if s == "ID"
+            || s == "IsActiveEntity"
+            || s == "HasDraftEntity"
+            || s == "HasActiveEntity"
+            || s == "DraftMessages"
+            || s == "DraftAdministrativeData"
+        {
+            return;
+        }
+        if !self.fields.contains_key(s) {
+            self.fields.insert(s.to_string(), json!(format!("<{}>", s)));
         }
     }
 }
@@ -65,6 +122,7 @@ impl From<DataRecord> for EntityKey {
 pub struct YamlStore {
     root: PathBuf,
     pub metadata: EntityMetadata,
+    current_change: RwLock<Option<Uuid>>,
     // cache: RwLock<HashMap<String, HashMap<Uuid, DataRecord>>>,
 }
 
@@ -101,10 +159,23 @@ impl YamlStore {
         let store = Self {
             root,
             metadata,
+            current_change: RwLock::new(None),
             // cache: RwLock::new(HashMap::new()),
         };
         // store.load_all()?;
         Ok(store)
+    }
+
+    pub fn get_change(&self) -> Uuid {
+        let mut c = self.current_change.write().unwrap();
+        match *c {
+            Some(x) => x,
+            None => {
+                let new_change = Uuid::new_v4();
+                *c = Some(new_change);
+                new_change
+            }
+        }
     }
 
     fn load_records(&self, set_name: &str) -> Result<Vec<DataRecord>, StoreError> {
@@ -169,7 +240,14 @@ impl YamlStore {
             id: active_key.id,
             is_active_entity: active_key.is_active_entity,
             has_active_entity: true,
-            sibling: Some(active_key.id),
+            has_draft_entity: false,
+            draft_messages: vec![],
+            draft_admin_data: Some(DraftAdministrativeData {
+                draft_uuid: self.get_change(),
+                draft_is_created_by_me: true,
+                draft_in_process_by_user: "user".into(),
+                last_changed_by_user: "user".into(),
+            }),
             fields: Map::new(),
         };
 
@@ -203,7 +281,18 @@ fn collect_records(p: PathBuf) -> Result<Vec<DataRecord>, StoreError> {
 
 impl DataStore for YamlStore {
     fn get_collection(&self, set_name: &str, query: &ODataQuery) -> Result<Value, StoreError> {
-        let mut records: Vec<DataRecord> = self.load_records(set_name)?;
+        info!("selected fields: {:?}", query.select);
+        let mut records: Vec<DataRecord> = self
+            .load_records(set_name)?
+            .iter()
+            .cloned()
+            .map(|mut r| {
+                for s in query.select.iter().flatten() {
+                    r.touch(s);
+                }
+                r
+            })
+            .collect();
 
         if let Some(filter) = &query.filter {
             records.retain(|r| evaluate_filter(r, filter));
@@ -278,14 +367,25 @@ impl DataStore for YamlStore {
 
     fn read_entity(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
         let p = self.path_for(set_name, key);
-        let content =
-            fs::read_to_string(&p).or_else(|_| Err(StoreError::NotFound(format!("{p:?}"))))?;
-        serde_json::from_str(&content).or_else(|e| Err(StoreError::Deserialize(format!("{e}"))))
+        let content = fs::read_to_string(&p)
+            .or_else(|_| Err(StoreError::NotFound(format!("{p:?} for key {key:?}"))))?;
+        let r = serde_yaml::from_str(&content)
+            .or_else(|e| Err(StoreError::Deserialize(format!("{e}"))))
+            .and_then(|x| DataRecord::from_json(&x))?;
+        Ok(json!(r))
     }
 
     fn create_entity(&self, set_name: &str, data: &Value) -> Result<Value, StoreError> {
         // let key = EntityKey::new_from_json(&data);
-        let rec: DataRecord = DataRecord::from_json(data)?;
+        let mut rec: DataRecord = DataRecord::from_json(data)?;
+        rec.has_active_entity = false;
+        rec.is_active_entity = false;
+        rec.draft_admin_data = Some(DraftAdministrativeData {
+            draft_uuid: self.get_change(),
+            draft_is_created_by_me: true,
+            draft_in_process_by_user: "user".into(),
+            last_changed_by_user: "user".into(),
+        });
         self.write_record(set_name, rec.clone())?;
 
         Ok(json!(rec))

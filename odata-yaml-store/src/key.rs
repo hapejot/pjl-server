@@ -52,7 +52,12 @@ impl From<&PathSegment> for EntityKey {
             .iter()
             .find(|x| x.name == Some("ID".into()))
             .and_then(|x| Uuid::parse_str(&x.value.to_string_value()).ok());
-        EntityKey::new(k.unwrap(), true)
+        let is_active = value
+            .keys
+            .iter()
+            .find(|x| x.name == Some("IsActiveEntity".into()))
+            .and_then(|x| x.value.as_bool());
+        EntityKey::new(k.unwrap(), is_active.unwrap_or(true))
     }
 }
 /// Referenz auf die uebergeordnete Entity bei Compositions (z.B. Header -> Items).

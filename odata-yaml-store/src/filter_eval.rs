@@ -1,7 +1,7 @@
 use odata::query::{FilterExpr, FilterOperand};
 use serde_json::Value;
 use std::cmp::Ordering;
-
+use tracing::warn;
 use crate::yaml_store::DataRecord;
 
 pub fn resolve_property(record: &DataRecord, path: &str) -> Value {
@@ -97,7 +97,10 @@ pub fn evaluate_filter(_record: &DataRecord, _expr: &FilterExpr) -> bool {
             op: _op,
             left: _left,
             right: _right,
-        } => todo!(),
+        } => {
+            warn!("Operation {:?} {:?} {:?} not implemented", _left, _op, _right);
+            true
+        }
     }
 }
 

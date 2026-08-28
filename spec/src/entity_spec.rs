@@ -1,4 +1,3 @@
-
 /// How a measure field relates to its unit/currency companion.
 #[derive(Debug, Clone)]
 pub enum MeasureKind {
@@ -111,6 +110,8 @@ pub struct PresentationOverrides {
     pub criticality_path: Option<String>,
     /// FieldGroup qualifier — groups this field into a form section.
     pub form_group: Option<String>,
+    /// Lookup
+    pub lookup: Option<String>,
 }
 
 /// A field specification — describes the entity's own data (leaves on the relationship tree).
@@ -119,6 +120,11 @@ pub struct PresentationOverrides {
 /// References to other entities are expressed as `Relationship`, not as fields.
 #[derive(Debug, Clone)]
 pub enum FieldSpec {
+    Lookup {
+        name: String,
+        entity: String,
+        collection: bool,
+    },
     /// Simple value: text, number, date, boolean, coded value with optional dropdown.
     Atom {
         name: String,
@@ -155,7 +161,6 @@ pub enum FieldSpec {
         presentation: PresentationOverrides,
     },
 }
-
 
 impl FieldSpec {
     // ── Constructors ─────────────────────────────────────────────────
@@ -249,6 +254,7 @@ impl FieldSpec {
         match &mut self {
             FieldSpec::Atom { presentation, .. } => presentation.form_group = Some(group.into()),
             FieldSpec::Measure { presentation, .. } => presentation.form_group = Some(group.into()),
+            _ => todo!(),
         }
         self
     }
@@ -257,6 +263,7 @@ impl FieldSpec {
         match &mut self {
             FieldSpec::Atom { presentation, .. } => presentation.searchable = Some(true),
             FieldSpec::Measure { presentation, .. } => presentation.searchable = Some(true),
+            _ => todo!(),
         }
         self
     }
@@ -265,6 +272,7 @@ impl FieldSpec {
         match &mut self {
             FieldSpec::Atom { presentation, .. } => presentation.show_in_list = Some(true),
             FieldSpec::Measure { presentation, .. } => presentation.show_in_list = Some(true),
+            _ => todo!(),
         }
         self
     }
@@ -273,6 +281,7 @@ impl FieldSpec {
         match &mut self {
             FieldSpec::Atom { package, .. } => *package = Some(p.into()),
             FieldSpec::Measure { package, .. } => *package = Some(p.into()),
+            _ => todo!(),
         }
         self
     }
@@ -291,6 +300,7 @@ impl FieldSpec {
         match self {
             FieldSpec::Atom { name, .. } => name,
             FieldSpec::Measure { name, .. } => name,
+            FieldSpec::Lookup { name, .. } => name,
         }
     }
 
@@ -299,6 +309,7 @@ impl FieldSpec {
         match self {
             FieldSpec::Atom { label, .. } => label,
             FieldSpec::Measure { label, .. } => label,
+            FieldSpec::Lookup { name, .. } => name,
         }
     }
 
@@ -307,6 +318,7 @@ impl FieldSpec {
         match self {
             FieldSpec::Atom { package, .. } => package.as_deref(),
             FieldSpec::Measure { package, .. } => package.as_deref(),
+            _ => todo!(),
         }
     }
 
@@ -315,6 +327,7 @@ impl FieldSpec {
         match self {
             FieldSpec::Atom { edm_type, .. } => edm_type,
             FieldSpec::Measure { .. } => "Edm.Decimal",
+            FieldSpec::Lookup { .. } => "Edm.Guid",
         }
     }
 
@@ -323,6 +336,25 @@ impl FieldSpec {
         match self {
             FieldSpec::Atom { presentation, .. } => presentation,
             FieldSpec::Measure { presentation, .. } => presentation,
+            _ => todo!(),
+        }
+    }
+
+    pub fn lookup(&mut self, arg: &str) {
+        match self {
+            FieldSpec::Atom { presentation, .. } => {
+                *presentation = PresentationOverrides {
+                    searchable: None,
+                    show_in_list: None,
+                    list_sort_order: None,
+                    list_importance: None,
+                    criticality_path: None,
+                    form_group: None,
+                    lookup: Some(arg.into()),
+                }
+            }
+            FieldSpec::Measure { .. } => todo!(),
+            _ => todo!(),
         }
     }
 }
@@ -383,16 +415,16 @@ impl EntitySpec {
         self.fields.push(fld);
         self
     }
-    
+
     pub fn name(&self) -> &str {
         &self.name
     }
-    
+
     pub fn fields(&self) -> impl Iterator<Item = &FieldSpec> {
         self.fields.iter()
     }
-    
+
     pub fn setname(&self) -> String {
         format!("{}Set", self.name)
-    }   
+    }
 }

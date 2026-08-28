@@ -3,11 +3,12 @@ use std::path::Path;
 use odata::query::ODataQuery;
 use odata::query::OrderByItem;
 use odata::query::SortDirection;
-use odata_yaml_store::DraftAction;
+use odata_yaml_store::DraftActionExt;
+use odata_yaml_store::EntityKey;
 use odata_yaml_store::NavigationDef;
 use odata_yaml_store::ParentKey;
 use odata_yaml_store::YamlStore;
-use odata_yaml_store::{DataStore, DraftActionExt, EntityKey, EntityMetadata};
+use odata_yaml_store::{DataStore, EntityMetadata};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -104,7 +105,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let items = store.get_collection("OrderItems", &ODataQuery::default());
     println!("items: {:#?}", items);
 
-    let d = store.draft_action("Order", &key, DraftAction::Prepare);
+    let d = store.draft_prepare("Order", &key);
     println!("{d:?}");
 
     Ok(())

@@ -46,9 +46,13 @@ impl App {
     }
 
     // resolvers
-    pub fn main_entity<'a>(&self, _ddic: &'a DataDictonary) -> &'a EntitySpec {
-        _ddic.entities()
-            .find(|e| e.name() == self.main_entity).expect(&format!("Entity {} not found", self.main_entity))
+    pub fn main_entity<'a>(&self, _ddic: &'a DataDictonary) -> EntitySpec {
+        _ddic
+            .entities()
+            .iter()
+            .find(|e| e.name() == self.main_entity)
+            .cloned()
+            .expect(&format!("Entity {} not found", self.main_entity))
     }
 
     pub fn subtitle(&self) -> Option<&String> {

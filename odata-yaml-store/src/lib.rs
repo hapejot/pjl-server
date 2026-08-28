@@ -14,29 +14,19 @@ pub use yaml_store::YamlStore;
 #[cfg(any(test, feature = "debug-tools"))]
 pub use datastore::DataStoreDebugExt;
 
-/// Bequeme Wrapper-Methoden, damit Aufrufer weiterhin `store.draft_edit(...)`
-/// statt `store.draft_action(..., DraftAction::Edit)` schreiben koennen.
-/// Das Kern-Trait `DataStore` selbst bleibt schlank (nur `draft_action`).
 pub trait DraftActionExt: DataStore {
-    fn draft_edit(&self, set_name: &str, key: &EntityKey) -> Result<serde_json::Value, StoreError> {
-        self.draft_action(set_name, key, DraftAction::Edit)
-    }
+    fn draft_edit(&self, set_name: &str, key: &EntityKey) -> Result<serde_json::Value, StoreError>;
     fn draft_activate(
         &self,
         set_name: &str,
         key: &EntityKey,
-    ) -> Result<serde_json::Value, StoreError> {
-        self.draft_action(set_name, key, DraftAction::Activate)
-    }
+    ) -> Result<serde_json::Value, StoreError>;
     fn draft_prepare(
         &self,
         set_name: &str,
         key: &EntityKey,
-    ) -> Result<serde_json::Value, StoreError> {
-        self.draft_action(set_name, key, DraftAction::Prepare)
-    }
+    ) -> Result<serde_json::Value, StoreError>;
 }
-impl<T: DataStore + ?Sized> DraftActionExt for T {}
 
 #[cfg(test)]
 mod tests {
@@ -129,10 +119,9 @@ mod tests {
         };
 
         let result = store.get_collection("Orders", &query).unwrap();
-        let arr = result.as_array().unwrap();
-        assert_eq!(arr.len(), 2);
-        assert_eq!(arr[0]["ID"], "2"); // Amount 200 zuerst (desc)
-        assert_eq!(arr[1]["ID"], "3");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0]["ID"], "2"); // Amount 200 zuerst (desc)
+        assert_eq!(result[1]["ID"], "3");
     }
 
     #[test]
@@ -163,7 +152,7 @@ mod tests {
         };
 
         let result = store.get_collection("Orders", &query).unwrap();
-        let order = &result.as_array().unwrap()[0];
+        let order = &result.first().unwrap();
         let items = order["Items"].as_array().unwrap();
         assert_eq!(items.len(), 2);
     }

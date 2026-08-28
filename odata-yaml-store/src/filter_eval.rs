@@ -2,7 +2,8 @@ use odata::query::{FilterExpr, FilterOperand};
 use serde_json::Value;
 use std::cmp::Ordering;
 use tracing::warn;
-use crate::yaml_store::DataRecord;
+
+use crate::datastore::DataRecord;
 
 pub fn resolve_property(record: &DataRecord, path: &str) -> Value {
     let mut parts = path.split('/');
@@ -98,7 +99,10 @@ pub fn evaluate_filter(_record: &DataRecord, _expr: &FilterExpr) -> bool {
             left: _left,
             right: _right,
         } => {
-            warn!("Operation {:?} {:?} {:?} not implemented", _left, _op, _right);
+            warn!(
+                "Operation {:?} {:?} {:?} not implemented",
+                _left, _op, _right
+            );
             true
         }
     }

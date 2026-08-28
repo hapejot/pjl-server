@@ -11,11 +11,11 @@ use odata::{
     path::parse_odata_path,
     query::{FilterExpr, ODataQuery},
 };
-use odata_yaml_store::{DataStore, DraftAction, EntityKey};
+use odata_yaml_store::{DataStore, DraftActionExt, EntityKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use spec::{EntitySpec, data_dictionary::DataDictonary};
-use tracing::{debug, error, info, trace, warn};
+use spec::{EntitySpec, FieldSpec, data_dictionary::DataDictonary};
+use tracing::*;
 
 use crate::AppState;
 mod sample;
@@ -46,6 +46,36 @@ impl EntityType {
         properties.push(Property::new("HasDraftEntity", "Edm.Boolean").nullable(false));
 
         for f in x.fields() {
+            match f {
+                FieldSpec::Lookup {
+                    name,
+                    entity,
+                    collection,
+                } => todo!(),
+                FieldSpec::Atom {
+                    name,
+                    label,
+                    edm_type,
+                    package,
+                    max_length,
+                    precision,
+                    scale,
+                    computed,
+                    immutable,
+                    value_list,
+                    presentation,
+                } => todo!(),
+                FieldSpec::Measure {
+                    name,
+                    label,
+                    package,
+                    precision,
+                    scale,
+                    unit_field,
+                    kind,
+                    presentation,
+                } => todo!(),
+            }
             properties.push(Property::new(f.name(), f.edm_type()));
         }
         let mut navigation_properties = Vec::new();
@@ -61,7 +91,7 @@ impl EntityType {
         ));
         for r in ddic.relationships().filter(|r| r.many() == x.name()) {
             navigation_properties.push(NavigationProperty::new(
-                r.name(),
+                r.many_property(),
                 format!("Service.{}", r.one()),
                 Some(false),
             ));
@@ -322,8 +352,10 @@ impl Annotations {
         );
 
         let mut main_data = Collection::new();
-        main_data = main_data
-            .add_record(Record::new("UI.DataField").add(PropertyValue::new("Value").path("ID")));
+        // main_data = main_data
+        //     .add_record(Record::new("UI.DataField")
+        //     .add(PropertyValue::new("Value")
+        //     .path("ID")));
         for f in x.fields() {
             main_data = main_data.add_record(
                 Record::new("UI.DataField").add(PropertyValue::new("Value").path(f.name())),
@@ -346,8 +378,35 @@ impl Annotations {
 
     fn from_field(name: &str, f: &spec::FieldSpec) -> Annotations {
         let target = format!("Service.{}/{}", name, f.name());
-        let annotations = Vec::new();
-
+        let mut a = Annotation::new("Common.Label");
+        a.string = Some(f.label().into());
+        let mut annotations = vec![a];
+        if let FieldSpec::Lookup {
+            name,
+            entity,
+            collection,
+        } = f
+        {
+            annotations.push(Annotation::new("Common.Text").path(format!("{}/name", f.name())));
+            let p1 = PropertyValue::new("CollectionPath").string(format!("{entity}Set"));
+            let p2 = PropertyValue::new("SearchSupported").boolean(false);
+            let p3_1 = PropertyValue::new("LocalDataProperty").property_path(f.name());
+            let p3_2 = PropertyValue::new("ValueListProperty").string("ID");
+            let p3_3 = PropertyValue::new("ValueListProperty").string("name");
+            let p3 = PropertyValue::new("Parameters").collection(
+                Collection::new()
+                    .add_record(
+                        Record::new("Common.ValueListParameterOut")
+                            .add(p3_1)
+                            .add(p3_2),
+                    )
+                    .add_record(Record::new("Common.ValueListParameterDisplayOnly").add(p3_3)),
+            );
+            annotations.push(
+                Annotation::new("Common.ValueList")
+                    .record(Record::new("Common.ValueListType").add(p1).add(p2).add(p3)),
+            );
+        }
         Annotations {
             target,
             annotations,
@@ -513,6 +572,10 @@ impl PropertyValue {
         self.string = Some(value.into());
         self
     }
+    pub fn boolean(mut self, value: impl Into<bool>) -> Self {
+        self.bool_ = Some(value.into());
+        self
+    }
     pub fn record(mut self, record: Record) -> Self {
         self.record = Some(record);
         self
@@ -520,6 +583,11 @@ impl PropertyValue {
 
     pub fn path(mut self, path: impl Into<String>) -> Self {
         self.path = Some(path.into());
+        self
+    }
+
+    pub fn property_path(mut self, path: impl Into<String>) -> Self {
+        self.property_path = Some(path.into());
         self
     }
 
@@ -545,13 +613,6 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RequestKind {
-    Get,
-    Post,
-    Patch,
-}
-
 fn build_query(params: &HashMap<String, String>) -> ODataQuery {
     ODataQuery {
         filter: params.get("$filter").map(|x| FilterExpr::parse(x).unwrap()),
@@ -560,7 +621,8 @@ fn build_query(params: &HashMap<String, String>) -> ODataQuery {
         skip: params.get("$skip").map(|x| x.parse().unwrap()),
         select: params
             .get("$select")
-            .map(|x| x.split(",").map(|y| y.to_string()).collect()),
+            .and_then(|x| Some(x.split(",").map(|y| y.to_string()).collect::<Vec<_>>()))
+            .unwrap_or_else(|| vec![]),
         expand: vec![],
         count: params.get("$count").is_some(),
         search: params.get("$search").cloned(),
@@ -580,14 +642,13 @@ fn to_json_response(body: Value) -> ([(HeaderName, String); 2], String) {
     )
 }
 
-fn entity_spec_for_segment<'a>(
-    state: &'a AppState,
-    s: &'a odata::path::PathSegment,
-) -> &'a EntitySpec {
+fn entity_spec_for_segment<'a>(state: &'a AppState, s: &'a odata::path::PathSegment) -> EntitySpec {
     let e = state
         .ddic
         .entities()
+        .iter()
         .find(|x| x.setname() == s.name)
+        .cloned()
         .unwrap();
     e
 }
@@ -605,16 +666,15 @@ async fn get_handler(
     let mut context = vec!["/Service/$metadata#".to_string()];
     if let Some(s) = path_iter.next() {
         if s.keys.is_empty() {
-            j = get_collection(&state, &p, entity_spec, s);
+            j = get_collection(&state, &p, &entity_spec, s);
             context.push(entity_spec.setname().to_string());
         } else {
-            j = get_single(&state, entity_spec, s);
-            for s in p.select.iter().flatten() {
+            j = get_single(&state, &entity_spec, s);
+            for s in p.select.iter() {
                 if j[s].is_null() {
                     j[s] = json!(format!("[{s}]"));
                 }
             }
-            j["DraftMessages"] = json!([]);
             context.push(format!("{}/$entity", entity_spec.setname()));
         }
     }
@@ -638,9 +698,9 @@ fn get_single(
     s: &odata::path::PathSegment,
 ) -> Value {
     let key: EntityKey = s.into();
-    info!("get single: {s:?}, key: {key:?}");
-    let mut j = state.store.read_entity(&s.name, &key).unwrap();
-    j
+    let j = state.store.read_entity(&s.name, &key).unwrap();
+    info!("get single: {j:#?}");
+    json!(j)
 }
 
 fn get_collection(
@@ -655,9 +715,11 @@ fn get_collection(
       "@odata.context": format!("/Service/$metadata#{}", entity_spec.setname()),
       "value": r
     });
+    let count = state.store.count(&s.name, p);
     if p.count {
-        resp["@odata.count"] = json!(state.store.count(&s.name, p));
+        resp["@odata.count"] = json!(count);
     }
+    info!("returning {count} rows");
     resp
 }
 
@@ -669,31 +731,39 @@ async fn post_handler(
 ) -> impl IntoResponse {
     let _p = build_query(&params);
     let path_struct = parse_odata_path(&path).unwrap();
-    if path_struct.segments.len() >= 2 {
-        warn!("Path has more than one segment");
-    }
-    let _body = payload.map(|Json(v)| v).unwrap_or_else(|| json!({}));
-    error!("POST request with more than one segment is not properly implemented yet");
-    let entity_segment = &path_struct.segments[path_struct.segments.len() - 2];
-    let action_segment = &path_struct.segments[path_struct.segments.len() - 1];
-    debug!("action: {}", action_segment.name);
-    if !entity_segment.keys.is_empty() && action_segment.keys.is_empty() {
-        let action_name = action_segment.name.rsplit('.').next().unwrap_or_default();
-        let action = match action_name {
-            "draftEdit" => Some(DraftAction::Edit),
-            "draftActivate" => Some(DraftAction::Activate),
-            "draftPrepare" => Some(DraftAction::Prepare),
-            _ => None,
-        };
-        if let Some(action) = action {
-            let key: EntityKey = entity_segment.into();
+
+    match path_struct.segments.as_slice() {
+        [_entity] => {
             let r = state
                 .store
-                .draft_action(&entity_segment.name, &key, action)
+                .create_entity(_entity.name.as_str(), payload.as_ref().unwrap())
                 .unwrap();
-            return to_json_response(r);
+            return to_json_response(json!(r));
         }
+        [entity, action] => {
+            if !entity.keys.is_empty() && action.keys.is_empty() {
+                let action_name = action.name.rsplit('.').next().unwrap_or_default();
+                let key: EntityKey = entity.into();
+                match action_name {
+                    "draftEdit" => {
+                        let r = state.store.draft_edit(&entity.name, &key).unwrap();
+                        return to_json_response(r);
+                    }
+                    "draftActivate" => {
+                        let r = state.store.draft_activate(&entity.name, &key).unwrap();
+                        return to_json_response(r);
+                    }
+                    "draftPrepare" => {
+                        let r = state.store.draft_prepare(&entity.name, &key).unwrap();
+                        return to_json_response(r);
+                    }
+                    _ => {}
+                };
+            }
+        }
+        _ => todo!(),
     }
+
     to_json_response(
         json!({ "error": {"code": "NotImplemented", "message": "POST not yet implemented"}}),
     )
@@ -708,17 +778,27 @@ async fn patch_handler(
     let _p = build_query(&params);
     let _path_struct = parse_odata_path(&path).unwrap();
     let _body = payload.map(|Json(v)| v).unwrap_or_else(|| json!({}));
-    error!("PATCH no yet implemented.");
+    let key = _path_struct.segments.first().unwrap();
+    let ekey = EntityKey::new(key.id().unwrap(), key.is_active_entity());
+    _state.store.patch_entity(&key.name, &ekey, &_body).unwrap();
     (
-        [
-            (
-                header::CONTENT_TYPE,
-                "application/json;odata.metadata=minimal;charset=utf-8".to_string(),
-            ),
-            (HeaderName::from_static("odata-version"), "4.0".to_string()),
-        ],
-        json!({"error": {"code": "NotImplemented", "message": "PATCH not yet implemented"}})
-            .to_string(),
+        [content_type_json(), odata_version()],
+        json!([]).to_string(),
+    )
+}
+#[allow(dead_code)]
+fn not_implemented(msg: impl Into<String>) -> Value {
+    json!({"error": {"code": "NotImplemented", "message": format!("{} not yet implemented", msg.into())}})
+}
+
+fn odata_version() -> (HeaderName, String) {
+    (HeaderName::from_static("odata-version"), "4.0".to_string())
+}
+
+fn content_type_json() -> (HeaderName, String) {
+    (
+        header::CONTENT_TYPE,
+        "application/json;odata.metadata=minimal;charset=utf-8".to_string(),
     )
 }
 
@@ -727,6 +807,7 @@ async fn index(State(state): State<AppState>) -> Json<Value> {
     let mut value: Vec<Value> = state
         .ddic
         .entities()
+        .iter()
         .map(|e| {
             let set = e.setname();
             json!({"name": set, "url": set})
@@ -751,16 +832,18 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
     let _entities: Vec<EntityType> = state
         .ddic
         .entities()
+        .iter()
         .map(|x| EntityType::from_entity(&state.ddic, x))
         .collect();
     let _entity_sets: Vec<EntitySet> = state
         .ddic
         .apps()
-        .map(|x| EntitySet::from_entity(&state.ddic, x.main_entity(&state.ddic)))
+        .map(|x| EntitySet::from_entity(&state.ddic, &x.main_entity(&state.ddic)))
         .collect();
     let _annotations: Vec<Annotations> = state
         .ddic
         .entities()
+        .iter()
         .map(|x| Annotations::from_entity(x))
         .flatten()
         .collect();

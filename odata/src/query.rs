@@ -15,7 +15,7 @@ pub struct ODataQuery {
     #[serde(rename = "$skip")]
     pub skip: Option<u32>,
     #[serde(rename = "$select")]
-    pub select: Option<Vec<String>>,
+    pub select: Vec<String>,
     #[serde(rename = "$expand")]
     pub expand: Vec<ExpandItem>,
     #[serde(rename = "$count")]

@@ -8,11 +8,35 @@ use axum::{
     routing::get,
 };
 use serde_json::{Value, json};
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::AppState;
 // use serde::{Deserialize, Serialize};
+use axum::{http::StatusCode, response::Response};
 
+pub struct AppError(anyhow::Error);
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        tracing::error!("Interner Fehler: {:?}", self.0);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Etwas ist schiefgelaufen: {}", self.0),
+        )
+            .into_response()
+    }
+}
+
+// Ermöglicht ?-Operator für JEDEN Fehlertyp, der Into<anyhow::Error> ist
+// (also praktisch jeden std::error::Error)
+impl<E> From<E> for AppError
+where
+    E: Into<anyhow::Error>,
+{
+    fn from(err: E) -> Self {
+        AppError(err.into())
+    }
+}
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/init.js", get(init))
@@ -20,6 +44,7 @@ pub fn router() -> Router<AppState> {
 }
 
 async fn site(State(_state): State<AppState>) -> Json<Value> {
+    info!("site");
     let mut apps: HashMap<String, Value> = HashMap::new();
     for app in _state.ddic.apps() {
         let app_json = json!({
@@ -156,6 +181,7 @@ async fn site(State(_state): State<AppState>) -> Json<Value> {
     }))
 }
 async fn init() -> impl IntoResponse {
+    info!("static init.js");
     (
         [(
             header::CONTENT_TYPE,
@@ -169,14 +195,15 @@ pub async fn app_component_handler(
     Path(app): Path<String>,
     State(_state): State<AppState>,
 ) -> impl IntoResponse {
-    debug!("{}", app);
+    debug!("Component.js for {}", app);
 
     let a = _state
         .ddic
         .apps()
         .find(|x| x.main_entity(&_state.ddic).name() == app)
         .unwrap();
-    debug!("{:?}", a);
+
+    dbg!(a);
 
     (
         [(
@@ -197,15 +224,15 @@ sap.ui.define(["sap/fe/core/AppComponent"], function (AppComponent) {{
 pub async fn app_manifest_handler(
     Path(app): Path<String>,
     State(_state): State<AppState>,
-) -> Json<Value> {
-    debug!("{}", app);
+) -> Result<Json<Value>, AppError> {
+    debug!("manifest.json for {}", app);
 
     let a = _state
         .ddic
         .apps()
         .find(|x| x.main_entity(&_state.ddic).name() == app)
         .unwrap();
-    debug!("{:?}", a);
+    dbg!(a);
     let main_entity = a.main_entity(&_state.ddic);
     let main_name = main_entity.name().to_string();
     let main_set = main_entity.setname();
@@ -396,7 +423,7 @@ pub async fn app_manifest_handler(
       }
     });
 
-    Json(r)
+    Ok(Json(r))
 }
 
 pub async fn app_handler(
@@ -421,6 +448,7 @@ pub async fn app_handler(
 }
 
 pub async fn index() -> Html<String> {
+    info!("fetch static index");
     let out_format = r##"
         <!doctype html>
 <html>

@@ -81,45 +81,61 @@ pub struct Relationship {
     /// Unique name for this relationship (used as reference target by ConditionalRef).
     pub name: String,
     /// The "1" side — gets a Collection NavigationProperty + TableFacet
-    pub one: String,
+    pub one: Option<String>,
+    /// FK field name on the "many" entity. Default: `"{many.nav_name}ID"`.
+    pub one_field: Option<String>,
     /// The "N" side — gets a FK property + 1:1 NavigationProperty + ValueList + SemanticObject
-    pub many: String,
+    pub many: Option<String>,
+    pub many_property: Option<String>,
     /// `true` = composition (parent controls child lifecycle, child gets DraftNode).
     /// `false` = association (independent entities, just linked).
     pub owned: bool,
-    /// FK field name on the "many" entity. Default: `"{many.nav_name}ID"`.
-    pub one_field: String,
     /// Logical package grouping (e.g. "itil", "asset_management").
     pub package: String,
 }
 
 impl Relationship {
-    pub fn new(
-        name: impl Into<String>,
-        one: impl Into<String>,
-        many: impl Into<String>,
-        one_field: impl Into<String>,
-        package: impl Into<String>,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, package: impl Into<String>) -> Self {
         Self {
             name: name.into(),
-            one: one.into(),
-            many: many.into(),
-            owned: false,
-            one_field: one_field.into(),
             package: package.into(),
+            one: None,
+            one_field: None,
+            many: None,
+            many_property: None,
+            owned: false,
         }
     }
-    
+
+    pub fn with_one(mut self, entity: impl Into<String>, property: impl Into<String>) -> Self {
+        self.one = Some(entity.into());
+        self.one_field = Some(property.into());
+        self
+    }
+
+    pub fn with_many(mut self, entity: impl Into<String>, property: impl Into<String>) -> Self {
+        self.many = Some(entity.into());
+        self.many_property = Some(property.into());
+        self
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
-    
+
     pub fn one(&self) -> &str {
-        &self.one
+        self.one.as_ref().unwrap()
     }
-    
+
     pub fn many(&self) -> &str {
-        &self.many
+        &self.many.as_ref().unwrap()
+    }
+
+    pub fn one_property(&self) -> &str {
+        &self.one_field.as_ref().unwrap()
+    }
+
+    pub fn many_property(&self) -> &str {
+        &self.many_property.as_ref().unwrap()
     }
 }

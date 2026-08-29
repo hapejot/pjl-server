@@ -7,7 +7,7 @@ use serde_json::Value;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ODataQuery {
     #[serde(rename = "$filter")]
-    pub filter: Option<FilterExpr>,
+    pub filter: Option<Expr>,
     #[serde(rename = "$orderby")]
     pub orderby: Vec<OrderByItem>,
     #[serde(rename = "$top")]
@@ -22,6 +22,35 @@ pub struct ODataQuery {
     pub count: bool,
     #[serde(rename = "$search")]
     pub search: Option<String>,
+}
+
+impl ODataQuery {
+    pub fn new() -> Self {
+        Self {
+            ..Default::default()
+        }
+    }
+
+    pub fn order_by(mut self, arg: &str, desc: SortDirection) -> Self {
+        self.orderby.push(OrderByItem {
+            property: arg.into(),
+            direction: desc,
+        });
+        self
+    }
+
+    pub fn filter(mut self, expr: Expr) -> ODataQuery {
+        self.filter = Some(expr);
+        self
+    }
+
+    pub fn expand(mut self, arg: &str) -> ODataQuery {
+        self.expand.push(ExpandItem {
+            navigation_property: arg.into(),
+            nested_query: Default::default(),
+        });
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -236,7 +265,7 @@ fn classify_ident(s: &str) -> Token {
     }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum FilterExpr {
+pub enum Expr {
     Identifier(String),
     Path(Vec<String>), // z.B. Category/Name
     String(String),
@@ -246,17 +275,41 @@ pub enum FilterExpr {
     Null,
     FunctionCall {
         name: String,
-        args: Vec<FilterExpr>,
+        args: Vec<Expr>,
     },
-    UnaryNot(Box<FilterExpr>),
+    UnaryNot(Box<Expr>),
     BinaryOp {
         op: BinOp,
-        left: Box<FilterExpr>,
-        right: Box<FilterExpr>,
+        left: Box<Expr>,
+        right: Box<Expr>,
     },
 }
 
-impl FilterExpr {
+impl Expr {
+    pub fn equals_guid(guid: impl Into<String>, identifier: impl Into<String>) -> Self {
+        Expr::BinaryOp {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Guid(guid.into())),
+            right: Box::new(Expr::Identifier(identifier.into())),
+        }
+    }
+
+    pub fn equals_value(guid: &Value, identifier: impl Into<String>) -> Self {
+        match guid {
+            Value::String(s) => Expr::BinaryOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::String(s.clone())),
+                right: Box::new(Expr::Identifier(identifier.into())),
+            },
+
+            Value::Null => todo!(),
+            Value::Bool(_) => todo!(),
+            Value::Number(_) => todo!(),
+            Value::Array(_) => todo!(),
+            Value::Object(_) => todo!(),
+        }
+    }
+
     pub fn parse(input: &str) -> Result<Self, String> {
         let tokens = tokenize(input).map_err(|e| {
             format!(
@@ -297,7 +350,7 @@ impl Parser {
         Self { tokens, pos: 0 }
     }
 
-    pub fn parse(mut self) -> Result<FilterExpr, ParseError> {
+    pub fn parse(mut self) -> Result<Expr, ParseError> {
         let expr = self.parse_or()?;
         if self.pos != self.tokens.len() {
             return Err(self.error(&format!(
@@ -309,12 +362,12 @@ impl Parser {
     }
 
     // or := and ("or" and)*
-    fn parse_or(&mut self) -> Result<FilterExpr, ParseError> {
+    fn parse_or(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_and()?;
         while self.check(&Token::Or) {
             self.advance();
             let right = self.parse_and()?;
-            left = FilterExpr::BinaryOp {
+            left = Expr::BinaryOp {
                 op: BinOp::Or,
                 left: Box::new(left),
                 right: Box::new(right),
@@ -324,12 +377,12 @@ impl Parser {
     }
 
     // and := not ("and" not)*
-    fn parse_and(&mut self) -> Result<FilterExpr, ParseError> {
+    fn parse_and(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_not()?;
         while self.check(&Token::And) {
             self.advance();
             let right = self.parse_not()?;
-            left = FilterExpr::BinaryOp {
+            left = Expr::BinaryOp {
                 op: BinOp::And,
                 left: Box::new(left),
                 right: Box::new(right),
@@ -339,17 +392,17 @@ impl Parser {
     }
 
     // not := "not" not | comparison
-    fn parse_not(&mut self) -> Result<FilterExpr, ParseError> {
+    fn parse_not(&mut self) -> Result<Expr, ParseError> {
         if self.check(&Token::Not) {
             self.advance();
             let inner = self.parse_not()?;
-            return Ok(FilterExpr::UnaryNot(Box::new(inner)));
+            return Ok(Expr::UnaryNot(Box::new(inner)));
         }
         self.parse_comparison()
     }
 
     // comparison := primary (("eq"|"ne"|"gt"|"ge"|"lt"|"le") primary)?
-    fn parse_comparison(&mut self) -> Result<FilterExpr, ParseError> {
+    fn parse_comparison(&mut self) -> Result<Expr, ParseError> {
         let left = self.parse_primary()?;
 
         let op = match self.peek() {
@@ -369,7 +422,7 @@ impl Parser {
         self.advance();
         let right = self.parse_primary()?;
 
-        Ok(FilterExpr::BinaryOp {
+        Ok(Expr::BinaryOp {
             op,
             left: Box::new(left),
             right: Box::new(right),
@@ -377,7 +430,7 @@ impl Parser {
     }
 
     // primary := "(" or ")" | literal | path | funcCall
-    fn parse_primary(&mut self) -> Result<FilterExpr, ParseError> {
+    fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         match self.peek().cloned() {
             Some(Token::LParen) => {
                 self.advance();
@@ -387,23 +440,23 @@ impl Parser {
             }
             Some(Token::String(s)) => {
                 self.advance();
-                Ok(FilterExpr::String(s))
+                Ok(Expr::String(s))
             }
             Some(Token::Number(n)) => {
                 self.advance();
-                Ok(FilterExpr::Number(n))
+                Ok(Expr::Number(n))
             }
             Some(Token::Bool(b)) => {
                 self.advance();
-                Ok(FilterExpr::Bool(b))
+                Ok(Expr::Bool(b))
             }
             Some(Token::Guid(g)) => {
                 self.advance();
-                Ok(FilterExpr::Guid(g))
+                Ok(Expr::Guid(g))
             }
             Some(Token::Null) => {
                 self.advance();
-                Ok(FilterExpr::Null)
+                Ok(Expr::Null)
             }
             Some(Token::Identifier(name)) => {
                 self.advance();
@@ -413,7 +466,7 @@ impl Parser {
                     self.advance();
                     let args = self.parse_args()?;
                     self.expect(&Token::RParen)?;
-                    return Ok(FilterExpr::FunctionCall { name, args });
+                    return Ok(Expr::FunctionCall { name, args });
                 }
 
                 // Pfad-Navigation: identifier ("/" identifier)*
@@ -434,9 +487,9 @@ impl Parser {
                 }
 
                 if segments.len() == 1 {
-                    Ok(FilterExpr::Identifier(segments.into_iter().next().unwrap()))
+                    Ok(Expr::Identifier(segments.into_iter().next().unwrap()))
                 } else {
-                    Ok(FilterExpr::Path(segments))
+                    Ok(Expr::Path(segments))
                 }
             }
             other => Err(self.error(&format!("Unerwartetes Token: {other:?}"))),
@@ -444,7 +497,7 @@ impl Parser {
     }
 
     // args := (or ("," or)*)?
-    fn parse_args(&mut self) -> Result<Vec<FilterExpr>, ParseError> {
+    fn parse_args(&mut self) -> Result<Vec<Expr>, ParseError> {
         let mut args = Vec::new();
 
         if self.check(&Token::RParen) {
@@ -496,6 +549,6 @@ impl Parser {
     }
 }
 
-pub fn parse_filter(input: &str) -> Result<FilterExpr, String> {
-    FilterExpr::parse(input)
+pub fn parse_filter(input: &str) -> Result<Expr, String> {
+    Expr::parse(input)
 }

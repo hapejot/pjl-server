@@ -2,6 +2,17 @@ use std::collections::HashMap;
 
 use crate::{EntitySpec, FieldSpec, Relationship, app::App, package::Package};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NavigationInfo {
+    pub name: String,
+    pub source_entity: String,
+    pub source_set: String,
+    pub target_entity: String,
+    pub target_set: String,
+    pub collection: bool,
+    pub foreign_key_field: Option<String>,
+}
+
 pub struct DataDictonary {
     packages: Vec<Package>,
     entities: Vec<EntitySpec>,
@@ -74,17 +85,17 @@ impl DataDictonary {
             .field(FieldSpec::atom("description", "Description", "Edm.String"));
 
         let rel = Relationship::new("entity_fields", core.name())
-            .with_one("Field", "entity")
-            .with_many("Entity", "_Fields");
+            .with_one("Entity", "_Fields")
+            .with_many("Field", "entity");
         let r2 = Relationship::new("entity_package", core.name())
             .with_many("Entity", "package")
             .with_one("Package", "_Entitites");
         let r3 = Relationship::new("many_entity", core.name())
-            .with_one("Relation", "many")
-            .with_many("Entity", "_Many");
+            .with_one("Entity", "_Many")
+            .with_many("Relation", "many");
         let r4 = Relationship::new("one_entity", core.name())
-            .with_one("Relation", "one")
-            .with_many("Entity", "_One");
+            .with_one("Entity", "_One")
+            .with_many("Relation", "one");
         let r5 = Relationship::new("field_package", core.name())
             .with_many("Field", "package")
             .with_one("Package", "_Fields");
@@ -154,7 +165,7 @@ impl DataDictonary {
             {
                 e.fields.push(FieldSpec::Lookup {
                     name: one_field.clone().unwrap(),
-                    entity: one.clone().unwrap(),
+                    entity: many.clone().unwrap(),
                     collection: true,
                 });
             }
@@ -165,7 +176,7 @@ impl DataDictonary {
             {
                 e.fields.push(FieldSpec::Lookup {
                     name: many_property.clone().unwrap(),
-                    entity: many.clone().unwrap(),
+                    entity: one.clone().unwrap(),
                     collection: false,
                 });
             }
@@ -175,6 +186,100 @@ impl DataDictonary {
 
     pub fn relationships(&self) -> impl Iterator<Item = &Relationship> {
         self.relationships.iter()
+    }
+
+    pub fn navigations_for_entity(&self, entity: &EntitySpec) -> Vec<NavigationInfo> {
+        let entities = if self.active.is_empty() {
+            self.entities()
+        } else {
+            self.active.values().cloned().collect()
+        };
+
+        entity
+            .fields()
+            .filter_map(|field| match field {
+                FieldSpec::Lookup {
+                    name,
+                    entity: target_entity,
+                    collection,
+                } => {
+                    let target = entities.iter().find(|candidate| candidate.name() == target_entity)?;
+                    Some(NavigationInfo {
+                        name: name.clone(),
+                        source_entity: entity.name().to_string(),
+                        source_set: entity.setname(),
+                        target_entity: target_entity.clone(),
+                        target_set: target.setname(),
+                        collection: *collection,
+                        foreign_key_field: self.foreign_key_field_for_navigation(
+                            entity,
+                            target,
+                            name,
+                            *collection,
+                            &entities,
+                        ),
+                    })
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn navigation_for_entity(
+        &self,
+        entity: &EntitySpec,
+        navigation_property: &str,
+    ) -> Option<NavigationInfo> {
+        self.navigations_for_entity(entity)
+            .into_iter()
+            .find(|navigation| navigation.name == navigation_property)
+    }
+
+    fn foreign_key_field_for_navigation(
+        &self,
+        source: &EntitySpec,
+        target: &EntitySpec,
+        navigation_name: &str,
+        collection: bool,
+        entities: &[EntitySpec],
+    ) -> Option<String> {
+        if !collection {
+            return Some(navigation_name.to_string());
+        }
+
+        self.relationships()
+            .find(|relationship| {
+                relationship.one() == source.name()
+                    && relationship.many() == target.name()
+                    && relationship.one_property() == navigation_name
+            })
+            .map(|relationship| relationship.many_property().to_string())
+            .or_else(|| {
+                entities
+                    .iter()
+                    .find(|candidate| candidate.name() == target.name())?
+                    .fields()
+                    .find_map(|field| match field {
+                        FieldSpec::Lookup {
+                            name,
+                            entity,
+                            collection,
+                        } if entity == source.name() && !collection => Some(name.clone()),
+                        _ => None,
+                    })
+            })
+    }
+
+    pub fn active_entity(&self, name: &str) -> Option<&EntitySpec> {
+        self.active.get(name)
+    }
+
+    pub fn active_entities(&self) -> impl Iterator<Item = &EntitySpec> {
+        self.active.values()
+    }
+
+    pub fn active_entity_by_setname(&self, set_name: &str) -> Option<&EntitySpec> {
+        self.active.values().find(|entity| entity.setname() == set_name)
     }
 
     pub fn activate(&mut self) {
@@ -201,7 +306,7 @@ impl DataDictonary {
                         active.fields.push(FieldSpec::Lookup {
                             name: many_property.clone(),
                             entity: one.clone(),
-                            collection: true,
+                            collection: false,
                         });
                     }
                 }
@@ -225,5 +330,90 @@ impl DataDictonary {
                 println!("    {}", prop.name());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn activate_exposes_lookup_fields_with_cardinality() {
+        let mut ddic = DataDictonary::new();
+        ddic.activate();
+
+        let package = ddic
+            .active_entity_by_setname("PackageSet")
+            .expect("active entity by set name");
+        let package_fields = package.fields().collect::<Vec<_>>();
+
+        assert!(package_fields.iter().any(|field| matches!(
+            field,
+            FieldSpec::Lookup { name, entity, collection }
+                if name == "_Entitites" && entity == "Entity" && *collection
+        )));
+
+        let entity = ddic
+            .active_entity_by_setname("EntitySet")
+            .expect("active entity by set name");
+        let entity_fields = entity.fields().collect::<Vec<_>>();
+
+        assert!(entity_fields.iter().any(|field| matches!(
+            field,
+            FieldSpec::Lookup { name, entity, collection }
+                if name == "_Fields" && entity == "Field" && *collection
+        )));
+        assert!(entity_fields.iter().any(|field| matches!(
+            field,
+            FieldSpec::Lookup { name, entity, collection }
+                if name == "_Many" && entity == "Relation" && *collection
+        )));
+        assert!(entity_fields.iter().any(|field| matches!(
+            field,
+            FieldSpec::Lookup { name, entity, collection }
+                if name == "package" && entity == "Package" && !*collection
+        )));
+
+        let field = ddic
+            .active_entity_by_setname("FieldSet")
+            .expect("active field by set name");
+        let field_fields = field.fields().collect::<Vec<_>>();
+
+        assert!(field_fields.iter().any(|field| matches!(
+            field,
+            FieldSpec::Lookup { name, entity, collection }
+                if name == "entity" && entity == "Entity" && !*collection
+        )));
+
+        let package_by_name = ddic
+            .active_entity("Package")
+            .expect("active entity by name");
+        assert_eq!(package_by_name.setname(), "PackageSet");
+    }
+
+    #[test]
+    fn derives_navigation_info_from_active_entities() {
+        let mut ddic = DataDictonary::new();
+        ddic.activate();
+
+        let entity = ddic.active_entity("Entity").expect("active entity");
+        let fields = ddic
+            .navigation_for_entity(entity, "_Fields")
+            .expect("fields navigation");
+
+        assert_eq!(fields.source_set, "EntitySet");
+        assert_eq!(fields.target_entity, "Field");
+        assert_eq!(fields.target_set, "FieldSet");
+        assert!(fields.collection);
+        assert_eq!(fields.foreign_key_field.as_deref(), Some("entity"));
+
+        let field = ddic.active_entity("Field").expect("active field");
+        let parent = ddic
+            .navigation_for_entity(field, "entity")
+            .expect("parent navigation");
+
+        assert_eq!(parent.target_set, "EntitySet");
+        assert!(!parent.collection);
+        assert_eq!(parent.foreign_key_field.as_deref(), Some("entity"));
     }
 }

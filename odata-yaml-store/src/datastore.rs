@@ -85,7 +85,7 @@ impl DataRecord {
         let is_active_entity = fields
             .remove("IsActiveEntity")
             .and_then(|x| x.as_bool())
-            .unwrap_or_else(|| true);
+            .unwrap_or_else(|| false);
         let has_active_entity = fields
             .remove("HasActiveEntity")
             .and_then(|x| x.as_bool())
@@ -110,11 +110,10 @@ impl DataRecord {
             draft_messages,
             fields: fields.clone(),
         };
-        dbg!(&r);
         Ok(r)
     }
 
-    pub(crate) fn get(&self, segment: &str) -> Option<Value> {
+    pub fn get(&self, segment: &str) -> Option<Value> {
         match segment {
             "ID" => Some(json!(self.id)),
             x => self.fields.get(x).cloned(),
@@ -177,7 +176,7 @@ impl DataRecord {
         }
     }
 
-    pub(crate) fn edit(&mut self) {
+    pub fn edit(&mut self) {
         self.has_active_entity = true;
         self.is_active_entity = false;
         self.has_draft_entity = false;
@@ -187,6 +186,15 @@ impl DataRecord {
             in_process_by_user: "user".into(),
             last_changed_by_user: "user".into(),
         });
+    }
+
+    pub fn core_json(&self) -> Value {
+        let mut m = Map::new();
+        m.insert("ID".into(), json!(self.id));
+        for (k, v) in self.fields.iter() {
+            m.insert(k.clone(), v.clone());
+        }
+        json!(m)
     }
 }
 
@@ -212,6 +220,35 @@ impl IndexMut<&str> for DataRecord {
             self.fields.insert(index.into(), Value::Null);
         }
         self.fields.get_mut(index).unwrap()
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Navigation {
+    pub single: bool,
+    pub from_entity: Option<String>,
+    pub from_field: Option<String>,
+    pub to_entity: Option<String>,
+    pub to_field: Option<String>,
+}
+impl Navigation {
+    pub fn new(single: bool) -> Self {
+        Self {
+            single,
+            ..Default::default()
+        }
+    }
+
+    pub fn from(&mut self, arg_1: &str, arg_2: &str) -> &mut Self {
+        self.from_entity = Some(arg_1.into());
+        self.from_field = Some(arg_2.into());
+        self
+    }
+
+    pub fn to(&mut self, arg_1: &str, arg_2: &str) -> &mut Self {
+        self.to_entity = Some(arg_1.into());
+        self.to_field = Some(arg_2.into());
+        self
     }
 }
 
@@ -274,6 +311,8 @@ pub trait DataStore: Send + Sync {
             let _ = self.create_entity(set_name, &record);
         }
     }
+
+    fn navigation(&mut self, single: bool) -> &mut Navigation;
 }
 
 /// Optionale Debug-Erweiterung. Bewusst getrennt vom Kern-Trait, damit

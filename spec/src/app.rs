@@ -47,6 +47,10 @@ impl App {
 
     // resolvers
     pub fn main_entity<'a>(&self, _ddic: &'a DataDictonary) -> EntitySpec {
+        if let Some(entity) = _ddic.active_entity(&self.main_entity) {
+            return entity.clone();
+        }
+
         _ddic
             .entities()
             .iter()

@@ -1,5 +1,5 @@
 use odata::query::ODataQuery;
-use odata_yaml_store::{DataStore, DraftActionExt, EntityKey, EntityMetadata, YamlStore};
+use odata_yaml_store::{DataStore, DraftDataStore, EntityKey, YamlStore};
 use serde_json::json;
 use tracing::{Level, info};
 use tracing_subscriber::{fmt, prelude::*};
@@ -13,8 +13,7 @@ fn main() -> anyhow::Result<()> {
         ))
         .init();
     let relationset = "RelationSet";
-    let metadata = EntityMetadata::new();
-    let store = YamlStore::open("/home/peter/pjl-server/data", metadata)?;
+    let store = YamlStore::open("/home/peter/pjl-server/data")?;
     let mut query = ODataQuery::default();
     query.select = vec!["id".into()];
     let result = store.get_collection(relationset, &query)?;

@@ -8,14 +8,15 @@ use axum::{
     routing::get,
 };
 use odata::{
-    path::parse_odata_path,
-    query::{FilterExpr, ODataQuery},
+    path::{PathSegment, parse_odata_path},
+    query::{ExpandItem, Expr, ODataQuery},
 };
-use odata_yaml_store::{DataStore, DraftActionExt, EntityKey};
+use odata_yaml_store::EntityKey;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use spec::{EntitySpec, FieldSpec, data_dictionary::DataDictonary};
+use spec::{AtomValueList, EntitySpec, FieldSpec, MeasureKind, data_dictionary::DataDictonary};
 use tracing::*;
+use uuid::Uuid;
 
 use crate::AppState;
 mod sample;
@@ -39,6 +40,7 @@ pub struct EntityType {
 impl EntityType {
     pub fn from_entity(ddic: &DataDictonary, x: &EntitySpec) -> Self {
         let mut properties = Vec::new();
+        let mut navigation_properties = Vec::new();
 
         properties.push(Property::new("ID", "Edm.Guid").nullable(false));
         properties.push(Property::new("IsActiveEntity", "Edm.Boolean").nullable(false));
@@ -47,38 +49,44 @@ impl EntityType {
 
         for f in x.fields() {
             match f {
-                FieldSpec::Lookup {
-                    name,
-                    entity,
-                    collection,
-                } => todo!(),
+                FieldSpec::Lookup { .. } => {}
                 FieldSpec::Atom {
                     name,
-                    label,
                     edm_type,
-                    package,
                     max_length,
                     precision,
                     scale,
-                    computed,
-                    immutable,
-                    value_list,
-                    presentation,
-                } => todo!(),
+                    ..
+                } => {
+                    let mut property = Property::new(name, edm_type);
+                    if let Some(max_length) = max_length {
+                        property = property.max_length(*max_length);
+                    }
+                    if let Some(precision) = precision {
+                        property = property.precision(*precision);
+                    }
+                    if let Some(scale) = scale {
+                        property = property.scale(*scale);
+                    }
+                    properties.push(property);
+                }
                 FieldSpec::Measure {
                     name,
-                    label,
-                    package,
                     precision,
                     scale,
-                    unit_field,
-                    kind,
-                    presentation,
-                } => todo!(),
+                    ..
+                } => {
+                    let mut property = Property::new(name, "Edm.Decimal");
+                    if let Some(precision) = precision {
+                        property = property.precision(*precision);
+                    }
+                    if let Some(scale) = scale {
+                        property = property.scale(*scale);
+                    }
+                    properties.push(property);
+                }
             }
-            properties.push(Property::new(f.name(), f.edm_type()));
         }
-        let mut navigation_properties = Vec::new();
         navigation_properties.push(NavigationProperty::new(
             "SiblingEntity",
             format!("Service.{}", x.name()),
@@ -89,20 +97,6 @@ impl EntityType {
             "Service.DraftAdministrativeData",
             Some(true),
         ));
-        for r in ddic.relationships().filter(|r| r.many() == x.name()) {
-            navigation_properties.push(NavigationProperty::new(
-                r.many_property(),
-                format!("Service.{}", r.one()),
-                Some(false),
-            ));
-        }
-        for r in ddic.relationships().filter(|r| r.one() == x.name()) {
-            navigation_properties.push(NavigationProperty::new(
-                r.name(),
-                format!("Collection(Service.{})", r.many()),
-                Some(true),
-            ));
-        }
         Self {
             name: x.name().into(),
             key: Key::new(&["ID", "IsActiveEntity"]),
@@ -170,6 +164,12 @@ pub struct Property {
     #[serde(rename = "@MaxLength", skip_serializing_if = "Option::is_none")]
     pub max_length: Option<u32>,
 
+    #[serde(rename = "@Precision", skip_serializing_if = "Option::is_none")]
+    pub precision: Option<u32>,
+
+    #[serde(rename = "@Scale", skip_serializing_if = "Option::is_none")]
+    pub scale: Option<u32>,
+
     #[serde(rename = "@DefaultValue", skip_serializing_if = "Option::is_none")]
     pub default_value: Option<String>,
 }
@@ -181,6 +181,8 @@ impl Property {
             type_: datatype.into(),
             nullable: None,
             max_length: None,
+            precision: None,
+            scale: None,
             default_value: None,
         }
     }
@@ -192,6 +194,16 @@ impl Property {
 
     pub fn max_length(mut self, length: u32) -> Self {
         self.max_length = Some(length);
+        self
+    }
+
+    pub fn precision(mut self, precision: u32) -> Self {
+        self.precision = Some(precision);
+        self
+    }
+
+    pub fn scale(mut self, scale: u32) -> Self {
+        self.scale = Some(scale);
         self
     }
 }
@@ -245,10 +257,10 @@ impl EntitySet {
             path: "DraftAdministrativeData".into(),
             target: "DraftAdministrativeData".into(),
         });
-        for r in ddic.relationships().filter(|r| r.many() == x.name()) {
+        for navigation in ddic.navigations_for_entity(x) {
             navigation_property_bindings.push(NavigationPropertyBinding {
-                path: r.one().into(),
-                target: format!("Service.{}", r.one()),
+                path: navigation.name,
+                target: navigation.target_set,
             });
         }
 
@@ -378,40 +390,155 @@ impl Annotations {
 
     fn from_field(name: &str, f: &spec::FieldSpec) -> Annotations {
         let target = format!("Service.{}/{}", name, f.name());
-        let mut a = Annotation::new("Common.Label");
-        a.string = Some(f.label().into());
-        let mut annotations = vec![a];
-        if let FieldSpec::Lookup {
-            name,
-            entity,
-            collection,
-        } = f
-        {
-            annotations.push(Annotation::new("Common.Text").path(format!("{}/name", f.name())));
-            let p1 = PropertyValue::new("CollectionPath").string(format!("{entity}Set"));
-            let p2 = PropertyValue::new("SearchSupported").boolean(false);
-            let p3_1 = PropertyValue::new("LocalDataProperty").property_path(f.name());
-            let p3_2 = PropertyValue::new("ValueListProperty").string("ID");
-            let p3_3 = PropertyValue::new("ValueListProperty").string("name");
-            let p3 = PropertyValue::new("Parameters").collection(
-                Collection::new()
-                    .add_record(
-                        Record::new("Common.ValueListParameterOut")
-                            .add(p3_1)
-                            .add(p3_2),
-                    )
-                    .add_record(Record::new("Common.ValueListParameterDisplayOnly").add(p3_3)),
-            );
-            annotations.push(
-                Annotation::new("Common.ValueList")
-                    .record(Record::new("Common.ValueListType").add(p1).add(p2).add(p3)),
-            );
+        let mut annotations = vec![Annotation::new("Common.Label").string(f.label())];
+
+        match f {
+            FieldSpec::Lookup {
+                name,
+                entity,
+                collection,
+            } => {
+                if !collection {
+                    annotations.push(Annotation::new("Common.Text").path(format!("name")));
+                    annotations.push(value_list_annotation(
+                        format!("{entity}Set"),
+                        false,
+                        Collection::new()
+                            .add_record(
+                                Record::new("Common.ValueListParameterOut")
+                                    .add(
+                                        PropertyValue::new("LocalDataProperty").property_path(name),
+                                    )
+                                    .add(PropertyValue::new("ValueListProperty").string("ID")),
+                            )
+                            .add_record(
+                                Record::new("Common.ValueListParameterDisplayOnly")
+                                    .add(PropertyValue::new("ValueListProperty").string("name")),
+                            ),
+                    ));
+                }
+            }
+            FieldSpec::Atom {
+                name,
+                computed,
+                immutable,
+                value_list,
+                ..
+            } => {
+                if *computed {
+                    annotations.push(Annotation::new("Org.OData.Core.V1.Computed").boolean(true));
+                }
+                if *immutable {
+                    annotations.push(Annotation::new("Org.OData.Core.V1.Immutable").boolean(true));
+                }
+                if let Some(value_list) = value_list {
+                    annotations.extend(annotations_for_atom_value_list(name, value_list));
+                }
+            }
+            FieldSpec::Measure {
+                unit_field, kind, ..
+            } => {
+                let term = match kind {
+                    MeasureKind::Currency => "Org.OData.Measures.V1.ISOCurrency",
+                    MeasureKind::Unit => "Org.OData.Measures.V1.Unit",
+                };
+                annotations.push(Annotation::new(term).path(unit_field));
+            }
         }
+
         Annotations {
             target,
             annotations,
         }
     }
+}
+
+fn annotations_for_atom_value_list(name: &str, value_list: &AtomValueList) -> Vec<Annotation> {
+    match value_list {
+        AtomValueList::FieldValueList {
+            list_id,
+            prefer_dialog,
+        } => value_list_annotations(
+            "FieldValueListItems",
+            *prefer_dialog,
+            Collection::new()
+                .add_record(
+                    Record::new("Common.ValueListParameterOut")
+                        .add(PropertyValue::new("LocalDataProperty").property_path(name))
+                        .add(PropertyValue::new("ValueListProperty").string("value")),
+                )
+                .add_record(
+                    Record::new("Common.ValueListParameterDisplayOnly")
+                        .add(PropertyValue::new("ValueListProperty").string("label")),
+                )
+                .add_record(
+                    Record::new("Common.ValueListParameterConstant")
+                        .add(PropertyValue::new("ValueListProperty").string("ListID"))
+                        .add(PropertyValue::new("Constant").constant(list_id)),
+                ),
+        ),
+        AtomValueList::EntityRef {
+            entity_set,
+            key_property,
+            display_property,
+            filters,
+            prefer_dialog,
+        } => {
+            let mut parameters = Collection::new().add_record(
+                Record::new("Common.ValueListParameterOut")
+                    .add(PropertyValue::new("LocalDataProperty").property_path(name))
+                    .add(PropertyValue::new("ValueListProperty").string(key_property)),
+            );
+            if let Some(display_property) = display_property {
+                parameters = parameters.add_record(
+                    Record::new("Common.ValueListParameterDisplayOnly")
+                        .add(PropertyValue::new("ValueListProperty").string(display_property)),
+                );
+            }
+            for filter in filters {
+                parameters = parameters.add_record(
+                    Record::new("Common.ValueListParameterIn")
+                        .add(
+                            PropertyValue::new("LocalDataProperty")
+                                .property_path(&filter.local_property),
+                        )
+                        .add(
+                            PropertyValue::new("ValueListProperty").string(&filter.target_property),
+                        ),
+                );
+            }
+            value_list_annotations(entity_set, *prefer_dialog, parameters)
+        }
+    }
+}
+
+fn value_list_annotations(
+    collection_path: impl Into<String>,
+    prefer_dialog: bool,
+    parameters: Collection,
+) -> Vec<Annotation> {
+    let mut annotations = vec![value_list_annotation(
+        collection_path,
+        prefer_dialog,
+        parameters,
+    )];
+    if !prefer_dialog {
+        annotations.push(Annotation::new("Common.ValueListWithFixedValues").boolean(true));
+    }
+    annotations
+}
+
+fn value_list_annotation(
+    collection_path: impl Into<String>,
+    prefer_dialog: bool,
+    parameters: Collection,
+) -> Annotation {
+    Annotation::new("Common.ValueList").record(
+        Record::new("Common.ValueListType")
+            .add(PropertyValue::new("CollectionPath").string(collection_path))
+            .add(PropertyValue::new("SearchSupported").boolean(prefer_dialog))
+            .add(PropertyValue::new("Parameters").collection(parameters)),
+    )
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -459,6 +586,17 @@ impl Annotation {
             nested_annotations: vec![],
         }
     }
+
+    pub fn string(mut self, value: impl Into<String>) -> Self {
+        self.string = Some(value.into());
+        self
+    }
+
+    pub fn boolean(mut self, value: bool) -> Self {
+        self.bool_ = Some(value);
+        self
+    }
+
     pub fn record(mut self, record: Record) -> Self {
         self.record = Some(record);
         self
@@ -541,6 +679,9 @@ pub struct PropertyValue {
     #[serde(rename = "@Bool", skip_serializing_if = "Option::is_none")]
     pub bool_: Option<bool>,
 
+    #[serde(rename = "@Constant", skip_serializing_if = "Option::is_none")]
+    pub constant: Option<String>,
+
     #[serde(rename = "@PropertyPath", skip_serializing_if = "Option::is_none")]
     pub property_path: Option<String>,
 
@@ -561,6 +702,7 @@ impl PropertyValue {
             path: None,
             string: None,
             bool_: None,
+            constant: None,
             property_path: None,
             annotation_path: None,
             collection: None,
@@ -576,6 +718,12 @@ impl PropertyValue {
         self.bool_ = Some(value.into());
         self
     }
+
+    pub fn constant(mut self, value: impl Into<String>) -> Self {
+        self.constant = Some(value.into());
+        self
+    }
+
     pub fn record(mut self, record: Record) -> Self {
         self.record = Some(record);
         self
@@ -615,7 +763,7 @@ pub fn router() -> Router<AppState> {
 
 fn build_query(params: &HashMap<String, String>) -> ODataQuery {
     ODataQuery {
-        filter: params.get("$filter").map(|x| FilterExpr::parse(x).unwrap()),
+        filter: params.get("$filter").map(|x| Expr::parse(x).unwrap()),
         orderby: vec![],
         top: params.get("$top").map(|x| x.parse().unwrap()),
         skip: params.get("$skip").map(|x| x.parse().unwrap()),
@@ -623,10 +771,108 @@ fn build_query(params: &HashMap<String, String>) -> ODataQuery {
             .get("$select")
             .and_then(|x| Some(x.split(",").map(|y| y.to_string()).collect::<Vec<_>>()))
             .unwrap_or_else(|| vec![]),
-        expand: vec![],
+        expand: params
+            .get("$expand")
+            .map(|x| parse_expand_items(x))
+            .unwrap_or_else(|| vec![]),
         count: params.get("$count").is_some(),
         search: params.get("$search").cloned(),
     }
+}
+
+fn parse_expand_items(raw: &str) -> Vec<ExpandItem> {
+    split_top_level(raw, ',')
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .map(|part| parse_expand_item(&part))
+        .collect()
+}
+
+fn parse_expand_item(raw: &str) -> ExpandItem {
+    let trimmed = raw.trim();
+    if let Some(paren) = find_top_level_options_start(trimmed) {
+        let navigation_property = trimmed[..paren].trim().to_string();
+        let options = trimmed[paren + 1..trimmed.len() - 1].trim();
+        ExpandItem {
+            navigation_property,
+            nested_query: Box::new(parse_nested_query(options)),
+        }
+    } else {
+        ExpandItem {
+            navigation_property: trimmed.to_string(),
+            nested_query: Box::new(ODataQuery::default()),
+        }
+    }
+}
+
+fn parse_nested_query(raw: &str) -> ODataQuery {
+    let mut query = ODataQuery::default();
+    for option in split_top_level(raw, ';') {
+        let Some((name, value)) = option.split_once('=') else {
+            continue;
+        };
+        match name.trim() {
+            "$filter" => query.filter = Some(Expr::parse(value.trim()).unwrap()),
+            "$top" => query.top = Some(value.trim().parse().unwrap()),
+            "$skip" => query.skip = Some(value.trim().parse().unwrap()),
+            "$select" => query.select = split_top_level(value.trim(), ','),
+            "$expand" => query.expand = parse_expand_items(value.trim()),
+            "$count" => query.count = value.trim().parse().unwrap_or(true),
+            "$search" => query.search = Some(value.trim().to_string()),
+            _ => {}
+        }
+    }
+    query
+}
+
+fn find_top_level_options_start(raw: &str) -> Option<usize> {
+    if !raw.ends_with(')') {
+        return None;
+    }
+
+    let mut in_string = false;
+    for (idx, ch) in raw.char_indices() {
+        match ch {
+            '\'' => in_string = !in_string,
+            '(' if !in_string => return Some(idx),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn split_top_level(raw: &str, separator: char) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0usize;
+    let mut in_string = false;
+
+    for ch in raw.chars() {
+        match ch {
+            '\'' => {
+                in_string = !in_string;
+                current.push(ch);
+            }
+            '(' if !in_string => {
+                depth += 1;
+                current.push(ch);
+            }
+            ')' if !in_string => {
+                depth = depth.saturating_sub(1);
+                current.push(ch);
+            }
+            c if c == separator && depth == 0 && !in_string => {
+                parts.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.trim().is_empty() {
+        parts.push(current.trim().to_string());
+    }
+    parts
 }
 
 fn to_json_response(body: Value) -> ([(HeaderName, String); 2], String) {
@@ -642,15 +888,20 @@ fn to_json_response(body: Value) -> ([(HeaderName, String); 2], String) {
     )
 }
 
-fn entity_spec_for_segment<'a>(state: &'a AppState, s: &'a odata::path::PathSegment) -> EntitySpec {
-    let e = state
+fn entity_spec_for_segment(state: &AppState, s: &PathSegment) -> EntitySpec {
+    state
         .ddic
-        .entities()
-        .iter()
-        .find(|x| x.setname() == s.name)
-        .cloned()
-        .unwrap();
-    e
+        .active_entity_by_setname(&s.name)
+        .unwrap_or_else(|| panic!("No active entity for set '{}'", s.name))
+        .clone()
+}
+
+fn entity_spec_by_name(state: &AppState, name: &str) -> EntitySpec {
+    state
+        .ddic
+        .active_entity(name)
+        .unwrap_or_else(|| panic!("No active entity named '{name}'"))
+        .clone()
 }
 
 async fn get_handler(
@@ -660,36 +911,305 @@ async fn get_handler(
 ) -> impl IntoResponse {
     let p = build_query(&params);
     let path_struct = parse_odata_path(&path).unwrap();
-    let mut j = json!([]);
-    let entity_spec = entity_spec_for_segment(&state, &path_struct.segments.iter().nth(0).unwrap());
-    let mut path_iter = path_struct.segments.iter();
-    let mut context = vec!["/Service/$metadata#".to_string()];
-    if let Some(s) = path_iter.next() {
-        if s.keys.is_empty() {
-            j = get_collection(&state, &p, &entity_spec, s);
-            context.push(entity_spec.setname().to_string());
-        } else {
-            j = get_single(&state, &entity_spec, s);
-            for s in p.select.iter() {
-                if j[s].is_null() {
-                    j[s] = json!(format!("[{s}]"));
-                }
-            }
-            context.push(format!("{}/$entity", entity_spec.setname()));
-        }
-    }
-
-    if let Some(s) = path_iter.next() {
-        if s.keys.is_empty() {
-            if s.name == "DraftAdministrativeData" {
-                j = j["DraftAdministrativeData"].take();
-            }
-        } else {
-            todo!();
-        }
-    }
+    let (mut j, context) = resolve_get_path(&state, &p, &path_struct.segments);
     j["@odata.context"] = json!(context.concat());
     to_json_response(j)
+}
+
+fn resolve_get_path(
+    state: &State<AppState>,
+    query: &ODataQuery,
+    segments: &[PathSegment],
+) -> (Value, Vec<String>) {
+    let root = segments.first().expect("OData path has a root segment");
+    let mut entity_spec = entity_spec_for_segment(state, root);
+    let mut value = if root.keys.is_empty() {
+        get_collection(state, query, &entity_spec, root)
+    } else {
+        let mut single = get_single(state, &entity_spec, root);
+        touch_selected_fields(&mut single, query);
+        single
+    };
+    let mut is_collection = root.keys.is_empty();
+
+    for segment in segments.iter().skip(1) {
+        info!("processing segment {:?}", segment);
+        let navigation_query = if segment == segments.last().unwrap() {
+            query
+        } else {
+            &ODataQuery::default()
+        };
+        let resolved = resolve_navigation(state, &entity_spec, &value, segment, navigation_query);
+        entity_spec = resolved.entity_spec;
+        value = resolved.value;
+        is_collection = resolved.is_collection;
+    }
+
+    let final_expand = expand_for_spec(state, &entity_spec, &query.expand);
+    apply_expand(state, &entity_spec, &mut value, &final_expand);
+    project_value(&mut value, &query.select, &final_expand);
+
+    let mut context = vec!["/Service/$metadata#".to_string()];
+    if is_collection {
+        context.push(entity_spec.setname().to_string());
+    } else {
+        context.push(format!("{}/$entity", entity_spec.setname()));
+    }
+    (value, context)
+}
+
+fn expand_for_spec(
+    state: &State<AppState>,
+    entity_spec: &EntitySpec,
+    expand_items: &[ExpandItem],
+) -> Vec<ExpandItem> {
+    expand_items
+        .iter()
+        .cloned()
+        .filter(|expand| has_navigation(state, entity_spec, &expand.navigation_property))
+        .collect()
+}
+
+fn has_navigation(
+    state: &State<AppState>,
+    entity_spec: &EntitySpec,
+    navigation_property: &str,
+) -> bool {
+    navigation_property == "DraftAdministrativeData"
+        || state
+            .ddic
+            .navigation_for_entity(entity_spec, navigation_property)
+            .is_some()
+}
+
+struct ResolvedNavigation {
+    entity_spec: EntitySpec,
+    value: Value,
+    is_collection: bool,
+}
+
+fn resolve_navigation(
+    state: &State<AppState>,
+    current_spec: &EntitySpec,
+    current_value: &Value,
+    segment: &PathSegment,
+    query: &ODataQuery,
+) -> ResolvedNavigation {
+    if segment.name == "DraftAdministrativeData" {
+        return ResolvedNavigation {
+            entity_spec: current_spec.clone(),
+            value: current_value["DraftAdministrativeData"].clone(),
+            is_collection: false,
+        };
+    }
+
+    let navigation = state
+        .ddic
+        .navigation_for_entity(current_spec, &segment.name)
+        .unwrap_or_else(|| {
+            panic!(
+                "Unknown navigation {} on {}",
+                segment.name,
+                current_spec.name()
+            )
+        });
+
+    let target_spec = entity_spec_by_name(state, &navigation.target_entity);
+    if navigation.collection {
+        resolve_collection_navigation(
+            state,
+            current_spec,
+            current_value,
+            &target_spec,
+            &navigation.name,
+            navigation.foreign_key_field.as_deref(),
+            segment,
+            query,
+        )
+    } else {
+        resolve_single_navigation(
+            state,
+            current_value,
+            &target_spec,
+            &navigation.name,
+            segment,
+        )
+    }
+}
+
+fn resolve_single_navigation(
+    state: &State<AppState>,
+    current_value: &Value,
+    target_spec: &EntitySpec,
+    lookup_name: &str,
+    segment: &PathSegment,
+) -> ResolvedNavigation {
+    let target_set = target_spec.setname();
+    let value = if segment.keys.is_empty() {
+        current_value
+            .get(lookup_name)
+            .and_then(value_as_uuid)
+            .map(|id| {
+                let key = EntityKey::new(id, true);
+                json!(state.store.read_entity(&target_set, &key).unwrap())
+            })
+            .unwrap_or(Value::Null)
+    } else {
+        let key: EntityKey = segment.into();
+        json!(state.store.read_entity(&target_set, &key).unwrap())
+    };
+
+    ResolvedNavigation {
+        entity_spec: target_spec.clone(),
+        value,
+        is_collection: false,
+    }
+}
+
+fn resolve_collection_navigation(
+    state: &State<AppState>,
+    current_spec: &EntitySpec,
+    current_value: &Value,
+    target_spec: &EntitySpec,
+    lookup_name: &str,
+    foreign_key_field: Option<&str>,
+    segment: &PathSegment,
+    query: &ODataQuery,
+) -> ResolvedNavigation {
+    let target_set = target_spec.setname();
+    let foreign_key = foreign_key_field.unwrap_or_else(|| {
+        panic!(
+            "No foreign key for collection navigation {} from {} to {}",
+            lookup_name,
+            current_spec.name(),
+            target_spec.name()
+        )
+    });
+    let parent_id = current_value
+        .get("ID")
+        .and_then(value_as_uuid)
+        .expect("Current entity has an ID");
+    let mut records = state.store.get_collection(&target_set, query).unwrap();
+    records.retain(|record| {
+        record[foreign_key]
+            .as_str()
+            .and_then(|value| Uuid::parse_str(value).ok())
+            == Some(parent_id)
+    });
+
+    if segment.keys.is_empty() {
+        ResolvedNavigation {
+            entity_spec: target_spec.clone(),
+            value: json!({ "value": records }),
+            is_collection: true,
+        }
+    } else {
+        let key: EntityKey = segment.into();
+        let record = records
+            .into_iter()
+            .find(|record| {
+                record.id() == key.id && record.is_active_entity() == key.is_active_entity
+            })
+            .map(|record| json!(record))
+            .unwrap_or(Value::Null);
+        ResolvedNavigation {
+            entity_spec: target_spec.clone(),
+            value: record,
+            is_collection: false,
+        }
+    }
+}
+
+fn apply_expand(
+    state: &State<AppState>,
+    entity_spec: &EntitySpec,
+    value: &mut Value,
+    expand_items: &[ExpandItem],
+) {
+    if expand_items.is_empty() {
+        return;
+    }
+
+    if let Some(items) = value.get_mut("value").and_then(Value::as_array_mut) {
+        for item in items {
+            apply_expand_to_entity(state, entity_spec, item, expand_items);
+        }
+        return;
+    }
+
+    apply_expand_to_entity(state, entity_spec, value, expand_items);
+}
+
+fn apply_expand_to_entity(
+    state: &State<AppState>,
+    entity_spec: &EntitySpec,
+    value: &mut Value,
+    expand_items: &[ExpandItem],
+) {
+    if !value.is_object() {
+        return;
+    }
+
+    for expand in expand_items {
+        let segment = PathSegment {
+            name: expand.navigation_property.clone(),
+            keys: vec![],
+        };
+        let resolved =
+            resolve_navigation(state, entity_spec, value, &segment, &expand.nested_query);
+        let mut expanded_value = resolved.value;
+        apply_expand(
+            state,
+            &resolved.entity_spec,
+            &mut expanded_value,
+            &expand.nested_query.expand,
+        );
+        project_value(
+            &mut expanded_value,
+            &expand.nested_query.select,
+            &expand.nested_query.expand,
+        );
+        value[&expand.navigation_property] = expanded_value;
+    }
+}
+
+fn touch_selected_fields(value: &mut Value, query: &ODataQuery) {
+    for field in query.select.iter() {
+        if value[field].is_null() {
+            value[field] = json!(format!("[{field}]"));
+        }
+    }
+}
+
+fn project_value(value: &mut Value, select: &[String], expand_items: &[ExpandItem]) {
+    if select.is_empty() {
+        return;
+    }
+
+    if let Some(items) = value.get_mut("value").and_then(Value::as_array_mut) {
+        for item in items {
+            project_entity(item, select, expand_items);
+        }
+        return;
+    }
+
+    project_entity(value, select, expand_items);
+}
+
+fn project_entity(value: &mut Value, select: &[String], expand_items: &[ExpandItem]) {
+    let Some(map) = value.as_object_mut() else {
+        return;
+    };
+    map.retain(|key, _| {
+        select.iter().any(|selected| selected == key)
+            || expand_items
+                .iter()
+                .any(|expand| expand.navigation_property == *key)
+    });
+}
+
+fn value_as_uuid(value: &Value) -> Option<Uuid> {
+    value.as_str().and_then(|value| Uuid::parse_str(value).ok())
 }
 
 fn get_single(
@@ -699,7 +1219,7 @@ fn get_single(
 ) -> Value {
     let key: EntityKey = s.into();
     let j = state.store.read_entity(&s.name, &key).unwrap();
-    info!("get single: {j:#?}");
+    // info!("get single: {j:#?}");
     json!(j)
 }
 
@@ -806,8 +1326,7 @@ async fn index(State(state): State<AppState>) -> Json<Value> {
     trace!("index");
     let mut value: Vec<Value> = state
         .ddic
-        .entities()
-        .iter()
+        .active_entities()
         .map(|e| {
             let set = e.setname();
             json!({"name": set, "url": set})
@@ -831,8 +1350,7 @@ async fn index(State(state): State<AppState>) -> Json<Value> {
 async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
     let _entities: Vec<EntityType> = state
         .ddic
-        .entities()
-        .iter()
+        .active_entities()
         .map(|x| EntityType::from_entity(&state.ddic, x))
         .collect();
     let _entity_sets: Vec<EntitySet> = state
@@ -842,8 +1360,7 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
         .collect();
     let _annotations: Vec<Annotations> = state
         .ddic
-        .entities()
-        .iter()
+        .active_entities()
         .map(|x| Annotations::from_entity(x))
         .flatten()
         .collect();
@@ -868,7 +1385,7 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
     for x in _annotations {
         annotations.push(quick_xml::se::to_string(&x).unwrap());
     }
-    for x in state.ddic.entities() {
+    for x in state.ddic.active_entities() {
         let set_name = x.setname();
         annotations.extend(draft_annotations_for_entity(x.name(), &set_name));
     }
@@ -963,4 +1480,123 @@ fn edmx_template() -> String {
   </edmx:DataServices>
 </edmx:Edmx>"##;
     meta.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn entity_type_from_entity_maps_field_variants() {
+        let mut ddic = DataDictonary::new();
+        ddic.activate();
+        let entity = ddic.active_entity("Entity").unwrap();
+
+        let entity_type = EntityType::from_entity(&ddic, entity);
+        dbg!(&entity_type);
+        assert!(
+            entity_type
+                .properties
+                .iter()
+                .any(|property| property.name == "name" && property.type_ == "Edm.String")
+        );
+        assert!(entity_type.navigation_properties.iter().any(|navigation| {
+            navigation.name == "package"
+                && navigation.type_ == "Service.Package"
+                && navigation.contains_target == Some(false)
+        }));
+    }
+
+    #[test]
+    fn field_annotations_cover_atom_value_list_and_measure() {
+        let value_list_field = FieldSpec::string("code", "Code", 20)
+            .computed()
+            .immutable()
+            .with_value_list(AtomValueList::entity_ref("PackageSet", "ID", Some("name")));
+        let value_list_annotations = Annotations::from_field("Invoice", &value_list_field);
+
+        assert!(value_list_annotations.annotations.iter().any(|annotation| {
+            annotation.term == "Common.Label" && annotation.string.as_deref() == Some("Code")
+        }));
+        assert!(
+            value_list_annotations
+                .annotations
+                .iter()
+                .any(|annotation| annotation.term == "Org.OData.Core.V1.Computed")
+        );
+        assert!(
+            value_list_annotations
+                .annotations
+                .iter()
+                .any(|annotation| annotation.term == "Org.OData.Core.V1.Immutable")
+        );
+        assert!(
+            value_list_annotations
+                .annotations
+                .iter()
+                .any(|annotation| annotation.term == "Common.ValueList")
+        );
+        assert!(
+            value_list_annotations
+                .annotations
+                .iter()
+                .any(|annotation| annotation.term == "Common.ValueListWithFixedValues")
+        );
+
+        let measure = FieldSpec::Measure {
+            name: "amount".into(),
+            label: "Amount".into(),
+            package: None,
+            precision: Some(15),
+            scale: Some(2),
+            unit_field: "currency".into(),
+            kind: MeasureKind::Currency,
+            presentation: Default::default(),
+        };
+        let measure_annotations = Annotations::from_field("Invoice", &measure);
+
+        assert!(measure_annotations.annotations.iter().any(|annotation| {
+            annotation.term == "Org.OData.Measures.V1.ISOCurrency"
+                && annotation.path.as_deref() == Some("currency")
+        }));
+    }
+
+    #[test]
+    fn parses_simple_expand_list() {
+        let expand = parse_expand_items("DraftAdministrativeData,package");
+
+        assert_eq!(expand.len(), 2);
+        assert_eq!(expand[0].navigation_property, "DraftAdministrativeData");
+        assert_eq!(expand[1].navigation_property, "package");
+    }
+
+    #[test]
+    fn parses_expand_with_select_options() {
+        let expand =
+            parse_expand_items("DraftAdministrativeData($select=DraftUUID,InProcessByUser)");
+
+        assert_eq!(expand.len(), 1);
+        assert_eq!(expand[0].navigation_property, "DraftAdministrativeData");
+        assert_eq!(
+            expand[0].nested_query.select,
+            vec!["DraftUUID".to_string(), "InProcessByUser".to_string()]
+        );
+    }
+
+    #[test]
+    fn parses_nested_expand_options() {
+        let expand = parse_expand_items("_Entitites($expand=package($select=name))");
+
+        assert_eq!(expand.len(), 1);
+        assert_eq!(expand[0].navigation_property, "_Entitites");
+        assert_eq!(expand[0].nested_query.expand.len(), 1);
+        assert_eq!(
+            expand[0].nested_query.expand[0].navigation_property,
+            "package"
+        );
+        assert_eq!(
+            expand[0].nested_query.expand[0].nested_query.select,
+            vec!["name".to_string()]
+        );
+    }
 }

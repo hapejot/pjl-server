@@ -1,11 +1,11 @@
-use crate::datastore::{DataRecord, DataStore};
+use crate::datastore::{DataRecord, DataStore, Navigation};
 use crate::error::StoreError;
-use crate::filter_eval::evaluate_filter;
+use crate::filter_eval::evaluate;
 use crate::key::EntityKey;
-use crate::metadata::EntityMetadata;
-use crate::DraftActionExt;
-use odata::query::ODataQuery;
+use crate::DraftDataStore;
+use odata::query::{Expr, ODataQuery, SortDirection};
 use serde_json::{json, Value};
+use std::cmp::Ordering;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
@@ -14,39 +14,12 @@ use uuid::Uuid;
 
 pub struct YamlStore {
     root: PathBuf,
-    pub metadata: EntityMetadata,
     current_change: RwLock<Option<Uuid>>,
+    navigations: Vec<Navigation>,
     // cache: RwLock<HashMap<String, HashMap<Uuid, DataRecord>>>,
 }
 
-#[allow(dead_code)]
-fn json_value_to_key_string(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        Value::Number(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Null => String::new(),
-        other => other.to_string(),
-    }
-}
-
-/// Rekursiver Merge: Objekte werden Feld fuer Feld gemergt, alles andere
-/// (Arrays, Skalare) wird vom Patch komplett ueberschrieben.
-#[allow(dead_code)]
-fn merge_json(existing: &mut Value, patch: &Value) {
-    match (existing, patch) {
-        (Value::Object(existing_map), Value::Object(patch_map)) => {
-            for (k, v) in patch_map {
-                merge_json(existing_map.entry(k).or_insert(Value::Null), v);
-            }
-        }
-        (existing_slot, patch_value) => {
-            *existing_slot = patch_value.clone();
-        }
-    }
-}
-
-impl DraftActionExt for YamlStore {
+impl DraftDataStore for YamlStore {
     fn draft_edit(&self, set_name: &str, active_key: &EntityKey) -> Result<Value, StoreError> {
         // let draft_key = active_key.sibling(); // is_active_entity = false
         let mut draft_data = self.read_entity(set_name, active_key)?;
@@ -74,12 +47,12 @@ impl DraftActionExt for YamlStore {
 }
 
 impl YamlStore {
-    pub fn open(root: impl Into<PathBuf>, metadata: EntityMetadata) -> Result<Self, StoreError> {
+    pub fn open(root: impl Into<PathBuf>) -> Result<Self, StoreError> {
         let root = root.into();
         let store = Self {
             root,
-            metadata,
             current_change: RwLock::new(None),
+            navigations: vec![],
             // cache: RwLock::new(HashMap::new()),
         };
         // store.load_all()?;
@@ -135,7 +108,6 @@ impl YamlStore {
         let path = self.path_for(set_name, &key);
         let yaml =
             serde_yaml::to_string(&record).map_err(|e| StoreError::Serialize(e.to_string()))?;
-        dbg!(&record);
         let tmp_path = path.with_extension("yaml.tmp");
         fs::write(&tmp_path, yaml)?;
         fs::rename(&tmp_path, &path)?;
@@ -148,17 +120,6 @@ impl YamlStore {
             fs::remove_file(path)?;
         }
         Ok(())
-    }
-
-    #[allow(dead_code)]
-    fn enrich_with_technical_fields(
-        &self,
-        _set_name: &str,
-        _key: &EntityKey,
-        value: &Value,
-    ) -> Value {
-        let out = value.clone();
-        out
     }
 }
 
@@ -183,12 +144,18 @@ fn load_record_from_file(path: PathBuf) -> Result<DataRecord, StoreError> {
 }
 
 impl DataStore for YamlStore {
+    fn navigation(&mut self, single: bool) -> &mut Navigation {
+        let nav = Navigation::new(single);
+        self.navigations.push(nav);
+        self.navigations.last_mut().expect("last navigation")
+    }
+
     fn get_collection(
         &self,
         set_name: &str,
         query: &ODataQuery,
     ) -> Result<Vec<DataRecord>, StoreError> {
-        info!("selected fields: {:?}", query.select);
+        info!("get collection {set_name} {:?}", query);
         let mut records: Vec<DataRecord> = self
             .load_records(set_name)?
             .iter()
@@ -201,59 +168,69 @@ impl DataStore for YamlStore {
             })
             .collect();
 
-        if let Some(filter) = &query.filter {
-            records.retain(|r| evaluate_filter(r, filter));
+        for x in query.expand.iter() {
+            for n in self.navigations.iter() {
+                if let Navigation {
+                    single,
+                    from_entity: Some(from_entity),
+                    from_field: Some(from_field),
+                    to_entity: Some(to_entity),
+                    to_field: Some(to_field),
+                } = n
+                {
+                    if from_entity == set_name && from_field == &x.navigation_property {
+                        for row in records.iter_mut() {
+                            if *single {
+                                if let Some(from_id) = row.get(from_field) {
+                                    let q = ODataQuery::new()
+                                        .filter(Expr::equals_value(&from_id, "ID"));
+                                    let subrows = self
+                                        .get_collection(to_entity, &q)?
+                                        .iter()
+                                        .map(|x| x.core_json())
+                                        .collect::<Vec<_>>();
+                                    match subrows.as_slice() {
+                                        [] => row[from_field] = Value::Null,
+                                        [v] => row[from_field] = json!(v),
+                                        _ => todo!(),
+                                    }
+                                } else {
+                                    row[from_field] = Value::Null
+                                }
+                            } else {
+                                let q =
+                                    ODataQuery::new().filter(Expr::equals_guid(row.id(), to_field));
+                                let subrows = json!(self
+                                    .get_collection(to_entity, &q)?
+                                    .iter()
+                                    .map(|x| x.core_json())
+                                    .collect::<Vec<_>>());
+                                row[from_field] = subrows;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        // for item in query.orderby.iter().rev() {
-        //     records.sort_by(|a, b| {
-        //         let (va, vb) = (
-        //             resolve_property(a, &item.property),
-        //             resolve_property(b, &item.property),
-        //         );
-        //         let ord = compare_json_for_sort(&va, &vb);
-        //         if item.direction == SortDirection::Desc {
-        //             ord.reverse()
-        //         } else {
-        //             ord
-        //         }
-        //     });
-        // }
+        if let Some(filter) = &query.filter {
+            records.retain(|r| evaluate(r, filter) == Value::Bool(true));
+        }
 
-        // let skip = query.skip.unwrap_or(0) as usize;
-        // let mut records: Vec<Value> = records.into_iter().skip(skip).collect();
-        // if let Some(top) = query.top {
-        //     records.truncate(top as usize);
-        // }
-
-        // // $expand VOR $select ausfuehren, damit die Navigation Property noch
-        // // im vollen Record steckt.
-        // for expand_item in &query.expand {
-        //     let nav_def = self
-        //         .metadata
-        //         .lookup_navigation(set_name, &expand_item.navigation_property)?;
-
-        //     for record in records.iter_mut() {
-        //         let own_key = self.entity_key_of(set_name, record)?;
-        //         let nested_parent = ParentKey {
-        //             set_name: set_name.to_string(),
-        //             key: own_key,
-        //             navigation_property: expand_item.navigation_property.clone(),
-        //         };
-        //         let nested = self.get_collection(
-        //             &nav_def.target_set,
-        //             &expand_item.nested_query,
-        //             Some(&nested_parent),
-        //         )?;
-        //         if let Value::Object(map) = record {
-        //             map.insert(expand_item.navigation_property.clone(), nested);
-        //         }
-        //     }
-        // }
-
-        // if let Some(select) = &query.select {
-        //     records = records.iter().map(|r| project_fields(r, select)).collect();
-        // }
+        for item in query.orderby.iter().rev() {
+            records.sort_by(|a, b| {
+                let (va, vb) = (
+                    evaluate(a, &Expr::Identifier(item.property.clone())),
+                    evaluate(b, &Expr::Identifier(item.property.clone())),
+                );
+                let ord = compare_json(&va, &vb);
+                if item.direction == SortDirection::Desc {
+                    ord.reverse()
+                } else {
+                    ord
+                }
+            });
+        }
 
         Ok(records)
     }
@@ -284,7 +261,9 @@ impl DataStore for YamlStore {
 
     fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
         let mut rec: DataRecord = DataRecord::from_json(data)?;
-        rec.edit();
+        if !rec.is_active_entity() {
+            rec.edit();
+        }
         self.write_record(set_name, rec.clone())?;
         Ok(rec)
     }
@@ -298,7 +277,6 @@ impl DataStore for YamlStore {
         trace!("patching yaml");
         let mut r = self.read_entity(set_name, key)?;
         r.merge(patch);
-        dbg!(&r);
         self.write_record(set_name, r)?;
         Ok(patch.clone())
     }
@@ -331,14 +309,14 @@ impl DataStore for YamlStore {
     }
 }
 
-#[allow(dead_code)]
-fn project_fields(record: &Value, select: &[String]) -> Value {
-    let Value::Object(map) = record else {
-        return record.clone();
-    };
-    let projected: serde_json::Map<String, Value> = select
-        .iter()
-        .filter_map(|field| map.get(field).map(|v| (field.clone(), v.clone())))
-        .collect();
-    Value::Object(projected)
+fn compare_json(va: &Value, vb: &Value) -> Ordering {
+    match (va, vb) {
+        (Value::Number(x), Value::Number(y)) => x
+            .as_f64()
+            .partial_cmp(&y.as_f64())
+            .unwrap_or(Ordering::Equal),
+        (Value::String(x), Value::String(y)) => x.cmp(y),
+        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
+        _ => todo!("Comparison not implemented for these JSON value types"),
+    }
 }

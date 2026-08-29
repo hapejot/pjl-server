@@ -1,7 +1,6 @@
-use odata::query::{FilterExpr, FilterOperand};
-use serde_json::Value;
+use odata::query::{Expr, FilterOperand};
+use serde_json::{Number, Value};
 use std::cmp::Ordering;
-use tracing::warn;
 
 use crate::datastore::DataRecord;
 
@@ -80,32 +79,75 @@ fn evaluate_operand(_record: &Value, _a: &FilterOperand) -> Value {
     todo!()
 }
 
-pub fn evaluate_filter(_record: &DataRecord, _expr: &FilterExpr) -> bool {
-    match _expr {
-        FilterExpr::Identifier(_) => todo!(),
-        FilterExpr::Path(_items) => todo!(),
-        FilterExpr::String(_) => todo!(),
-        FilterExpr::Number(_) => todo!(),
-        FilterExpr::Bool(_) => todo!(),
-        FilterExpr::Guid(_) => todo!(),
-        FilterExpr::Null => todo!(),
-        FilterExpr::FunctionCall {
+pub fn evaluate(record: &DataRecord, _expr: &Expr) -> Value {
+    let v = match _expr {
+        Expr::Identifier(id) => {
+            let parts = id.split("/").collect::<Vec<_>>();
+            match parts.as_slice() {
+                [single] => record.get(*single).unwrap_or(Value::Null),
+                _ => todo!("Path expressions with multiple segments are not yet implemented"),
+            }
+        }
+        Expr::Path(items) => {
+            if let Some(mut v0) = record.get(items[0].as_str()) {
+                for i in items.iter().skip(1) {
+                    if let Some(v) = v0.get(i) {
+                        v0 = v.clone();
+                    } else {
+                        return Value::Null;
+                    }
+                }
+                v0
+            } else {
+                Value::Null
+            }
+        }
+        Expr::String(s) => Value::String(s.clone()),
+        Expr::Number(n) => Value::Number(Number::from_f64(*n).unwrap()),
+        Expr::Bool(b) => Value::Bool(*b),
+        Expr::Guid(g) => Value::String(g.to_string()),
+        Expr::Null => Value::Null,
+        Expr::FunctionCall {
             name: _name,
             args: _args,
         } => todo!(),
-        FilterExpr::UnaryNot(_filter_expr) => todo!(),
-        FilterExpr::BinaryOp {
-            op: _op,
-            left: _left,
-            right: _right,
-        } => {
-            warn!(
-                "Operation {:?} {:?} {:?} not implemented",
-                _left, _op, _right
-            );
-            true
+        Expr::UnaryNot(expr) => {
+            let v = evaluate(record, expr);
+            if let Value::Bool(b) = v {
+                return Value::Bool(!b);
+            } else {
+                return Value::Null;
+            }
         }
-    }
+        Expr::BinaryOp { op, left, right } => {
+            let left = evaluate(record, left);
+            let right = evaluate(record, right);
+            match op {
+                odata::query::BinOp::And => {
+                    if let (Value::Bool(left), Value::Bool(right)) = (left, right) {
+                        Value::Bool(left && right)
+                    } else {
+                        Value::Null
+                    }
+                }
+
+                odata::query::BinOp::Or => {
+                    if let (Value::Bool(left), Value::Bool(right)) = (left, right) {
+                        Value::Bool(left || right)
+                    } else {
+                        Value::Null
+                    }
+                }
+                odata::query::BinOp::Eq => Value::Bool(left == right),
+                odata::query::BinOp::Ne => Value::Bool(left != right),
+                odata::query::BinOp::Gt => todo!(),
+                odata::query::BinOp::Ge => todo!(),
+                odata::query::BinOp::Lt => todo!(),
+                odata::query::BinOp::Le => todo!(),
+            }
+        }
+    };
+    v
 }
 
 pub fn compare_json_for_sort(a: &Value, b: &Value) -> Ordering {

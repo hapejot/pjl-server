@@ -3,12 +3,10 @@ use std::path::Path;
 use odata::query::ODataQuery;
 use odata::query::OrderByItem;
 use odata::query::SortDirection;
-use odata_yaml_store::DraftActionExt;
+use odata_yaml_store::DataStore;
+use odata_yaml_store::DraftDataStore;
 use odata_yaml_store::EntityKey;
-use odata_yaml_store::NavigationDef;
-use odata_yaml_store::ParentKey;
 use odata_yaml_store::YamlStore;
-use odata_yaml_store::{DataStore, EntityMetadata};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -16,19 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data_dir = Path::new("testdata");
     println!("Datenverzeichnis: {}", data_dir.display());
 
-    let mut metadata = EntityMetadata::new();
-    metadata.register_key("Orders", &["ID"]);
-    metadata.register_key("OrderItems", &["ID"]);
-    metadata.register_navigation(
-        "Orders",
-        "Items",
-        NavigationDef {
-            target_set: "OrderItems".to_string(),
-            foreign_key_field: "OrderID".to_string(),
-        },
-    );
-
-    let store = YamlStore::open(&data_dir, metadata)?;
+    let store = YamlStore::open(&data_dir)?;
 
     let _ = store.create_entity(
         "Orders",
@@ -96,12 +82,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
         true,
     );
-    let navigation_property = "Items".to_string();
-    let _parent = ParentKey {
-        set_name: "Orders".into(),
-        key: key.clone(),
-        navigation_property,
-    };
     let items = store.get_collection("OrderItems", &ODataQuery::default());
     println!("items: {:#?}", items);
 

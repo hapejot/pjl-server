@@ -2,19 +2,17 @@ pub mod datastore;
 pub mod error;
 pub mod filter_eval;
 pub mod key;
-pub mod metadata;
 pub mod yaml_store;
 
 pub use datastore::{DataStore, DraftAction};
 pub use error::StoreError;
-pub use key::{EntityKey, ParentKey};
-pub use metadata::{EntityMetadata, NavigationDef};
+pub use key::EntityKey;
 pub use yaml_store::YamlStore;
 
 #[cfg(any(test, feature = "debug-tools"))]
 pub use datastore::DataStoreDebugExt;
 
-pub trait DraftActionExt: DataStore {
+pub trait DraftDataStore: DataStore {
     fn draft_edit(&self, set_name: &str, key: &EntityKey) -> Result<serde_json::Value, StoreError>;
     fn draft_activate(
         &self,
@@ -37,33 +35,24 @@ mod tests {
     use tempfile::TempDir;
     use uuid::Uuid;
 
-    fn make_store() -> (TempDir, YamlStore) {
+    fn make_store() -> (TempDir, impl DraftDataStore) {
         let dir = TempDir::new().unwrap();
-        let mut meta = EntityMetadata::new();
-        meta.register_key("Orders", &["ID"]);
-        meta.register_key("OrderItems", &["ID"]);
-        meta.register_navigation(
-            "Orders",
-            "Items",
-            NavigationDef {
-                target_set: "OrderItems".to_string(),
-                foreign_key_field: "OrderID".to_string(),
-            },
-        );
-        let store = YamlStore::open(dir.path(), meta).unwrap();
+        let store = YamlStore::open(dir.path()).unwrap();
         (dir, store)
     }
 
     #[test]
     fn create_and_read_entity() {
+        // Entites sind automatisch im Draft Modus, wenn sie angelegt werden.
+        // Das bedeutet, dass `IsActiveEntity` beim Erstellen auf `false` gesetzt wird.
+        // Nur so können sie dann auch wieder gelesen werden.
+
+        let id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
         let (_dir, store) = make_store();
-        let data = json!({ "ID": "1", "CustomerName": "Mueller GmbH", "Amount": 150 });
+        let data = json!({ "ID": id, "CustomerName": "Mueller GmbH", "Amount": 150 });
         store.create_entity("Orders", &data).unwrap();
 
-        let key = EntityKey::new(
-            Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
-            true,
-        );
+        let key = EntityKey::new(id, false);
         let read = store.read_entity("Orders", &key).unwrap();
         assert_eq!(read["CustomerName"], "Mueller GmbH");
     }
@@ -71,13 +60,11 @@ mod tests {
     #[test]
     fn patch_entity_merges_fields() {
         let (_dir, store) = make_store();
-        let data = json!({ "ID": "1", "Status": "New", "Amount": 100 });
+        let id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let data = json!({ "ID": id, "Status": "New", "Amount": 100 });
         store.create_entity("Orders", &data).unwrap();
 
-        let key = EntityKey::new(
-            Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
-            true,
-        );
+        let key = EntityKey::new(id, false);
         store
             .patch_entity("Orders", &key, &json!({ "Status": "Released" }))
             .unwrap();
@@ -93,68 +80,38 @@ mod tests {
         store
             .create_entity(
                 "Orders",
-                &json!({ "ID": "1", "Amount": 50, "Status": "New" }),
+                &json!({ "ID": Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(), "Amount": 50, "Status": "New" }),
             )
             .unwrap();
         store
             .create_entity(
                 "Orders",
-                &json!({ "ID": "2", "Amount": 200, "Status": "Released" }),
+                &json!({ "ID": Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(), "Amount": 200, "Status": "Released" }),
             )
             .unwrap();
         store
             .create_entity(
                 "Orders",
-                &json!({ "ID": "3", "Amount": 120, "Status": "Released" }),
+                &json!({ "ID": Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap(), "Amount": 120, "Status": "Released" }),
             )
             .unwrap();
 
-        let query = ODataQuery {
-            filter: None,
-            orderby: vec![OrderByItem {
-                property: "Amount".to_string(),
-                direction: SortDirection::Desc,
-            }],
-            ..Default::default()
-        };
+        let query = ODataQuery::new().order_by("Amount", SortDirection::Desc);
 
         let result = store.get_collection("Orders", &query).unwrap();
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0]["ID"], "2"); // Amount 200 zuerst (desc)
-        assert_eq!(result[1]["ID"], "3");
-    }
-
-    #[test]
-    fn expand_resolves_composition_children() {
-        let (_dir, store) = make_store();
-        store
-            .create_entity("Orders", &json!({ "ID": "1", "CustomerName": "Foo" }))
-            .unwrap();
-        store
-            .create_entity(
-                "OrderItems",
-                &json!({ "ID": "10", "OrderID": "1", "Qty": 3 }),
-            )
-            .unwrap();
-        store
-            .create_entity(
-                "OrderItems",
-                &json!({ "ID": "11", "OrderID": "1", "Qty": 7 }),
-            )
-            .unwrap();
-
-        let query = ODataQuery {
-            expand: vec![ExpandItem {
-                navigation_property: "Items".to_string(),
-                nested_query: Box::new(ODataQuery::default()),
-            }],
-            ..Default::default()
-        };
-
-        let result = store.get_collection("Orders", &query).unwrap();
-        let order = &result.first().unwrap();
-        let items = order["Items"].as_array().unwrap();
-        assert_eq!(items.len(), 2);
+        assert_eq!(result.len(), 3);
+        assert_eq!(
+            result[0].get("ID"),
+            Some(json!("00000000-0000-0000-0000-000000000002"))
+        ); // Amount 200 zuerst (desc)
+        assert_eq!(
+            result[1].get("ID"),
+            Some(json!("00000000-0000-0000-0000-000000000003"))
+        );
+        assert_eq!(
+            result[2].get("ID"),
+            Some(json!("00000000-0000-0000-0000-000000000001"))
+        );
     }
 
     #[test]
@@ -163,14 +120,13 @@ mod tests {
         store
             .create_entity(
                 "Orders",
-                &json!({ "ID": "1", "Status": "Released", "IsActiveEntity": true }),
+                &json!({ "ID": "00000000-0000-0000-0000-000000000001",
+                         "IsActiveEntity": true,
+                         "Status": "Released" }),
             )
             .unwrap();
 
-        let active_key = EntityKey::new(
-            Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
-            true,
-        );
+        let active_key = EntityKey::new_active("00000000-0000-0000-0000-000000000001");
 
         let draft = store.draft_edit("Orders", &active_key).unwrap();
         assert_eq!(draft["IsActiveEntity"], false);
@@ -198,24 +154,74 @@ mod tests {
     #[test]
     fn persists_across_reopen() {
         let dir = TempDir::new().unwrap();
-        let mut meta = EntityMetadata::new();
-        meta.register_key("Orders", &["ID"]);
 
         {
-            let store = YamlStore::open(dir.path(), meta).unwrap();
+            let store = YamlStore::open(dir.path()).unwrap();
             store
-                .create_entity("Orders", &json!({ "ID": "1", "Amount": 42 }))
+                .create_entity(
+                    "Orders",
+                    &json!({ "ID": "00000000-0000-0000-0000-000000000001",
+                                                    "IsActiveEntity": true,
+                                                    "Amount": 42 }),
+                )
                 .unwrap();
         }
 
-        let mut meta2 = EntityMetadata::new();
-        meta2.register_key("Orders", &["ID"]);
-        let reopened = YamlStore::open(dir.path(), meta2).unwrap();
-        let key = EntityKey::new(
-            Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
-            true,
-        );
+        let reopened = YamlStore::open(dir.path()).unwrap();
+        let key = EntityKey::new_active("00000000-0000-0000-0000-000000000001");
         let read = reopened.read_entity("Orders", &key).unwrap();
         assert_eq!(read["Amount"], 42);
+    }
+    #[test]
+    fn expand() {
+        let (_dir, mut store) = make_store();
+        store
+            .navigation(false)
+            .from("Orders", "_Items")
+            .to("Items", "OrderID");
+        store
+            .navigation(true)
+            .from("Orders", "Customer")
+            .to("Customers", "ID");
+        store
+            .create_entity(
+                "Customers",
+                &json!({
+                            "ID":"00000000-0000-0000-0000-000000000005",
+                            "Name": "ACME Inc."}),
+            )
+            .unwrap();
+        store
+            .create_entity(
+                "Orders",
+                &json!({ "ID": "00000000-0000-0000-0000-000000000001",
+                "Customer": "00000000-0000-0000-0000-000000000005",
+                "Status": "Released" }),
+            )
+            .unwrap();
+        store.create_entity("Items", &json!({"ID": Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
+                                            "Pos": "00010",
+                                            "OrderID": Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap()})).unwrap();
+        store.create_entity("Items", &json!({"ID": Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap(),
+                                            "Pos": "00020",
+                                            "OrderID": Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap()})).unwrap();
+        store.create_entity("Items", &json!({"ID": Uuid::parse_str("00000000-0000-0000-0000-000000000004").unwrap(),
+                                            "Pos": "00030",
+                                            "OrderID": Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap()})).unwrap();
+
+        let q = ODataQuery::new().expand("_Items").expand("Customer");
+        let result = store.get_collection("Orders", &q).unwrap();
+        match result.as_slice() {
+            [r] => {
+                let x = r.get("_Items").unwrap();
+                assert!(x.is_array());
+                let x = r.get("Customer").unwrap();
+                assert!(x.is_object());
+            }
+            _ => panic!(),
+        }
+        let _r = store
+            .read_entity("Orders", &EntityKey::new_active(""))
+            .unwrap();
     }
 }

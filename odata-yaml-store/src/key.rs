@@ -13,8 +13,14 @@ pub struct EntityKey {
 impl EntityKey {
     pub fn new(id: Uuid, is_active_entity: bool) -> Self {
         Self {
-            id,
+            id: id.into(),
             is_active_entity,
+        }
+    }
+    pub fn new_active(id: impl Into<String>) -> Self {
+        Self {
+            id: Uuid::parse_str(id.into().as_str()).unwrap(),
+            is_active_entity: true,
         }
     }
 
@@ -59,11 +65,4 @@ impl From<&PathSegment> for EntityKey {
             .and_then(|x| x.value.as_bool());
         EntityKey::new(k.unwrap(), is_active.unwrap_or(true))
     }
-}
-/// Referenz auf die uebergeordnete Entity bei Compositions (z.B. Header -> Items).
-#[derive(Debug, Clone)]
-pub struct ParentKey {
-    pub set_name: String,
-    pub key: EntityKey,
-    pub navigation_property: String,
 }

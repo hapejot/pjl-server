@@ -22,9 +22,8 @@ entfernen oder lockern.
 ```
 src/
   error.rs        StoreError
-  key.rs          EntityKey, ParentKey (inkl. RAP-Draft-Dimension)
+  key.rs          EntityKey (inkl. RAP-Draft-Dimension)
   query.rs        ODataQuery, FilterExpr, ExpandItem, ... (kompletter Query-AST)
-  metadata.rs      EntityMetadata: Key-Felder + Navigationen pro Entity-Set
   filter_eval.rs   Auswertung von FilterExpr gegen serde_json::Value
   datastore.rs     DataStore-Trait (+ DataStoreDebugExt)
   yaml_store.rs    YamlStore: Datei-basierte Implementierung von DataStore
@@ -76,21 +75,9 @@ Dateiname problematisch wären.
 ## Setup-Beispiel
 
 ```rust
-use odata_yaml_store::{EntityMetadata, NavigationDef, YamlStore};
+use odata_yaml_store::YamlStore;
 
-let mut metadata = EntityMetadata::new();
-metadata.register_key("Orders", &["ID"]);
-metadata.register_key("OrderItems", &["ID"]);
-metadata.register_navigation(
-    "Orders",
-    "Items",
-    NavigationDef {
-        target_set: "OrderItems".to_string(),
-        foreign_key_field: "OrderID".to_string(),
-    },
-);
-
-let store = YamlStore::open("./data", metadata)?;
+let store = YamlStore::open("./data")?;
 ```
 
 ## Bekannte Vereinfachungen (bewusste Prototyp-Entscheidungen)
@@ -107,9 +94,6 @@ let store = YamlStore::open("./data", metadata)?;
 - **`$apply` (Aggregation/GroupBy, OData V4 Analytics)** ist nicht
   abgebildet – falls benötigt, müsste `ApplyTransformation` (siehe
   Konversationsverlauf) ergänzt werden.
-- **Composition-Scoping über Parent:** Geht aktuell davon aus, dass der
-  Foreign Key genau ein Parent-Key-Feld referenziert. Bei zusammengesetzten
-  Parent-Keys mit mehreren FK-Feldern im Kind müsste das erweitert werden.
 - **`draft_prepare`:** Reines Platzhalterverhalten (gibt aktuellen
   Draft/Active-Stand zurück). Hier wäre der Ansatzpunkt für echte
   Validierungen/Determinations analog zu RAP.
@@ -130,7 +114,7 @@ impl DataStore for PostgresStore {
 }
 ```
 
-`EntityKey`, `ParentKey`, `ODataQuery` und `FilterExpr` bleiben dabei
-unverändert wiederverwendbar – die `FilterExpr`-AST müsste dann in eine
+`EntityKey`, `ODataQuery` und `FilterExpr` bleiben dabei unverändert
+wiederverwendbar – die `FilterExpr`-AST müsste dann in eine
 `WHERE`-Klausel statt in In-Memory-Vergleiche übersetzt werden
 (`filter_eval.rs` durch einen SQL-Query-Builder ersetzen).

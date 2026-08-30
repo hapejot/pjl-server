@@ -114,6 +114,11 @@ pub struct PresentationOverrides {
     pub lookup: Option<String>,
 }
 
+/// Suffix appended to a field name when a synthetic single-value / key alias is needed
+/// (e.g. a many-to-one relationship's local key field `Order_ID`). One authoritative
+/// source so no caller hard-codes the string.
+pub const ID_SUFFIX: &str = "_ID";
+
 /// A field specification — describes the entity's own data (leaves on the relationship tree).
 ///
 /// Only two variants: Atom (simple values) and Measure (value + unit/currency dependency).
@@ -163,6 +168,18 @@ pub enum FieldSpec {
 }
 
 impl FieldSpec {
+    /// Return this field's name with the standard ID suffix appended
+    /// (`Order` → `Order_ID`). Use instead of `format!("{name}_ID")`.
+    pub fn with_id_suffix(&self) -> String {
+        format!("{}{}", self.name(), ID_SUFFIX)
+    }
+
+    /// Whether this field's name already ends with the standard ID suffix.
+    /// Use instead of `f.name().ends_with("_ID")` / `"_ID"`.
+    pub fn ends_with_id_suffix(&self) -> bool {
+        self.name().ends_with(ID_SUFFIX)
+    }
+
     // ── Constructors ─────────────────────────────────────────────────
 
     pub fn atom(name: &str, label: &str, edm_type: &str) -> Self {

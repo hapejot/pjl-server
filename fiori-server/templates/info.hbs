@@ -1,0 +1,69 @@
+<style>
+  body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    min-height: 100vh;
+    margin: 0;
+  }
+  .card {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 2rem 2.5rem;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    max-width: 480px;
+  }
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+    background: linear-gradient(135deg, #60a5fa, #a78bfa);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  p {
+    font-size: 0.95rem;
+    line-height: 1.5;
+    color: #94a3b8;
+  }
+  table {
+      width: 100%;
+  }
+</style>
+
+<h1>Data Dictionary</h1>
+
+<h2>Packages</h2>
+<ul>
+{{#each packages}}  <li>{{name}}</li>
+{{/each}}</ul>
+
+<h2>Apps ({{apps_count}})</h2>
+<ul class="apps">
+{{#each apps}}  <li><span class="app-title">{{title}}</span>
+      <span class="app-sub">{{subtitle}}
+      <a href="./apps/{{main_entity}}/">{{name}}</a> · display
+{{/each}}</ul>
+
+<h2>Entities ({{entities_count}})</h2>
+<ul class="entities">
+{{#each entities}}  <h3>{{name}}</h3><p>(set {{set}}, {{field_count}} fields, {{nav_count}} nav)</p>
+  <table class="fields">
+    <tr><th>Field</th><th>UI Label</th><th>Edm Type</th></tr>
+{{#each fields}}    <tr><td>{{name}}</td><td>{{label}}</td><td>{{edm_type}}</td></tr>
+{{/each}}  </table>
+  <ul>
+{{#each navigations}}    <li>{{name}} → {{target_entity}} (source set {{source_set}}, target set {{target_set}}, FK {{#if foreign_key_field}}{{foreign_key_field}}{{else}}-{{/if}})<span class="cardinality">{{#if collection}}collection{{else}}1:1{{/if}}</span>
+{{/each}}  </ul>
+{{/each}}</ul>
+
+<h2>Relationships ({{relationships_count}})</h2>
+<ul class="relationships">
+{{#each relationships}}  <li>
+    <span class="rel-name">{{name}}</span>
+    <span class="rel-one">{{one}}</span> → <span class="rel-many">{{many}}</span>
+    <span class="cardinality">{{package}}</span> · package <span class="rel-pkg">{{package}}</span>
+{{/each}}</ul>

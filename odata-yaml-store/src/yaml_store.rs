@@ -254,6 +254,13 @@ impl DataStore for YamlStore {
                 }
             });
         }
+
+        if let Some(skip) = query.skip {
+            records.drain(..(skip as usize).min(records.len()));
+        }
+        if let Some(top) = query.top {
+            records.truncate(top as usize);
+        }
         Ok(records)
     }
 

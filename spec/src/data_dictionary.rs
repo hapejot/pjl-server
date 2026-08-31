@@ -2,17 +2,6 @@ use std::collections::HashMap;
 
 use crate::{EntitySpec, FieldSpec, Relationship, app::App, package::Package};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NavigationInfo {
-    pub name: String,
-    pub source_entity: String,
-    pub source_set: String,
-    pub target_entity: String,
-    pub target_set: String,
-    pub collection: bool,
-    pub foreign_key_field: Option<String>,
-}
-
 pub struct DataDictonary {
     packages: Vec<Package>,
     entities: Vec<EntitySpec>,
@@ -186,88 +175,51 @@ impl DataDictonary {
         self.relationships.iter()
     }
 
-    pub fn navigations_for_entity(&self, entity: &EntitySpec) -> Vec<NavigationInfo> {
-        let entities = if self.active.is_empty() {
-            self.entities()
-        } else {
-            self.active.values().cloned().collect()
+    /// Resolve the foreign-key field on the target side of a `FieldSpec::Lookup`.
+    ///
+    /// For a scalar lookup (`collection == false`) this is just the lookup's own
+    /// name. For a collection lookup we look up the matching `Relationship` (or
+    /// fall back to a reverse scalar lookup on the target entity).
+    pub fn foreign_key_field(&self, source: &EntitySpec, lookup: &FieldSpec) -> Option<String> {
+        let FieldSpec::Lookup {
+            name,
+            entity: target,
+            collection,
+        } = lookup
+        else {
+            return None;
         };
 
-        entity
-            .fields()
-            .filter_map(|field| match field {
-                FieldSpec::Lookup {
-                    name,
-                    entity: target_entity,
-                    collection,
-                } => {
-                    let target = entities
-                        .iter()
-                        .find(|candidate| candidate.name() == target_entity)?;
-                    Some(NavigationInfo {
-                        name: name.clone(),
-                        source_entity: entity.name().to_string(),
-                        source_set: entity.setname(),
-                        target_entity: target_entity.clone(),
-                        target_set: target.setname(),
-                        collection: *collection,
-                        foreign_key_field: self.foreign_key_field_for_navigation(
-                            entity,
-                            target,
-                            name,
-                            *collection,
-                            &entities,
-                        ),
-                    })
-                }
-                _ => None,
-            })
-            .collect()
-    }
-
-    pub fn navigation_for_entity(
-        &self,
-        entity: &EntitySpec,
-        navigation_property: &str,
-    ) -> Option<NavigationInfo> {
-        self.navigations_for_entity(entity)
-            .into_iter()
-            .find(|navigation| navigation.name == navigation_property)
-    }
-
-    fn foreign_key_field_for_navigation(
-        &self,
-        source: &EntitySpec,
-        target: &EntitySpec,
-        navigation_name: &str,
-        collection: bool,
-        entities: &[EntitySpec],
-    ) -> Option<String> {
         if !collection {
-            return Some(navigation_name.to_string());
+            return Some(name.clone());
         }
 
         self.relationships()
             .find(|relationship| {
                 relationship.one() == source.name()
-                    && relationship.many() == target.name()
-                    && relationship.one_property() == navigation_name
+                    && relationship.many() == target
+                    && relationship.one_property() == name
             })
             .map(|relationship| relationship.many_property().to_string())
             .or_else(|| {
-                entities
-                    .iter()
-                    .find(|candidate| candidate.name() == target.name())?
-                    .fields()
-                    .find_map(|field| match field {
-                        FieldSpec::Lookup {
-                            name,
-                            entity,
-                            collection,
-                        } if entity == source.name() && !collection => Some(name.clone()),
-                        _ => None,
-                    })
+                let target_entity = self.resolve_entity(target)?;
+                target_entity.fields().find_map(|field| match field {
+                    FieldSpec::Lookup {
+                        name: rev_name,
+                        entity: rev_entity,
+                        collection: false,
+                    } if rev_entity == source.name() => Some(rev_name.clone()),
+                    _ => None,
+                })
             })
+    }
+
+    fn resolve_entity(&self, name: &str) -> Option<EntitySpec> {
+        if self.active.is_empty() {
+            self.entities().into_iter().find(|e| e.name() == name)
+        } else {
+            self.active.get(name).cloned()
+        }
     }
 
     pub fn active_entity(&self, name: &str) -> Option<&EntitySpec> {
@@ -394,28 +346,28 @@ mod tests {
     }
 
     #[test]
-    fn derives_navigation_info_from_active_entities() {
+    fn derives_foreign_key_field_from_active_entities() {
         let mut ddic = DataDictonary::new();
         ddic.activate();
 
         let entity = ddic.active_entity("Entity").expect("active entity");
-        let fields = ddic
-            .navigation_for_entity(entity, "_Fields")
-            .expect("fields navigation");
-
-        assert_eq!(fields.source_set, "EntitySet");
-        assert_eq!(fields.target_entity, "Field");
-        assert_eq!(fields.target_set, "FieldSet");
-        assert!(fields.collection);
-        assert_eq!(fields.foreign_key_field.as_deref(), Some("entity"));
+        let fields_lookup = entity
+            .fields()
+            .find(|f| matches!(f, FieldSpec::Lookup { name, .. } if name == "_Fields"))
+            .expect("_Fields lookup");
+        assert_eq!(
+            ddic.foreign_key_field(entity, fields_lookup).as_deref(),
+            Some("entity"),
+        );
 
         let field = ddic.active_entity("Field").expect("active field");
-        let parent = ddic
-            .navigation_for_entity(field, "entity")
-            .expect("parent navigation");
-
-        assert_eq!(parent.target_set, "EntitySet");
-        assert!(!parent.collection);
-        assert_eq!(parent.foreign_key_field.as_deref(), Some("entity"));
+        let parent_lookup = field
+            .fields()
+            .find(|f| matches!(f, FieldSpec::Lookup { name, .. } if name == "entity"))
+            .expect("entity lookup");
+        assert_eq!(
+            ddic.foreign_key_field(field, parent_lookup).as_deref(),
+            Some("entity"),
+        );
     }
 }

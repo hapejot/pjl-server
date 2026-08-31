@@ -1,5 +1,7 @@
+use serde::{Deserialize, Serialize};
+
 /// How a measure field relates to its unit/currency companion.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MeasureKind {
     /// `Org.OData.Measures.V1.ISOCurrency Path="{unit_field}"`
     Currency,
@@ -9,7 +11,7 @@ pub enum MeasureKind {
 
 /// A context filter for value lists: "my local field X must match target field Y".
 /// Generates a `Common.ValueListParameterIn` in the OData annotation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValueListFilter {
     /// Property on the local entity (e.g. "ConfigID", "ID")
     pub local_property: String,
@@ -18,7 +20,7 @@ pub struct ValueListFilter {
 }
 
 /// Value help configuration for an Atom field.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AtomValueList {
     /// Code/Description from a FieldValueList (identified by UUID).
     /// Generates: Common.ValueList → FieldValueListItems with ListID filter.
@@ -96,7 +98,7 @@ impl AtomValueList {
 /// Presentation overrides for a field. All fields are optional — `None` means
 /// "use smart defaults" (non-computed non-Guid fields visible in list & form,
 /// form_group defaults to "General", list order follows definition order).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PresentationOverrides {
     /// Field appears as filter control in the list header bar.
     pub searchable: Option<bool>,
@@ -123,7 +125,7 @@ pub const ID_SUFFIX: &str = "_ID";
 ///
 /// Only two variants: Atom (simple values) and Measure (value + unit/currency dependency).
 /// References to other entities are expressed as `Relationship`, not as fields.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FieldSpec {
     Lookup {
         name: String,
@@ -385,7 +387,7 @@ impl FieldSpec {
 /// Entities may be introduced by `Relationship` declarations without an explicit `EntitySpec`.
 /// In that case they get default fields (ID + Name). An `EntitySpec` refines the entity
 /// with additional fields, header info, and data points.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntitySpec {
     /// Entity name (e.g. "Orders"). Must match the entity name used in Relationships.
     pub name: String,

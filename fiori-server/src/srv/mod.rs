@@ -3,19 +3,23 @@ use std::collections::HashMap;
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
-    http::{HeaderName, header},
+    http::{HeaderName, StatusCode, header},
     response::Html,
     response::IntoResponse,
+    response::Response,
     routing::get,
 };
 use odata::{
     path::{PathSegment, parse_odata_path},
-    query::{ExpandItem, Expr, ODataQuery},
+    query::{BinOp, ExpandItem, Expr, ODataQuery},
 };
-use odata_yaml_store::EntityKey;
+use odata_yaml_store::{EntityKey, StoreError, datastore::DataRecord};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use spec::{AtomValueList, EntitySpec, FieldSpec, MeasureKind, data_dictionary::DataDictonary};
+use spec::{
+    AtomValueList, EntitySpec, FieldSpec, MeasureKind, Relationship, app::App,
+    data_dictionary::DataDictonary, package::Package,
+};
 use tracing::*;
 
 use crate::AppState;
@@ -291,11 +295,16 @@ impl EntitySet {
             path: "DraftAdministrativeData".into(),
             target: "DraftAdministrativeData".into(),
         });
-        for navigation in ddic.navigations_for_entity(x) {
-            navigation_property_bindings.push(NavigationPropertyBinding {
-                path: navigation.name,
-                target: navigation.target_set,
-            });
+        for field in x.fields() {
+            if let FieldSpec::Lookup { name, entity, .. } = field {
+                let Some(target) = ddic.active_entity(entity) else {
+                    continue;
+                };
+                navigation_property_bindings.push(NavigationPropertyBinding {
+                    path: name.clone(),
+                    target: target.setname(),
+                });
+            }
         }
 
         EntitySet {
@@ -375,28 +384,31 @@ impl Annotations {
             .annotations
             .push(Annotation::new("Common.Messages").path("DraftMessages"));
 
-        // Default Object Page section pointing to a main field group.
-        main_annotations.annotations.push(
-            Annotation::new("UI.Facets").collection(
-                Collection::new().add_record(
-                    Record::new("UI.CollectionFacet")
-                        .add(PropertyValue::new("Label").string("General"))
-                        .add(PropertyValue::new("ID").string("GeneralSection"))
-                        .add(
-                            PropertyValue::new("Facets").collection(
-                                Collection::new().add_record(
-                                    Record::new("UI.ReferenceFacet")
-                                        .add(PropertyValue::new("Label").string("General"))
-                                        .add(
-                                            PropertyValue::new("Target")
-                                                .annotation_path("@UI.FieldGroup#Main"),
-                                        ),
+        // Default Object Page section pointing to a main field group, plus one
+        // list section per to-many navigation.
+        let mut facets = Collection::new().add_record(
+            Record::new("UI.CollectionFacet")
+                .add(PropertyValue::new("Label").string("General"))
+                .add(PropertyValue::new("ID").string("GeneralSection"))
+                .add(
+                    PropertyValue::new("Facets").collection(
+                        Collection::new().add_record(
+                            Record::new("UI.ReferenceFacet")
+                                .add(PropertyValue::new("Label").string("General"))
+                                .add(
+                                    PropertyValue::new("Target")
+                                        .annotation_path("@UI.FieldGroup#Main"),
                                 ),
-                            ),
                         ),
+                    ),
                 ),
-            ),
         );
+        for record in list_facet_records(x) {
+            facets = facets.add_record(record);
+        }
+        main_annotations
+            .annotations
+            .push(Annotation::new("UI.Facets").collection(facets));
 
         let main_field_group = prepare_field_group(x);
         main_annotations.annotations.push(main_field_group);
@@ -506,6 +518,29 @@ impl Annotations {
             annotations,
         }
     }
+}
+
+/// One top-level `UI.ReferenceFacet` section per to-many navigation, pointing at
+/// the target entity's default `UI.LineItem` for its table columns.
+fn list_facet_records(x: &EntitySpec) -> Vec<Record> {
+    x.fields()
+        .filter_map(|f| match f {
+            FieldSpec::Lookup {
+                name,
+                collection: true,
+                ..
+            } => Some(
+                Record::new("UI.ReferenceFacet")
+                    .add(PropertyValue::new("Label").string(name))
+                    .add(PropertyValue::new("ID").string(format!("{name}Section")))
+                    .add(
+                        PropertyValue::new("Target")
+                            .annotation_path(format!("{name}/@UI.LineItem")),
+                    ),
+            ),
+            _ => None,
+        })
+        .collect()
 }
 
 fn prepare_field_group(x: &EntitySpec) -> Annotation {
@@ -849,147 +884,91 @@ impl PropertyValue {
         self
     }
 }
-// body style alternatives:
-//    display: flex;
-//    align-items: center;
-//    justify-content: center;
 
-const MODERN_STYLE: &str = r#"
-<style>
-  body {
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    background: #0f172a;
-    color: #e2e8f0;
-    min-height: 100vh;
-    margin: 0;
-  }
-  .card {
-    background: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 16px;
-    padding: 2rem 2.5rem;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-    max-width: 480px;
-  }
-  h1 {
-    font-size: 1.5rem;
-    font-weight: 600;
-    margin: 0 0 0.5rem;
-    background: linear-gradient(135deg, #60a5fa, #a78bfa);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-  p {
-    font-size: 0.95rem;
-    line-height: 1.5;
-    color: #94a3b8;
-  }
-  table {
-      width: 100%;
-  }
-</style>
-"#;
+const INFO_TEMPLATE: &str = include_str!("../../templates/info.hbs");
+
 /// Build the HTML data dictionary page.
+//
+// Handlebars nimmt jeden `Serialize`-Typ direkt entgegen. Domain-Typen (`Package`,
+// `App`, `Relationship`) werden hier unverändert durchgereicht; abgeleitete Werte
+// (URL, Kardinalität, FK-Fallback) macht das Template selbst.
+// Für `EntitySpec` bauen wir mit `serde_json::json!` ein flaches Ad-hoc-Format,
+// weil `setname()` berechnet ist und `FieldSpec` als Enum untauglich fürs Template.
 fn render_info_page(state: &AppState) -> String {
-    let mut html = String::new();
-    html.push_str(MODERN_STYLE);
-    // html.push_str("<div class='card'>");
-    html.push_str("<h1>Data Dictionary</h1>\n");
+    let packages: Vec<&Package> = state.ddic.packages().collect();
+    let apps: Vec<&App> = state.ddic.apps().collect();
+    let relationships: Vec<&Relationship> = state.ddic.relationships().collect();
 
-    // Packages
-    let packages: Vec<_> = state.ddic.packages().collect();
-    html.push_str("<h2>Packages</h2>\n<ul>\n");
-    for p in packages {
-        html.push_str(&format!("<li>{}</li>\n", p.name()));
-    }
-    html.push_str("</ul>\n");
+    let entities: Vec<Value> = state
+        .ddic
+        .active_entities()
+        .cloned()
+        .map(|ent| {
+            let fields: Vec<Value> = ent
+                .fields()
+                .map(|f| {
+                    json!({
+                        "name": f.name(),
+                        "label": f.label(),
+                        "edm_type": format_field_value(f),
+                    })
+                })
+                .collect();
+            let navigations: Vec<Value> = ent
+                .fields()
+                .filter_map(|field| match field {
+                    FieldSpec::Lookup {
+                        name,
+                        entity: target_entity,
+                        collection,
+                    } => {
+                        let target_set = state
+                            .ddic
+                            .active_entity(target_entity)
+                            .map(|e| e.setname())
+                            .unwrap_or_else(|| format!("{target_entity}Set"));
+                        Some(json!({
+                            "name": name,
+                            "source_entity": ent.name(),
+                            "source_set": ent.setname(),
+                            "target_entity": target_entity,
+                            "target_set": target_set,
+                            "collection": *collection,
+                            "foreign_key_field": state.ddic.foreign_key_field(&ent, field),
+                        }))
+                    }
+                    _ => None,
+                })
+                .collect();
+            json!({
+                "name": ent.name(),
+                "set": ent.setname(),
+                "field_count": fields.len(),
+                "nav_count": navigations.len(),
+                "fields": fields,
+                "navigations": navigations,
+            })
+        })
+        .collect();
 
-    // Apps
-    let apps: Vec<_> = state.ddic.apps().collect();
-    html.push_str(&format!(
-        "<h2>Apps ({})</h2>\n<ul class=\"apps\">\n",
-        apps.len()
-    ));
-    for app in apps {
-        html.push_str(&format!(
-            "<li><span class=\"app-title\">{}</span>\n\
-             <span class=\"app-sub\">{}\n\
-             <a href=\"{}\">{}</a> · {}\n",
-            app.title(),
-            app.subtitle().map(|s| s.as_str()).unwrap_or(""),
-            app.url(),
-            app.name(),
-            app.action(),
-        ));
-    }
-    html.push_str("</ul>\n");
+    let ctx = json!({
+        "packages": packages,
+        "apps_count": apps.len(),
+        "apps": apps,
+        "entities_count": entities.len(),
+        "entities": entities,
+        "relationships_count": relationships.len(),
+        "relationships": relationships,
+    });
 
-    // Entities
-    let entities: Vec<_> = state.ddic.active_entities().cloned().collect();
-    html.push_str(&format!(
-        "<h2>Entities ({})</h2>\n<ul class=\"entities\">\n",
-        entities.len()
-    ));
-    for ent in entities {
-        let set = ent.setname();
-        let fields: Vec<_> = ent.fields().cloned().collect();
-        let navigations = state.ddic.navigations_for_entity(&ent);
-        html.push_str(&format!(
-            "<h3>{}</h3><p>(set {}, {} fields, {} nav)</p>",
-            ent.name(),
-            set,
-            fields.len(),
-            navigations.len()
-        ));
-
-        html.push_str(
-            "<table class=\"fields\">\n<tr><th>Field</th><th>UI Label</th><th>Edm Type</th></tr>\n",
-        );
-        for f in fields {
-            let display = f.label();
-            let ftype = format_field_value(&f);
-            html.push_str(&format!(
-                "<tr><td>{}</td><td>{display}</td><td>{ftype}</td></tr>\n",
-                f
-            ));
+    let hbs = handlebars::Handlebars::new();
+    match hbs.render_template(INFO_TEMPLATE, &ctx) {
+        Ok(html) => html,
+        Err(e) => {
+            error!("failed to render info page template: {e}");
+            format!("<pre>template error: {e}</pre>")
         }
-        html.push_str("</table><ul>\n");
-
-        for nav in navigations {
-            let collection = if nav.collection { "collection" } else { "1:1" };
-            html.push_str(&format!(
-                "<li>{0} → {1} (source set {2}, target set {3}, FK {4})<span class=\"cardinality\">{collection}</span>\n",
-                nav.name, nav.target_entity, nav.source_set, nav.target_set,
-                nav.foreign_key_field.as_deref().unwrap_or("-")
-            ));
-        }
-        html.push_str("</ul>\n");
     }
-
-    // Relationships
-    let relationships: Vec<_> = state.ddic.relationships().cloned().collect();
-    html.push_str(&format!(
-        "<h2>Relationships ({})</h2>\n<ul class=\"relationships\">\n",
-        relationships.len()
-    ));
-    for rel in relationships {
-        html.push_str(&format!(
-            "<li>\n\
-             <span class=\"rel-name\">{}</span>\n\
-             <span class=\"rel-one\">{}</span> → <span class=\"rel-many\">{}</span> \n\
-             <span class=\"cardinality\">{}</span> · package <span class=\"rel-pkg\">{}</span>\n",
-            rel.name,
-            rel.one(),
-            rel.many(),
-            rel.package,
-            rel.package
-        ));
-    }
-    html.push_str("</ul>\n");
-    // html.push_str("</div>");
-    html
 }
 
 fn format_field_value(f: &FieldSpec) -> String {
@@ -1161,282 +1140,389 @@ fn to_json_response(body: Value) -> ([(HeaderName, String); 2], String) {
     )
 }
 
-fn entity_spec_for_segment(state: &AppState, s: &PathSegment) -> EntitySpec {
+fn entity_spec_for_segment(state: &AppState, s: &PathSegment) -> Result<EntitySpec, ODataError> {
     state
         .ddic
         .active_entity_by_setname(&s.name)
-        .unwrap_or_else(|| panic!("No active entity for set '{}'", s.name))
-        .clone()
+        .cloned()
+        .ok_or_else(|| ODataError::not_found(format!("Unknown entity set '{}'", s.name)))
+}
+
+#[derive(Debug)]
+struct ODataError {
+    status: StatusCode,
+    code: &'static str,
+    message: String,
+}
+
+impl ODataError {
+    fn bad_request(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            code: "BadRequest",
+            message: message.into(),
+        }
+    }
+
+    fn not_found(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            code: "NotFound",
+            message: message.into(),
+        }
+    }
+
+    fn from_store(e: StoreError) -> Self {
+        match e {
+            StoreError::NotFound(_) => Self::not_found(e.to_string()),
+            _ => Self {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "InternalError",
+                message: e.to_string(),
+            },
+        }
+    }
+}
+
+impl IntoResponse for ODataError {
+    fn into_response(self) -> Response {
+        let body = json!({"error": {"code": self.code, "message": self.message}});
+        (
+            self.status,
+            [content_type_json(), odata_version()],
+            body.to_string(),
+        )
+            .into_response()
+    }
+}
+
+enum GetResult {
+    Json(Value),
+    Text(String),
+    NoContent,
+}
+
+impl IntoResponse for GetResult {
+    fn into_response(self) -> Response {
+        match self {
+            GetResult::Json(value) => to_json_response(value).into_response(),
+            GetResult::Text(text) => (
+                [
+                    (header::CONTENT_TYPE, "text/plain;charset=utf-8".to_string()),
+                    odata_version(),
+                ],
+                text,
+            )
+                .into_response(),
+            GetResult::NoContent => (StatusCode::NO_CONTENT, [odata_version()]).into_response(),
+        }
+    }
+}
+
+/// Zwischenstand beim Ablaufen der Pfadsegmente.
+enum Cursor {
+    Entity {
+        spec: EntitySpec,
+        set: String,
+        record: Box<DataRecord>,
+    },
+    Collection {
+        records: Vec<DataRecord>,
+        count: Option<usize>,
+    },
+    Property {
+        value: Value,
+    },
+    Empty,
 }
 
 async fn get_handler(
     path: Path<String>,
     state: State<AppState>,
     params: Query<HashMap<String, String>>,
-) -> impl IntoResponse {
-    let p = build_query(&params);
-    let path_struct = parse_odata_path(&path).unwrap();
-    let (mut j, context) = resolve_get_path(&state, &p, &path_struct.segments);
-    j["@odata.context"] = json!(context.concat());
-    to_json_response(j)
+) -> Response {
+    let query = build_query(&params);
+    let path_struct = match parse_odata_path(&path) {
+        Ok(p) => p,
+        Err(e) => {
+            return ODataError::bad_request(format!("Invalid path '{}': {}", e.segment, e.message))
+                .into_response();
+        }
+    };
+    match resolve_get_path(&state, &query, &path_struct.segments) {
+        Ok(result) => result.into_response(),
+        Err(e) => e.into_response(),
+    }
 }
 
 fn resolve_get_path(
-    state: &State<AppState>,
+    state: &AppState,
     query: &ODataQuery,
     segments: &[PathSegment],
-) -> (Value, Vec<String>) {
-    let root = segments.first().expect("OData path has a root segment");
-    let entity_spec = entity_spec_for_segment(state, root);
-    let value = if root.keys.is_empty() {
-        get_collection(state, query, &entity_spec, root)
-    } else {
-        let mut single = get_single(state, query, &entity_spec, root);
-        touch_selected_fields(&mut single, query);
-        single
+) -> Result<GetResult, ODataError> {
+    // `$count`/`$value` beschreiben die Darstellung des Vorgaengersegments, nicht eine Navigation.
+    let suffix = segments
+        .last()
+        .map(|s| s.name.as_str())
+        .filter(|name| *name == "$count" || *name == "$value");
+    let nav_segments = match suffix {
+        Some(_) => &segments[..segments.len() - 1],
+        None => segments,
     };
-    let is_collection = root.keys.is_empty();
+    let Some(root) = nav_segments.first() else {
+        return Err(ODataError::bad_request("Path without entity set"));
+    };
 
-    for segment in segments.iter().skip(1) {
-        info!("processing segment {:?}", segment);
-        let navigation_query = if segment == segments.last().unwrap() {
-            query
-        } else {
-            &ODataQuery::default()
-        };
-        // let resolved = resolve_navigation(state, &entity_spec, &value, segment, navigation_query);
-        // entity_spec = resolved.entity_spec;
-        // value = resolved.value;
-        // is_collection = resolved.is_collection;
-    }
+    let target_query = match suffix {
+        Some("$count") => ODataQuery {
+            top: None,
+            skip: None,
+            count: false,
+            select: vec![],
+            expand: vec![],
+            ..query.clone()
+        },
+        _ => query.clone(),
+    };
+    let intermediate_query = ODataQuery::default();
+    let last = nav_segments.len() - 1;
 
-    // let final_expand = expand_for_spec(state, &entity_spec, &query.expand);
-    // apply_expand(state, &entity_spec, &mut value, &final_expand);
-    // project_value(&mut value, &query.select, &final_expand);
-
-    let mut context = vec!["/Service/$metadata#".to_string()];
-    if is_collection {
-        context.push(entity_spec.setname().to_string());
+    let spec = entity_spec_for_segment(state, root)?;
+    let mut context = spec.setname();
+    let root_query = if last == 0 {
+        &target_query
     } else {
-        context.push(format!("{}/$entity", entity_spec.setname()));
+        &intermediate_query
+    };
+    let mut cursor = if root.keys.is_empty() {
+        read_collection(state, &root.name, root_query)?
+    } else {
+        let record = read_single(state, &root.name, &entity_key(root)?, root_query)?;
+        Cursor::Entity {
+            spec,
+            set: root.name.clone(),
+            record: Box::new(record),
+        }
+    };
+
+    for (idx, segment) in nav_segments.iter().enumerate().skip(1) {
+        info!("processing segment {:?}", segment);
+        let navigation_query = if idx == last {
+            &target_query
+        } else {
+            &intermediate_query
+        };
+        cursor = follow_segment(state, cursor, segment, navigation_query, &mut context)?;
     }
-    (value, context)
+
+    materialize(cursor, suffix, &target_query, &context)
 }
 
-// fn expand_for_spec(
-//     state: &State<AppState>,
-//     entity_spec: &EntitySpec,
-//     expand_items: &[ExpandItem],
-// ) -> Vec<ExpandItem> {
-//     expand_items
-//         .iter()
-//         .cloned()
-//         .filter(|expand| has_navigation(state, entity_spec, &expand.navigation_property))
-//         .collect()
-// }
+fn materialize(
+    cursor: Cursor,
+    suffix: Option<&str>,
+    query: &ODataQuery,
+    context: &str,
+) -> Result<GetResult, ODataError> {
+    let context = format!("/Service/$metadata#{context}");
+    match (cursor, suffix) {
+        (Cursor::Collection { records, .. }, Some("$count")) => {
+            Ok(GetResult::Text(records.len().to_string()))
+        }
+        (Cursor::Property { value }, Some("$value")) => Ok(GetResult::Text(match value {
+            Value::String(s) => s,
+            other => other.to_string(),
+        })),
+        (_, Some(suffix)) => Err(ODataError::bad_request(format!(
+            "'{suffix}' is not applicable here"
+        ))),
+        (Cursor::Entity { record, .. }, None) => {
+            let mut value = json!(record);
+            touch_selected_fields(&mut value, query);
+            value["@odata.context"] = json!(format!("{context}/$entity"));
+            Ok(GetResult::Json(value))
+        }
+        (Cursor::Collection { records, count }, None) => {
+            let mut value = json!({ "@odata.context": context, "value": records });
+            if let Some(count) = count {
+                value["@odata.count"] = json!(count);
+            }
+            Ok(GetResult::Json(value))
+        }
+        (Cursor::Property { value }, None) => Ok(GetResult::Json(
+            json!({ "@odata.context": context, "value": value }),
+        )),
+        (Cursor::Empty, None) => Ok(GetResult::NoContent),
+    }
+}
 
-// fn has_navigation(
-//     state: &State<AppState>,
-//     entity_spec: &EntitySpec,
-//     navigation_property: &str,
-// ) -> bool {
-//     navigation_property == "DraftAdministrativeData"
-//         || state
-//             .ddic
-//             .navigation_for_entity(entity_spec, navigation_property)
-//             .is_some()
-// }
+/// Ein Navigations-, Property- oder Draft-Segment ausgehend vom aktuellen Cursor aufloesen.
+fn follow_segment(
+    state: &AppState,
+    cursor: Cursor,
+    segment: &PathSegment,
+    query: &ODataQuery,
+    context: &mut String,
+) -> Result<Cursor, ODataError> {
+    let Cursor::Entity { spec, set, record } = cursor else {
+        return Err(ODataError::bad_request(format!(
+            "'{}' cannot be applied to a collection",
+            segment.name
+        )));
+    };
+    context.push_str(&format!(
+        "(ID={},IsActiveEntity={})/{}",
+        record.id(),
+        record.is_active_entity(),
+        segment.name
+    ));
 
-// struct ResolvedNavigation {
-//     entity_spec: EntitySpec,
-//     value: Value,
-//     is_collection: bool,
-// }
+    match segment.name.as_str() {
+        // Beide Draft-Navigationen sind nullable: fehlt das Ziel, ist die Antwort leer.
+        "SiblingEntity" => {
+            let key = EntityKey::new(record.id(), record.is_active_entity()).sibling();
+            match state.store.read_entity(&set, &key, query) {
+                Ok(record) => Ok(Cursor::Entity {
+                    spec,
+                    set,
+                    record: Box::new(record),
+                }),
+                Err(StoreError::NotFound(_)) => Ok(Cursor::Empty),
+                Err(e) => Err(ODataError::from_store(e)),
+            }
+        }
+        "DraftAdministrativeData" => match record.draft_admin_data() {
+            Some(data) => Ok(Cursor::Property { value: json!(data) }),
+            None => Ok(Cursor::Empty),
+        },
+        name => match spec.fields().find(|f| f.name() == name).cloned() {
+            Some(field) => match &field {
+                FieldSpec::Lookup {
+                    entity, collection, ..
+                } => {
+                    let target = state.ddic.active_entity(entity).cloned().ok_or_else(|| {
+                        ODataError::not_found(format!("Unknown entity '{entity}'"))
+                    })?;
+                    if *collection {
+                        follow_to_many(state, &spec, &field, target, &record, segment, query)
+                    } else {
+                        follow_to_one(state, name, target, &record, query)
+                    }
+                }
+                _ => Ok(Cursor::Property {
+                    value: record.get(name).unwrap_or(Value::Null),
+                }),
+            },
+            None => Err(ODataError::not_found(format!(
+                "'{name}' is not a member of '{}'",
+                spec.name()
+            ))),
+        },
+    }
+}
 
-// fn resolve_navigation(
-//     state: &State<AppState>,
-//     current_spec: &EntitySpec,
-//     current_value: &Value,
-//     segment: &PathSegment,
-//     query: &ODataQuery,
-// ) -> ResolvedNavigation {
-//     if segment.name == "DraftAdministrativeData" {
-//         return ResolvedNavigation {
-//             entity_spec: current_spec.clone(),
-//             value: current_value["DraftAdministrativeData"].clone(),
-//             is_collection: false,
-//         };
-//     }
+fn follow_to_one(
+    state: &AppState,
+    name: &str,
+    target: EntitySpec,
+    parent: &DataRecord,
+    query: &ODataQuery,
+) -> Result<Cursor, ODataError> {
+    let foreign_key = format!("{name}_ID");
+    let Some(id) = parent.get(&foreign_key).filter(|v| !v.is_null()) else {
+        return Ok(Cursor::Empty);
+    };
+    let set = target.setname();
+    let lookup = ODataQuery {
+        top: None,
+        skip: None,
+        count: false,
+        filter: Some(and_filter(
+            query.filter.clone(),
+            Expr::equals_value(&id, "ID"),
+        )),
+        ..query.clone()
+    };
+    let record = state
+        .store
+        .get_collection(&set, &lookup)
+        .map_err(ODataError::from_store)?
+        .into_iter()
+        .next();
+    match record {
+        Some(record) => Ok(Cursor::Entity {
+            spec: target,
+            set,
+            record: Box::new(record),
+        }),
+        None => Ok(Cursor::Empty),
+    }
+}
 
-//     let navigation = state
-//         .ddic
-//         .navigation_for_entity(current_spec, &segment.name)
-//         .unwrap_or_else(|| {
-//             panic!(
-//                 "Unknown navigation {} on {}",
-//                 segment.name,
-//                 current_spec.name()
-//             )
-//         });
+fn follow_to_many(
+    state: &AppState,
+    spec: &EntitySpec,
+    field: &FieldSpec,
+    target: EntitySpec,
+    parent: &DataRecord,
+    segment: &PathSegment,
+    query: &ODataQuery,
+) -> Result<Cursor, ODataError> {
+    let foreign_key = state
+        .ddic
+        .foreign_key_field(spec, field)
+        .map(|f| format!("{f}_ID"))
+        .ok_or_else(|| {
+            ODataError::not_found(format!(
+                "No foreign key for navigation '{}' of '{}'",
+                field.name(),
+                spec.name()
+            ))
+        })?;
+    let parent_filter = Expr::equals_guid(parent.id().to_string(), &foreign_key);
+    let set = target.setname();
 
-//     let target_spec = entity_spec_by_name(state, &navigation.target_entity);
-//     if navigation.collection {
-//         resolve_collection_navigation(
-//             state,
-//             current_spec,
-//             current_value,
-//             &target_spec,
-//             &navigation.name,
-//             navigation.foreign_key_field.as_deref(),
-//             segment,
-//             query,
-//         )
-//     } else {
-//         resolve_single_navigation(
-//             state,
-//             current_value,
-//             &target_spec,
-//             &navigation.name,
-//             segment,
-//         )
-//     }
-// }
+    if segment.keys.is_empty() {
+        let mut child_query = query.clone();
+        child_query.filter = Some(and_filter(child_query.filter, parent_filter));
+        return read_collection(state, &set, &child_query);
+    }
 
-// fn resolve_single_navigation(
-//     state: &State<AppState>,
-//     current_value: &Value,
-//     target_spec: &EntitySpec,
-//     lookup_name: &str,
-//     segment: &PathSegment,
-// ) -> ResolvedNavigation {
-//     let target_set = target_spec.setname();
-//     let value = if segment.keys.is_empty() {
-//         current_value
-//             .get(lookup_name)
-//             .and_then(value_as_uuid)
-//             .map(|id| {
-//                 let key = EntityKey::new(id, true);
-//                 json!(state.store.read_entity(&target_set, &key).unwrap())
-//             })
-//             .unwrap_or(Value::Null)
-//     } else {
-//         let key: EntityKey = segment.into();
-//         json!(state.store.read_entity(&target_set, &key).unwrap())
-//     };
+    let record = read_single(state, &set, &entity_key(segment)?, query)?;
+    if record
+        .get(&foreign_key)
+        .and_then(|v| v.as_str().map(str::to_string))
+        != Some(parent.id().to_string())
+    {
+        return Err(ODataError::not_found(format!(
+            "Entity is not part of '{}'",
+            segment.name
+        )));
+    }
+    Ok(Cursor::Entity {
+        spec: target,
+        set,
+        record: Box::new(record),
+    })
+}
 
-//     ResolvedNavigation {
-//         entity_spec: target_spec.clone(),
-//         value,
-//         is_collection: false,
-//     }
-// }
+fn and_filter(existing: Option<Expr>, additional: Expr) -> Expr {
+    match existing {
+        Some(existing) => Expr::BinaryOp {
+            op: BinOp::And,
+            left: Box::new(existing),
+            right: Box::new(additional),
+        },
+        None => additional,
+    }
+}
 
-// fn resolve_collection_navigation(
-//     state: &State<AppState>,
-//     current_spec: &EntitySpec,
-//     current_value: &Value,
-//     target_spec: &EntitySpec,
-//     lookup_name: &str,
-//     foreign_key_field: Option<&str>,
-//     segment: &PathSegment,
-//     query: &ODataQuery,
-// ) -> ResolvedNavigation {
-//     let target_set = target_spec.setname();
-//     let foreign_key = foreign_key_field.unwrap_or_else(|| {
-//         panic!(
-//             "No foreign key for collection navigation {} from {} to {}",
-//             lookup_name,
-//             current_spec.name(),
-//             target_spec.name()
-//         )
-//     });
-//     let parent_id = current_value
-//         .get("ID")
-//         .and_then(value_as_uuid)
-//         .expect("Current entity has an ID");
-//     let mut records = state.store.get_collection(&target_set, query).unwrap();
-//     records.retain(|record| {
-//         record[foreign_key]
-//             .as_str()
-//             .and_then(|value| Uuid::parse_str(value).ok())
-//             == Some(parent_id)
-//     });
-
-//     if segment.keys.is_empty() {
-//         ResolvedNavigation {
-//             entity_spec: target_spec.clone(),
-//             value: json!({ "value": records }),
-//             is_collection: true,
-//         }
-//     } else {
-//         let key: EntityKey = segment.into();
-//         let record = records
-//             .into_iter()
-//             .find(|record| {
-//                 record.id() == key.id && record.is_active_entity() == key.is_active_entity
-//             })
-//             .map(|record| json!(record))
-//             .unwrap_or(Value::Null);
-//         ResolvedNavigation {
-//             entity_spec: target_spec.clone(),
-//             value: record,
-//             is_collection: false,
-//         }
-//     }
-// }
-
-// fn apply_expand(
-//     state: &State<AppState>,
-//     entity_spec: &EntitySpec,
-//     value: &mut Value,
-//     expand_items: &[ExpandItem],
-// ) {
-//     if expand_items.is_empty() {
-//         return;
-//     }
-
-//     if let Some(items) = value.get_mut("value").and_then(Value::as_array_mut) {
-//         for item in items {
-//             apply_expand_to_entity(state, entity_spec, item, expand_items);
-//         }
-//         return;
-//     }
-
-//     apply_expand_to_entity(state, entity_spec, value, expand_items);
-// }
-
-// fn apply_expand_to_entity(
-//     state: &State<AppState>,
-//     entity_spec: &EntitySpec,
-//     value: &mut Value,
-//     expand_items: &[ExpandItem],
-// ) {
-//     if !value.is_object() {
-//         return;
-//     }
-
-//     for expand in expand_items {
-//         let segment = PathSegment {
-//             name: expand.navigation_property.clone(),
-//             keys: vec![],
-//         };
-//         let resolved =
-//             resolve_navigation(state, entity_spec, value, &segment, &expand.nested_query);
-//         let mut expanded_value = resolved.value;
-//         apply_expand(
-//             state,
-//             &resolved.entity_spec,
-//             &mut expanded_value,
-//             &expand.nested_query.expand,
-//         );
-//         project_value(
-//             &mut expanded_value,
-//             &expand.nested_query.select,
-//             &expand.nested_query.expand,
-//         );
-//         value[&expand.navigation_property] = expanded_value;
-//     }
-// }
+fn entity_key(segment: &PathSegment) -> Result<EntityKey, ODataError> {
+    let id = segment.id().ok_or_else(|| {
+        ODataError::bad_request(format!("Missing key 'ID' in '{}'", segment.name))
+    })?;
+    Ok(EntityKey::new(id, segment.is_active_entity()))
+}
 
 fn touch_selected_fields(value: &mut Value, query: &ODataQuery) {
     for field in query.select.iter() {
@@ -1477,34 +1563,25 @@ fn touch_selected_fields(value: &mut Value, query: &ODataQuery) {
 //     value.as_str().and_then(|value| Uuid::parse_str(value).ok())
 // }
 
-fn get_single(
-    state: &State<AppState>,
-    p: &ODataQuery,
-    _entity_spec: &EntitySpec,
-    s: &odata::path::PathSegment,
-) -> Value {
-    let key: EntityKey = s.into();
-    let j = state.store.read_entity(&s.name, &key, p).unwrap();
-    // info!("get single: {j:#?}");
-    json!(j)
+fn read_single(
+    state: &AppState,
+    set: &str,
+    key: &EntityKey,
+    query: &ODataQuery,
+) -> Result<DataRecord, ODataError> {
+    state
+        .store
+        .read_entity(set, key, query)
+        .map_err(ODataError::from_store)
 }
 
-fn get_collection(
-    state: &State<AppState>,
-    p: &ODataQuery,
-    entity_spec: &EntitySpec,
-    s: &odata::path::PathSegment,
-) -> Value {
-    let r = state.store.get_collection(&s.name, p).unwrap();
-    let mut resp = json!({
-      "@odata.context": format!("/Service/$metadata#{}", entity_spec.setname()),
-      "value": r
-    });
-    if p.count {
-        let count = state.store.count(&s.name, p);
-        resp["@odata.count"] = json!(count);
-    }
-    resp
+fn read_collection(state: &AppState, set: &str, query: &ODataQuery) -> Result<Cursor, ODataError> {
+    let records = state
+        .store
+        .get_collection(set, query)
+        .map_err(ODataError::from_store)?;
+    let count = query.count.then(|| state.store.count(set, query));
+    Ok(Cursor::Collection { records, count })
 }
 
 async fn post_handler(
@@ -1764,6 +1841,50 @@ mod tests {
                 .iter()
                 .any(|property| property.name == "name" && property.type_ == "Edm.String")
         );
+    }
+
+    #[test]
+    fn facets_include_a_list_section_per_to_many_navigation() {
+        let mut ddic = DataDictonary::new();
+        ddic.activate();
+        // "Entity" has to-many lookups _Fields, _Many, _One after activation.
+        let entity = ddic.active_entity("Entity").unwrap();
+
+        let annotations = Annotations::from_entity(entity);
+        let main = annotations
+            .iter()
+            .find(|a| a.target == "Service.Entity")
+            .unwrap();
+        let facets = main
+            .annotations
+            .iter()
+            .find(|a| a.term == "UI.Facets")
+            .unwrap()
+            .collection
+            .as_ref()
+            .unwrap();
+
+        for nav_name in ["_Fields", "_Many", "_One"] {
+            let record = facets
+                .records
+                .iter()
+                .find(|r| {
+                    r.property_values.iter().any(|pv| {
+                        pv.property == "ID"
+                            && pv.string.as_deref() == Some(&format!("{nav_name}Section"))
+                    })
+                })
+                .unwrap_or_else(|| panic!("no list facet generated for {nav_name}"));
+            let target = record
+                .property_values
+                .iter()
+                .find(|pv| pv.property == "Target")
+                .unwrap();
+            assert_eq!(
+                target.annotation_path.as_deref(),
+                Some(format!("{nav_name}/@UI.LineItem").as_str())
+            );
+        }
     }
 
     #[test]

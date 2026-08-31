@@ -117,6 +117,36 @@ mod tests {
     }
 
     #[test]
+    fn get_collection_applies_skip_and_top() {
+        let (_dir, store) = make_store();
+        for (n, id) in [
+            "00000000-0000-0000-0000-000000000001",
+            "00000000-0000-0000-0000-000000000002",
+            "00000000-0000-0000-0000-000000000003",
+        ]
+        .iter()
+        .enumerate()
+        {
+            store
+                .create_entity(
+                    "Orders",
+                    &json!({ "ID": Uuid::parse_str(id).unwrap(), "Amount": (n as i64 + 1) * 10 }),
+                )
+                .unwrap();
+        }
+
+        let mut query = ODataQuery::new().order_by("Amount", SortDirection::Asc);
+        query.skip = Some(1);
+        query.top = Some(1);
+
+        let result = store.get_collection("Orders", &query).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].get("Amount"), Some(json!(20)));
+        // $count ignoriert die Seitenaufteilung
+        assert_eq!(store.count("Orders", &query), 3);
+    }
+
+    #[test]
     fn draft_edit_activate_roundtrip() {
         let (_dir, store) = make_store();
         store
@@ -198,7 +228,7 @@ mod tests {
             .create_entity(
                 "Orders",
                 &json!({ "ID": "00000000-0000-0000-0000-000000000001",
-                "Customer": "00000000-0000-0000-0000-000000000005",
+                "Customer_ID": "00000000-0000-0000-0000-000000000005",
                 "Status": "Released" }),
             )
             .unwrap();
@@ -216,16 +246,23 @@ mod tests {
         let result = store.get_collection("Orders", &q).unwrap();
         match result.as_slice() {
             [r] => {
-                let x = r.get("_Items").unwrap();
-                assert!(x.is_array());
-                let x = r.get("Customer").unwrap();
-                assert!(x.is_object());
+                let items = r.get("_Items").unwrap();
+                assert_eq!(items.as_array().map(|a| a.len()), Some(3));
+                let customer = r.get("Customer").unwrap();
+                assert_eq!(customer["Name"], json!("ACME Inc."));
             }
             _ => panic!(),
         }
-        let q = ODataQuery::new();
-        let _r = store
-            .read_entity("Orders", &EntityKey::new_active(""), &q)
-            .unwrap();
+
+        let key = EntityKey::new(
+            Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+            false,
+        );
+        let r = store.read_entity("Orders", &key, &q).unwrap();
+        assert_eq!(
+            r.get("_Items").unwrap().as_array().map(|a| a.len()),
+            Some(3)
+        );
+        assert_eq!(r.get("Customer").unwrap()["Name"], json!("ACME Inc."));
     }
 }

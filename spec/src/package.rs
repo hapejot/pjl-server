@@ -1,4 +1,5 @@
-#[derive(Clone, Debug)]
+use serde::{Serialize, Deserialize};
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Package {
     name: String,
 }

@@ -1,1 +1,38 @@
 http://localhost:3033/Service/EntitySet(ID=889a5bcc-847b-41f5-978a-7d745d89015d,IsActiveEntity=false)/_One
+
+@host = http://localhost:3033/Service
+@entity = EntitySet(ID=889a5bcc-847b-41f5-978a-7d745d89015d,IsActiveEntity=true)
+@package = PackageSet(ID=76d7d436-62e7-411f-9e59-c37ce823c971,IsActiveEntity=true)
+
+### To-Many-Liste
+GET {{host}}/{{package}}/_Entitites?$count=true&$top=30&$skip=0
+
+### To-Many gefiltert
+GET {{host}}/{{package}}/_Entitites?$filter=name eq 'Person'
+
+### To-Many, Anzahl
+GET {{host}}/{{package}}/_Entitites/$count
+
+### Einzelner Eintrag der To-Many-Liste
+GET {{host}}/{{package}}/_Entitites(ID=889a5bcc-847b-41f5-978a-7d745d89015d,IsActiveEntity=true)
+
+### To-One-Navigation
+GET {{host}}/{{entity}}/package
+
+### Mehrstufige Navigation
+GET {{host}}/{{entity}}/package/_Entitites/$count
+
+### Property
+GET {{host}}/{{entity}}/name
+
+### Rohwert
+GET {{host}}/{{entity}}/name/$value
+
+### Draft-Navigation (204, solange kein Draft existiert)
+GET {{host}}/{{entity}}/SiblingEntity
+
+### Draft-Verwaltungsdaten
+GET {{host}}/{{entity}}/DraftAdministrativeData
+
+### Unbekannte Navigation -> 404
+GET {{host}}/{{entity}}/gibtsnicht

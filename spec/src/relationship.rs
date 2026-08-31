@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 /// A side of a relationship — identifies the entity and its navigation property name.
 #[derive(Debug, Clone)]
 pub struct Side {
@@ -76,7 +78,7 @@ pub struct ConditionalRef {
 ///     ..
 /// }
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Relationship {
     /// Unique name for this relationship (used as reference target by ConditionalRef).
     pub name: String,

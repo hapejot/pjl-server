@@ -1,5 +1,6 @@
 use super::*;
-   pub fn sample_annotations() -> String {
+#[allow(dead_code)]
+pub fn sample_annotations() -> String {
     let xml = r##"  
    <Annotations Target="Service.EntityConfig">
     <Annotation Term="UI.SelectionFields">
@@ -395,6 +396,7 @@ use super::*;
     xml.into()
 }
 
+#[allow(dead_code)]
 pub fn sample_entity_set() -> EntitySet {
     let sample_entity_set = EntitySet {
         name: "EntityConfigs".to_string(),
@@ -437,6 +439,7 @@ pub fn sample_entity_set() -> EntitySet {
     sample_entity_set
 }
 
+#[allow(dead_code)]
 pub fn sample_entity() -> EntityType {
     let sample_entity = EntityType {
         name: "EntityConfig".to_string(),
@@ -455,16 +458,8 @@ pub fn sample_entity() -> EntityType {
         navigation_properties: vec![
             NavigationProperty::new("Fields", "Collection(Service.EntityField)", None),
             NavigationProperty::new("Facets", "Collection(Service.EntityFacet)", None),
-            NavigationProperty::new(
-                "Navigations",
-                "Collection(Service.EntityNavigation)",
-                None,
-            ),
-            NavigationProperty::new(
-                "TableFacets",
-                "Collection(Service.EntityTableFacet)",
-                None,
-            ),
+            NavigationProperty::new("Navigations", "Collection(Service.EntityNavigation)", None),
+            NavigationProperty::new("TableFacets", "Collection(Service.EntityTableFacet)", None),
             NavigationProperty::new("_Name", "Service.EntityField", None),
             NavigationProperty::new("_Title", "Service.EntityField", None),
             NavigationProperty::new("SiblingEntity", "Service.EntityConfig", None),

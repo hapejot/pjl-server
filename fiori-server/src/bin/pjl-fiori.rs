@@ -44,7 +44,7 @@ fn prepare_navigations_from_ddic(
     ddic: &DataDictonary,
 ) -> anyhow::Result<()> {
     for entity in ddic.entities().iter() {
-        let n = entity.name();
+        let n = format!("{}Set", entity.name());
         for f in entity.fields() {
             match f {
                 spec::FieldSpec::Lookup {
@@ -54,8 +54,8 @@ fn prepare_navigations_from_ddic(
                 } => {
                     store
                         .navigation(!collection)
-                        .from(n, f.name())
-                        .to(entity, name);
+                        .from(&n, f.name())
+                        .to(&format!("{}Set", entity), name);
                 }
                 _ => {}
             }

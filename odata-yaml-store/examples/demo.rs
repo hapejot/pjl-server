@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
         true,
     );
-    let order = store.read_entity("Orders", &key)?;
+    let order = store.read_entity("Orders", &key, &ODataQuery::new())?;
     println!(
         "\nGelesene Order: {}",
         serde_json::to_string_pretty(&order)?

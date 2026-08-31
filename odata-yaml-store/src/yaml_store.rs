@@ -22,7 +22,10 @@ pub struct YamlStore {
 impl DraftDataStore for YamlStore {
     fn draft_edit(&self, set_name: &str, active_key: &EntityKey) -> Result<Value, StoreError> {
         // let draft_key = active_key.sibling(); // is_active_entity = false
-        let mut draft_data = self.read_entity(set_name, active_key)?;
+
+        let q = ODataQuery::new();
+
+        let mut draft_data = self.read_entity(set_name, active_key, &q)?;
         draft_data.edit();
         self.write_record(set_name, draft_data.clone())?;
 
@@ -121,6 +124,42 @@ impl YamlStore {
         }
         Ok(())
     }
+
+    fn expand_single_row(
+        &self,
+        from_id_field: &String,
+        row: &mut DataRecord,
+        single: &bool,
+        from_field: &String,
+        to_entity: &String,
+        to_field: &String,
+    ) -> Result<(), StoreError> {
+        Ok(if *single {
+            if let Some(from_id) = row.get(from_id_field.as_str()) {
+                let q = ODataQuery::new().filter(Expr::equals_value(&from_id, "ID"));
+                let subrows = self
+                    .get_collection(to_entity, &q)?
+                    .iter()
+                    .map(|x| x.core_json())
+                    .collect::<Vec<_>>();
+                match subrows.as_slice() {
+                    [] => row[from_field] = Value::Null,
+                    [v] => row[from_field] = json!(v),
+                    _ => todo!(),
+                }
+            } else {
+                row[from_field] = Value::Null
+            }
+        } else {
+            let q = ODataQuery::new().filter(Expr::equals_guid(row.id(), to_field));
+            let subrows = json!(self
+                .get_collection(to_entity, &q)?
+                .iter()
+                .map(|x| x.core_json())
+                .collect::<Vec<_>>());
+            row[from_field] = subrows;
+        })
+    }
 }
 
 fn collect_records(p: PathBuf) -> Result<Vec<DataRecord>, StoreError> {
@@ -167,46 +206,30 @@ impl DataStore for YamlStore {
                 r
             })
             .collect();
-
+        info!("total records: {}", records.len());
         for x in query.expand.iter() {
             for n in self.navigations.iter() {
                 if let Navigation {
                     single,
-                    from_entity: Some(from_entity),
+                    from_set: Some(from_entity),
                     from_field: Some(from_field),
-                    to_entity: Some(to_entity),
+                    to_set: Some(to_entity),
                     to_field: Some(to_field),
                 } = n
                 {
+                    let from_id_field = format!("{from_field}_ID");
+                    info!("... {:?}", n);
                     if from_entity == set_name && from_field == &x.navigation_property {
+                        info!("using...");
                         for row in records.iter_mut() {
-                            if *single {
-                                if let Some(from_id) = row.get(from_field) {
-                                    let q = ODataQuery::new()
-                                        .filter(Expr::equals_value(&from_id, "ID"));
-                                    let subrows = self
-                                        .get_collection(to_entity, &q)?
-                                        .iter()
-                                        .map(|x| x.core_json())
-                                        .collect::<Vec<_>>();
-                                    match subrows.as_slice() {
-                                        [] => row[from_field] = Value::Null,
-                                        [v] => row[from_field] = json!(v),
-                                        _ => todo!(),
-                                    }
-                                } else {
-                                    row[from_field] = Value::Null
-                                }
-                            } else {
-                                let q =
-                                    ODataQuery::new().filter(Expr::equals_guid(row.id(), to_field));
-                                let subrows = json!(self
-                                    .get_collection(to_entity, &q)?
-                                    .iter()
-                                    .map(|x| x.core_json())
-                                    .collect::<Vec<_>>());
-                                row[from_field] = subrows;
-                            }
+                            self.expand_single_row(
+                                &from_id_field,
+                                row,
+                                single,
+                                from_field,
+                                to_entity,
+                                to_field,
+                            )?;
                         }
                     }
                 }
@@ -231,7 +254,6 @@ impl DataStore for YamlStore {
                 }
             });
         }
-
         Ok(records)
     }
 
@@ -249,14 +271,45 @@ impl DataStore for YamlStore {
         }
     }
 
-    fn read_entity(&self, set_name: &str, key: &EntityKey) -> Result<DataRecord, StoreError> {
+    fn read_entity(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+        query: &ODataQuery,
+    ) -> Result<DataRecord, StoreError> {
         let p = self.path_for(set_name, key);
         let content = fs::read_to_string(&p)
             .or_else(|_| Err(StoreError::NotFound(format!("{p:?} for key {key:?}"))))?;
-        let r = serde_yaml::from_str(&content)
+        let mut row = serde_yaml::from_str(&content)
             .or_else(|e| Err(StoreError::Deserialize(format!("{e}"))))
             .and_then(|x| DataRecord::from_json(&x))?;
-        Ok(r)
+        for x in query.expand.iter() {
+            for n in self.navigations.iter() {
+                if let Navigation {
+                    single,
+                    from_set: Some(from_entity),
+                    from_field: Some(from_field),
+                    to_set: Some(to_entity),
+                    to_field: Some(to_field),
+                } = n
+                {
+                    let from_id_field = format!("{from_field}_ID");
+                    info!("... {:?}", n);
+                    if from_entity == set_name && from_field == &x.navigation_property {
+                        info!("using...");
+                        self.expand_single_row(
+                            &from_id_field,
+                            &mut row,
+                            single,
+                            from_field,
+                            to_entity,
+                            to_field,
+                        )?;
+                    }
+                }
+            }
+        }
+        Ok(row)
     }
 
     fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
@@ -275,7 +328,7 @@ impl DataStore for YamlStore {
         patch: &Value,
     ) -> Result<Value, StoreError> {
         trace!("patching yaml");
-        let mut r = self.read_entity(set_name, key)?;
+        let mut r = self.read_entity(set_name, key, &ODataQuery::new())?;
         r.merge(patch);
         self.write_record(set_name, r)?;
         Ok(patch.clone())
@@ -292,7 +345,7 @@ impl DataStore for YamlStore {
         key: &EntityKey,
         property: &str,
     ) -> Result<Value, StoreError> {
-        let entity = self.read_entity(set_name, key)?;
+        let entity = self.read_entity(set_name, key, &ODataQuery::new())?;
         entity.get(property).ok_or_else(|| {
             StoreError::NotFound(format!("Property '{property}' auf {set_name}/{key:?}"))
         })

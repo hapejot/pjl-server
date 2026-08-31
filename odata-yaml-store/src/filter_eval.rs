@@ -1,6 +1,7 @@
 use odata::query::{Expr, FilterOperand};
 use serde_json::{Number, Value};
 use std::cmp::Ordering;
+use tracing::trace;
 
 use crate::datastore::DataRecord;
 
@@ -79,8 +80,8 @@ fn evaluate_operand(_record: &Value, _a: &FilterOperand) -> Value {
     todo!()
 }
 
-pub fn evaluate(record: &DataRecord, _expr: &Expr) -> Value {
-    let v = match _expr {
+pub fn evaluate(record: &DataRecord, expr: &Expr) -> Value {
+    let v = match expr {
         Expr::Identifier(id) => {
             let parts = id.split("/").collect::<Vec<_>>();
             match parts.as_slice() {
@@ -147,6 +148,7 @@ pub fn evaluate(record: &DataRecord, _expr: &Expr) -> Value {
             }
         }
     };
+    trace!("Evaluate: {:?} -> {}", expr, v);
     v
 }
 

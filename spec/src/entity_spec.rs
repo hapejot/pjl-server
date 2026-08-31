@@ -166,7 +166,11 @@ pub enum FieldSpec {
         presentation: PresentationOverrides,
     },
 }
-
+impl std::fmt::Display for FieldSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
 impl FieldSpec {
     /// Return this field's name with the standard ID suffix appended
     /// (`Order` → `Order_ID`). Use instead of `format!("{name}_ID")`.

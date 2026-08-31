@@ -4,6 +4,7 @@ use axum::{
     Json, Router,
     extract::{Path, Query, State},
     http::{HeaderName, header},
+    response::Html,
     response::IntoResponse,
     routing::get,
 };
@@ -16,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use spec::{AtomValueList, EntitySpec, FieldSpec, MeasureKind, data_dictionary::DataDictonary};
 use tracing::*;
-use uuid::Uuid;
 
 use crate::AppState;
 mod sample;
@@ -38,7 +38,7 @@ pub struct EntityType {
 }
 
 impl EntityType {
-    pub fn from_entity(ddic: &DataDictonary, x: &EntitySpec) -> Self {
+    pub fn from_entity(x: &EntitySpec) -> Self {
         let mut properties = Vec::new();
         let mut navigation_properties = Vec::new();
 
@@ -49,7 +49,21 @@ impl EntityType {
 
         for f in x.fields() {
             match f {
-                FieldSpec::Lookup { .. } => {}
+                FieldSpec::Lookup {
+                    name,
+                    entity,
+                    collection,
+                } => {
+                    let p = if *collection {
+                        NavigationProperty::new(name, format!("Service.{}", entity), None)
+                    } else {
+                        let ref_name = format!("{}_ID", name);
+                        properties.push(Property::new(&ref_name, "Edm.Guid"));
+                        NavigationProperty::new(name, format!("Service.{}", entity), None)
+                            .ref_constraing(ref_name.as_str(), "ID")
+                    };
+                    navigation_properties.push(p);
+                }
                 FieldSpec::Atom {
                     name,
                     edm_type,
@@ -208,7 +222,7 @@ impl Property {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct NavigationProperty {
     #[serde(rename = "@Name")]
     pub name: String,
@@ -218,6 +232,17 @@ pub struct NavigationProperty {
 
     #[serde(rename = "@ContainsTarget", skip_serializing_if = "Option::is_none")]
     pub contains_target: Option<bool>,
+
+    #[serde(rename = "ReferentialConstraint")]
+    pub constraints: Vec<ReferentialConstraint>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct ReferentialConstraint {
+    #[serde(rename = "@Property")]
+    property: String,
+    #[serde(rename = "@ReferencedProperty")]
+    referenced_property: String,
 }
 
 impl NavigationProperty {
@@ -230,7 +255,16 @@ impl NavigationProperty {
             name: name.into(),
             type_: type_.into(),
             contains_target,
+            ..Default::default()
         }
+    }
+
+    fn ref_constraing(mut self, property: &str, referenced_property: &str) -> NavigationProperty {
+        self.constraints.push(ReferentialConstraint {
+            property: property.into(),
+            referenced_property: referenced_property.into(),
+        });
+        self
     }
 }
 
@@ -314,6 +348,7 @@ impl Annotations {
             target: format!("Service.{}", x.name()),
             annotations: Vec::new(),
         };
+
         main_annotations.annotations.push(
             Annotation::new("UI.HeaderInfo").record(
                 Record::new("UI.HeaderInfoType")
@@ -363,33 +398,35 @@ impl Annotations {
             ),
         );
 
-        let mut main_data = Collection::new();
-        // main_data = main_data
-        //     .add_record(Record::new("UI.DataField")
-        //     .add(PropertyValue::new("Value")
-        //     .path("ID")));
-        for f in x.fields() {
-            main_data = main_data.add_record(
-                Record::new("UI.DataField").add(PropertyValue::new("Value").path(f.name())),
-            );
-        }
-        let mut main_field_group = Annotation::new("UI.FieldGroup");
-        main_field_group.qualifier = Some("Main".to_string());
-        main_field_group = main_field_group.record(
-            Record::new("UI.FieldGroupType").add(PropertyValue::new("Data").collection(main_data)),
-        );
+        let main_field_group = prepare_field_group(x);
         main_annotations.annotations.push(main_field_group);
 
         annotations.push(main_annotations);
 
+        annotations.push(Self::from_field(
+            x.name(),
+            &FieldSpec::Atom {
+                name: "ID".into(),
+                label: x.name().into(),
+                edm_type: "Edm.Guid".into(),
+                package: None,
+                max_length: None,
+                precision: None,
+                scale: None,
+                computed: false,
+                immutable: false,
+                value_list: None,
+                presentation: Default::default(),
+            },
+        ));
         for f in x.fields() {
             annotations.push(Self::from_field(x.name(), f));
         }
         annotations
     }
 
-    fn from_field(name: &str, f: &spec::FieldSpec) -> Annotations {
-        let target = format!("Service.{}/{}", name, f.name());
+    fn from_field(service_name: &str, f: &spec::FieldSpec) -> Annotations {
+        let mut target = format!("Service.{}/{}", service_name, f.name());
         let mut annotations = vec![Annotation::new("Common.Label").string(f.label())];
 
         match f {
@@ -399,7 +436,17 @@ impl Annotations {
                 collection,
             } => {
                 if !collection {
-                    annotations.push(Annotation::new("Common.Text").path(format!("name")));
+                    let name = format!("{}_ID", name);
+                    target = format!("Service.{}/{}", service_name, name);
+                    annotations.push(
+                        Annotation::new("Common.Text")
+                            .path(format!("{}/name", f.name()))
+                            .annotation(
+                                Annotation::new("UI.TextArrangement")
+                                    .enum_member("UI.TextArrangementType/TextOnly"),
+                            ),
+                    );
+
                     annotations.push(value_list_annotation(
                         format!("{entity}Set"),
                         false,
@@ -434,6 +481,14 @@ impl Annotations {
                 if let Some(value_list) = value_list {
                     annotations.extend(annotations_for_atom_value_list(name, value_list));
                 }
+                if name == "ID" {
+                    annotations.push(
+                        Annotation::new("Common.Text").path("name").annotation(
+                            Annotation::new("UI.TextArrangement")
+                                .enum_member("UI.TextArrangementType/TextOnly"),
+                        ),
+                    );
+                }
             }
             FieldSpec::Measure {
                 unit_field, kind, ..
@@ -451,6 +506,41 @@ impl Annotations {
             annotations,
         }
     }
+}
+
+fn prepare_field_group(x: &EntitySpec) -> Annotation {
+    let mut main_data = Collection::new();
+    // main_data = main_data
+    //     .add_record(Record::new("UI.DataField")
+    //     .add(PropertyValue::new("Value")
+    //     .path("ID")));
+    for f in x.fields() {
+        match f {
+            FieldSpec::Lookup {
+                name, collection, ..
+            } => {
+                if *collection {
+                } else {
+                    let name = format!("{name}_ID");
+                    main_data = main_data.add_record(
+                        Record::new("UI.DataField").add(PropertyValue::new("Value").path(name)),
+                    )
+                }
+            }
+            FieldSpec::Atom { name, .. } => {
+                main_data = main_data.add_record(
+                    Record::new("UI.DataField").add(PropertyValue::new("Value").path(name)),
+                )
+            }
+            FieldSpec::Measure { .. } => todo!(),
+        }
+    }
+    let mut main_field_group = Annotation::new("UI.FieldGroup");
+    main_field_group.qualifier = Some("Main".to_string());
+    main_field_group = main_field_group.record(
+        Record::new("UI.FieldGroupType").add(PropertyValue::new("Data").collection(main_data)),
+    );
+    main_field_group
 }
 
 fn annotations_for_atom_value_list(name: &str, value_list: &AtomValueList) -> Vec<Annotation> {
@@ -609,6 +699,16 @@ impl Annotation {
         self.path = Some(path.into());
         self
     }
+
+    pub fn enum_member(mut self, arg: impl Into<String>) -> Self {
+        self.enum_member = Some(arg.into());
+        self
+    }
+
+    fn annotation(mut self, enum_member: Annotation) -> Self {
+        self.nested_annotations.push(enum_member);
+        self
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -749,12 +849,185 @@ impl PropertyValue {
         self
     }
 }
+// body style alternatives:
+//    display: flex;
+//    align-items: center;
+//    justify-content: center;
+
+const MODERN_STYLE: &str = r#"
+<style>
+  body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    min-height: 100vh;
+    margin: 0;
+  }
+  .card {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 2rem 2.5rem;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    max-width: 480px;
+  }
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+    background: linear-gradient(135deg, #60a5fa, #a78bfa);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  p {
+    font-size: 0.95rem;
+    line-height: 1.5;
+    color: #94a3b8;
+  }
+  table {
+      width: 100%;
+  }
+</style>
+"#;
+/// Build the HTML data dictionary page.
+fn render_info_page(state: &AppState) -> String {
+    let mut html = String::new();
+    html.push_str(MODERN_STYLE);
+    // html.push_str("<div class='card'>");
+    html.push_str("<h1>Data Dictionary</h1>\n");
+
+    // Packages
+    let packages: Vec<_> = state.ddic.packages().collect();
+    html.push_str("<h2>Packages</h2>\n<ul>\n");
+    for p in packages {
+        html.push_str(&format!("<li>{}</li>\n", p.name()));
+    }
+    html.push_str("</ul>\n");
+
+    // Apps
+    let apps: Vec<_> = state.ddic.apps().collect();
+    html.push_str(&format!(
+        "<h2>Apps ({})</h2>\n<ul class=\"apps\">\n",
+        apps.len()
+    ));
+    for app in apps {
+        html.push_str(&format!(
+            "<li><span class=\"app-title\">{}</span>\n\
+             <span class=\"app-sub\">{}\n\
+             <a href=\"{}\">{}</a> · {}\n",
+            app.title(),
+            app.subtitle().map(|s| s.as_str()).unwrap_or(""),
+            app.url(),
+            app.name(),
+            app.action(),
+        ));
+    }
+    html.push_str("</ul>\n");
+
+    // Entities
+    let entities: Vec<_> = state.ddic.active_entities().cloned().collect();
+    html.push_str(&format!(
+        "<h2>Entities ({})</h2>\n<ul class=\"entities\">\n",
+        entities.len()
+    ));
+    for ent in entities {
+        let set = ent.setname();
+        let fields: Vec<_> = ent.fields().cloned().collect();
+        let navigations = state.ddic.navigations_for_entity(&ent);
+        html.push_str(&format!(
+            "<h3>{}</h3><p>(set {}, {} fields, {} nav)</p>",
+            ent.name(),
+            set,
+            fields.len(),
+            navigations.len()
+        ));
+
+        html.push_str(
+            "<table class=\"fields\">\n<tr><th>Field</th><th>UI Label</th><th>Edm Type</th></tr>\n",
+        );
+        for f in fields {
+            let display = f.label();
+            let ftype = format_field_value(&f);
+            html.push_str(&format!(
+                "<tr><td>{}</td><td>{display}</td><td>{ftype}</td></tr>\n",
+                f
+            ));
+        }
+        html.push_str("</table><ul>\n");
+
+        for nav in navigations {
+            let collection = if nav.collection { "collection" } else { "1:1" };
+            html.push_str(&format!(
+                "<li>{0} → {1} (source set {2}, target set {3}, FK {4})<span class=\"cardinality\">{collection}</span>\n",
+                nav.name, nav.target_entity, nav.source_set, nav.target_set,
+                nav.foreign_key_field.as_deref().unwrap_or("-")
+            ));
+        }
+        html.push_str("</ul>\n");
+    }
+
+    // Relationships
+    let relationships: Vec<_> = state.ddic.relationships().cloned().collect();
+    html.push_str(&format!(
+        "<h2>Relationships ({})</h2>\n<ul class=\"relationships\">\n",
+        relationships.len()
+    ));
+    for rel in relationships {
+        html.push_str(&format!(
+            "<li>\n\
+             <span class=\"rel-name\">{}</span>\n\
+             <span class=\"rel-one\">{}</span> → <span class=\"rel-many\">{}</span> \n\
+             <span class=\"cardinality\">{}</span> · package <span class=\"rel-pkg\">{}</span>\n",
+            rel.name,
+            rel.one(),
+            rel.many(),
+            rel.package,
+            rel.package
+        ));
+    }
+    html.push_str("</ul>\n");
+    // html.push_str("</div>");
+    html
+}
+
+fn format_field_value(f: &FieldSpec) -> String {
+    match f {
+        FieldSpec::Lookup {
+            entity, collection, ..
+        } => {
+            if *collection {
+                format!("Lookup ({entity})[]")
+            } else {
+                format!("Lookup ({entity})")
+            }
+        }
+        FieldSpec::Atom { edm_type, .. } => edm_type.clone(),
+        FieldSpec::Measure { label, .. } => label.clone(),
+    }
+}
+
+/// Serve an HTML page describing the current data dictionary.
+async fn info(State(state): State<AppState>) -> impl IntoResponse {
+    let html = render_info_page(&state);
+    log::info!("serving HTML data dictionary page");
+    (
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (HeaderName::from_static("odata-version"), "4.0"),
+        ],
+        Html(html),
+    )
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////
 /// router entry point
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(index))
         .route("/$metadata", get(metadata))
+        .route("/info", get(info))
         .route(
             "/{*path}",
             get(get_handler).post(post_handler).patch(patch_handler),
@@ -896,14 +1169,6 @@ fn entity_spec_for_segment(state: &AppState, s: &PathSegment) -> EntitySpec {
         .clone()
 }
 
-fn entity_spec_by_name(state: &AppState, name: &str) -> EntitySpec {
-    state
-        .ddic
-        .active_entity(name)
-        .unwrap_or_else(|| panic!("No active entity named '{name}'"))
-        .clone()
-}
-
 async fn get_handler(
     path: Path<String>,
     state: State<AppState>,
@@ -922,15 +1187,15 @@ fn resolve_get_path(
     segments: &[PathSegment],
 ) -> (Value, Vec<String>) {
     let root = segments.first().expect("OData path has a root segment");
-    let mut entity_spec = entity_spec_for_segment(state, root);
-    let mut value = if root.keys.is_empty() {
+    let entity_spec = entity_spec_for_segment(state, root);
+    let value = if root.keys.is_empty() {
         get_collection(state, query, &entity_spec, root)
     } else {
-        let mut single = get_single(state, &entity_spec, root);
+        let mut single = get_single(state, query, &entity_spec, root);
         touch_selected_fields(&mut single, query);
         single
     };
-    let mut is_collection = root.keys.is_empty();
+    let is_collection = root.keys.is_empty();
 
     for segment in segments.iter().skip(1) {
         info!("processing segment {:?}", segment);
@@ -939,15 +1204,15 @@ fn resolve_get_path(
         } else {
             &ODataQuery::default()
         };
-        let resolved = resolve_navigation(state, &entity_spec, &value, segment, navigation_query);
-        entity_spec = resolved.entity_spec;
-        value = resolved.value;
-        is_collection = resolved.is_collection;
+        // let resolved = resolve_navigation(state, &entity_spec, &value, segment, navigation_query);
+        // entity_spec = resolved.entity_spec;
+        // value = resolved.value;
+        // is_collection = resolved.is_collection;
     }
 
-    let final_expand = expand_for_spec(state, &entity_spec, &query.expand);
-    apply_expand(state, &entity_spec, &mut value, &final_expand);
-    project_value(&mut value, &query.select, &final_expand);
+    // let final_expand = expand_for_spec(state, &entity_spec, &query.expand);
+    // apply_expand(state, &entity_spec, &mut value, &final_expand);
+    // project_value(&mut value, &query.select, &final_expand);
 
     let mut context = vec!["/Service/$metadata#".to_string()];
     if is_collection {
@@ -958,267 +1223,268 @@ fn resolve_get_path(
     (value, context)
 }
 
-fn expand_for_spec(
-    state: &State<AppState>,
-    entity_spec: &EntitySpec,
-    expand_items: &[ExpandItem],
-) -> Vec<ExpandItem> {
-    expand_items
-        .iter()
-        .cloned()
-        .filter(|expand| has_navigation(state, entity_spec, &expand.navigation_property))
-        .collect()
-}
+// fn expand_for_spec(
+//     state: &State<AppState>,
+//     entity_spec: &EntitySpec,
+//     expand_items: &[ExpandItem],
+// ) -> Vec<ExpandItem> {
+//     expand_items
+//         .iter()
+//         .cloned()
+//         .filter(|expand| has_navigation(state, entity_spec, &expand.navigation_property))
+//         .collect()
+// }
 
-fn has_navigation(
-    state: &State<AppState>,
-    entity_spec: &EntitySpec,
-    navigation_property: &str,
-) -> bool {
-    navigation_property == "DraftAdministrativeData"
-        || state
-            .ddic
-            .navigation_for_entity(entity_spec, navigation_property)
-            .is_some()
-}
+// fn has_navigation(
+//     state: &State<AppState>,
+//     entity_spec: &EntitySpec,
+//     navigation_property: &str,
+// ) -> bool {
+//     navigation_property == "DraftAdministrativeData"
+//         || state
+//             .ddic
+//             .navigation_for_entity(entity_spec, navigation_property)
+//             .is_some()
+// }
 
-struct ResolvedNavigation {
-    entity_spec: EntitySpec,
-    value: Value,
-    is_collection: bool,
-}
+// struct ResolvedNavigation {
+//     entity_spec: EntitySpec,
+//     value: Value,
+//     is_collection: bool,
+// }
 
-fn resolve_navigation(
-    state: &State<AppState>,
-    current_spec: &EntitySpec,
-    current_value: &Value,
-    segment: &PathSegment,
-    query: &ODataQuery,
-) -> ResolvedNavigation {
-    if segment.name == "DraftAdministrativeData" {
-        return ResolvedNavigation {
-            entity_spec: current_spec.clone(),
-            value: current_value["DraftAdministrativeData"].clone(),
-            is_collection: false,
-        };
-    }
+// fn resolve_navigation(
+//     state: &State<AppState>,
+//     current_spec: &EntitySpec,
+//     current_value: &Value,
+//     segment: &PathSegment,
+//     query: &ODataQuery,
+// ) -> ResolvedNavigation {
+//     if segment.name == "DraftAdministrativeData" {
+//         return ResolvedNavigation {
+//             entity_spec: current_spec.clone(),
+//             value: current_value["DraftAdministrativeData"].clone(),
+//             is_collection: false,
+//         };
+//     }
 
-    let navigation = state
-        .ddic
-        .navigation_for_entity(current_spec, &segment.name)
-        .unwrap_or_else(|| {
-            panic!(
-                "Unknown navigation {} on {}",
-                segment.name,
-                current_spec.name()
-            )
-        });
+//     let navigation = state
+//         .ddic
+//         .navigation_for_entity(current_spec, &segment.name)
+//         .unwrap_or_else(|| {
+//             panic!(
+//                 "Unknown navigation {} on {}",
+//                 segment.name,
+//                 current_spec.name()
+//             )
+//         });
 
-    let target_spec = entity_spec_by_name(state, &navigation.target_entity);
-    if navigation.collection {
-        resolve_collection_navigation(
-            state,
-            current_spec,
-            current_value,
-            &target_spec,
-            &navigation.name,
-            navigation.foreign_key_field.as_deref(),
-            segment,
-            query,
-        )
-    } else {
-        resolve_single_navigation(
-            state,
-            current_value,
-            &target_spec,
-            &navigation.name,
-            segment,
-        )
-    }
-}
+//     let target_spec = entity_spec_by_name(state, &navigation.target_entity);
+//     if navigation.collection {
+//         resolve_collection_navigation(
+//             state,
+//             current_spec,
+//             current_value,
+//             &target_spec,
+//             &navigation.name,
+//             navigation.foreign_key_field.as_deref(),
+//             segment,
+//             query,
+//         )
+//     } else {
+//         resolve_single_navigation(
+//             state,
+//             current_value,
+//             &target_spec,
+//             &navigation.name,
+//             segment,
+//         )
+//     }
+// }
 
-fn resolve_single_navigation(
-    state: &State<AppState>,
-    current_value: &Value,
-    target_spec: &EntitySpec,
-    lookup_name: &str,
-    segment: &PathSegment,
-) -> ResolvedNavigation {
-    let target_set = target_spec.setname();
-    let value = if segment.keys.is_empty() {
-        current_value
-            .get(lookup_name)
-            .and_then(value_as_uuid)
-            .map(|id| {
-                let key = EntityKey::new(id, true);
-                json!(state.store.read_entity(&target_set, &key).unwrap())
-            })
-            .unwrap_or(Value::Null)
-    } else {
-        let key: EntityKey = segment.into();
-        json!(state.store.read_entity(&target_set, &key).unwrap())
-    };
+// fn resolve_single_navigation(
+//     state: &State<AppState>,
+//     current_value: &Value,
+//     target_spec: &EntitySpec,
+//     lookup_name: &str,
+//     segment: &PathSegment,
+// ) -> ResolvedNavigation {
+//     let target_set = target_spec.setname();
+//     let value = if segment.keys.is_empty() {
+//         current_value
+//             .get(lookup_name)
+//             .and_then(value_as_uuid)
+//             .map(|id| {
+//                 let key = EntityKey::new(id, true);
+//                 json!(state.store.read_entity(&target_set, &key).unwrap())
+//             })
+//             .unwrap_or(Value::Null)
+//     } else {
+//         let key: EntityKey = segment.into();
+//         json!(state.store.read_entity(&target_set, &key).unwrap())
+//     };
 
-    ResolvedNavigation {
-        entity_spec: target_spec.clone(),
-        value,
-        is_collection: false,
-    }
-}
+//     ResolvedNavigation {
+//         entity_spec: target_spec.clone(),
+//         value,
+//         is_collection: false,
+//     }
+// }
 
-fn resolve_collection_navigation(
-    state: &State<AppState>,
-    current_spec: &EntitySpec,
-    current_value: &Value,
-    target_spec: &EntitySpec,
-    lookup_name: &str,
-    foreign_key_field: Option<&str>,
-    segment: &PathSegment,
-    query: &ODataQuery,
-) -> ResolvedNavigation {
-    let target_set = target_spec.setname();
-    let foreign_key = foreign_key_field.unwrap_or_else(|| {
-        panic!(
-            "No foreign key for collection navigation {} from {} to {}",
-            lookup_name,
-            current_spec.name(),
-            target_spec.name()
-        )
-    });
-    let parent_id = current_value
-        .get("ID")
-        .and_then(value_as_uuid)
-        .expect("Current entity has an ID");
-    let mut records = state.store.get_collection(&target_set, query).unwrap();
-    records.retain(|record| {
-        record[foreign_key]
-            .as_str()
-            .and_then(|value| Uuid::parse_str(value).ok())
-            == Some(parent_id)
-    });
+// fn resolve_collection_navigation(
+//     state: &State<AppState>,
+//     current_spec: &EntitySpec,
+//     current_value: &Value,
+//     target_spec: &EntitySpec,
+//     lookup_name: &str,
+//     foreign_key_field: Option<&str>,
+//     segment: &PathSegment,
+//     query: &ODataQuery,
+// ) -> ResolvedNavigation {
+//     let target_set = target_spec.setname();
+//     let foreign_key = foreign_key_field.unwrap_or_else(|| {
+//         panic!(
+//             "No foreign key for collection navigation {} from {} to {}",
+//             lookup_name,
+//             current_spec.name(),
+//             target_spec.name()
+//         )
+//     });
+//     let parent_id = current_value
+//         .get("ID")
+//         .and_then(value_as_uuid)
+//         .expect("Current entity has an ID");
+//     let mut records = state.store.get_collection(&target_set, query).unwrap();
+//     records.retain(|record| {
+//         record[foreign_key]
+//             .as_str()
+//             .and_then(|value| Uuid::parse_str(value).ok())
+//             == Some(parent_id)
+//     });
 
-    if segment.keys.is_empty() {
-        ResolvedNavigation {
-            entity_spec: target_spec.clone(),
-            value: json!({ "value": records }),
-            is_collection: true,
-        }
-    } else {
-        let key: EntityKey = segment.into();
-        let record = records
-            .into_iter()
-            .find(|record| {
-                record.id() == key.id && record.is_active_entity() == key.is_active_entity
-            })
-            .map(|record| json!(record))
-            .unwrap_or(Value::Null);
-        ResolvedNavigation {
-            entity_spec: target_spec.clone(),
-            value: record,
-            is_collection: false,
-        }
-    }
-}
+//     if segment.keys.is_empty() {
+//         ResolvedNavigation {
+//             entity_spec: target_spec.clone(),
+//             value: json!({ "value": records }),
+//             is_collection: true,
+//         }
+//     } else {
+//         let key: EntityKey = segment.into();
+//         let record = records
+//             .into_iter()
+//             .find(|record| {
+//                 record.id() == key.id && record.is_active_entity() == key.is_active_entity
+//             })
+//             .map(|record| json!(record))
+//             .unwrap_or(Value::Null);
+//         ResolvedNavigation {
+//             entity_spec: target_spec.clone(),
+//             value: record,
+//             is_collection: false,
+//         }
+//     }
+// }
 
-fn apply_expand(
-    state: &State<AppState>,
-    entity_spec: &EntitySpec,
-    value: &mut Value,
-    expand_items: &[ExpandItem],
-) {
-    if expand_items.is_empty() {
-        return;
-    }
+// fn apply_expand(
+//     state: &State<AppState>,
+//     entity_spec: &EntitySpec,
+//     value: &mut Value,
+//     expand_items: &[ExpandItem],
+// ) {
+//     if expand_items.is_empty() {
+//         return;
+//     }
 
-    if let Some(items) = value.get_mut("value").and_then(Value::as_array_mut) {
-        for item in items {
-            apply_expand_to_entity(state, entity_spec, item, expand_items);
-        }
-        return;
-    }
+//     if let Some(items) = value.get_mut("value").and_then(Value::as_array_mut) {
+//         for item in items {
+//             apply_expand_to_entity(state, entity_spec, item, expand_items);
+//         }
+//         return;
+//     }
 
-    apply_expand_to_entity(state, entity_spec, value, expand_items);
-}
+//     apply_expand_to_entity(state, entity_spec, value, expand_items);
+// }
 
-fn apply_expand_to_entity(
-    state: &State<AppState>,
-    entity_spec: &EntitySpec,
-    value: &mut Value,
-    expand_items: &[ExpandItem],
-) {
-    if !value.is_object() {
-        return;
-    }
+// fn apply_expand_to_entity(
+//     state: &State<AppState>,
+//     entity_spec: &EntitySpec,
+//     value: &mut Value,
+//     expand_items: &[ExpandItem],
+// ) {
+//     if !value.is_object() {
+//         return;
+//     }
 
-    for expand in expand_items {
-        let segment = PathSegment {
-            name: expand.navigation_property.clone(),
-            keys: vec![],
-        };
-        let resolved =
-            resolve_navigation(state, entity_spec, value, &segment, &expand.nested_query);
-        let mut expanded_value = resolved.value;
-        apply_expand(
-            state,
-            &resolved.entity_spec,
-            &mut expanded_value,
-            &expand.nested_query.expand,
-        );
-        project_value(
-            &mut expanded_value,
-            &expand.nested_query.select,
-            &expand.nested_query.expand,
-        );
-        value[&expand.navigation_property] = expanded_value;
-    }
-}
+//     for expand in expand_items {
+//         let segment = PathSegment {
+//             name: expand.navigation_property.clone(),
+//             keys: vec![],
+//         };
+//         let resolved =
+//             resolve_navigation(state, entity_spec, value, &segment, &expand.nested_query);
+//         let mut expanded_value = resolved.value;
+//         apply_expand(
+//             state,
+//             &resolved.entity_spec,
+//             &mut expanded_value,
+//             &expand.nested_query.expand,
+//         );
+//         project_value(
+//             &mut expanded_value,
+//             &expand.nested_query.select,
+//             &expand.nested_query.expand,
+//         );
+//         value[&expand.navigation_property] = expanded_value;
+//     }
+// }
 
 fn touch_selected_fields(value: &mut Value, query: &ODataQuery) {
     for field in query.select.iter() {
         if value[field].is_null() {
-            value[field] = json!(format!("[{field}]"));
+            value[field] = json!(format!(""));
         }
     }
 }
 
-fn project_value(value: &mut Value, select: &[String], expand_items: &[ExpandItem]) {
-    if select.is_empty() {
-        return;
-    }
+// fn project_value(value: &mut Value, select: &[String], expand_items: &[ExpandItem]) {
+//     if select.is_empty() {
+//         return;
+//     }
 
-    if let Some(items) = value.get_mut("value").and_then(Value::as_array_mut) {
-        for item in items {
-            project_entity(item, select, expand_items);
-        }
-        return;
-    }
+//     if let Some(items) = value.get_mut("value").and_then(Value::as_array_mut) {
+//         for item in items {
+//             project_entity(item, select, expand_items);
+//         }
+//         return;
+//     }
 
-    project_entity(value, select, expand_items);
-}
+//     project_entity(value, select, expand_items);
+// }
 
-fn project_entity(value: &mut Value, select: &[String], expand_items: &[ExpandItem]) {
-    let Some(map) = value.as_object_mut() else {
-        return;
-    };
-    map.retain(|key, _| {
-        select.iter().any(|selected| selected == key)
-            || expand_items
-                .iter()
-                .any(|expand| expand.navigation_property == *key)
-    });
-}
+// fn project_entity(value: &mut Value, select: &[String], expand_items: &[ExpandItem]) {
+//     let Some(map) = value.as_object_mut() else {
+//         return;
+//     };
+//     map.retain(|key, _| {
+//         select.iter().any(|selected| selected == key)
+//             || expand_items
+//                 .iter()
+//                 .any(|expand| expand.navigation_property == *key)
+//     });
+// }
 
-fn value_as_uuid(value: &Value) -> Option<Uuid> {
-    value.as_str().and_then(|value| Uuid::parse_str(value).ok())
-}
+// fn value_as_uuid(value: &Value) -> Option<Uuid> {
+//     value.as_str().and_then(|value| Uuid::parse_str(value).ok())
+// }
 
 fn get_single(
     state: &State<AppState>,
+    p: &ODataQuery,
     _entity_spec: &EntitySpec,
     s: &odata::path::PathSegment,
 ) -> Value {
     let key: EntityKey = s.into();
-    let j = state.store.read_entity(&s.name, &key).unwrap();
+    let j = state.store.read_entity(&s.name, &key, p).unwrap();
     // info!("get single: {j:#?}");
     json!(j)
 }
@@ -1229,17 +1495,15 @@ fn get_collection(
     entity_spec: &EntitySpec,
     s: &odata::path::PathSegment,
 ) -> Value {
-    info!("key is empty: {s:?}");
     let r = state.store.get_collection(&s.name, p).unwrap();
     let mut resp = json!({
       "@odata.context": format!("/Service/$metadata#{}", entity_spec.setname()),
       "value": r
     });
-    let count = state.store.count(&s.name, p);
     if p.count {
+        let count = state.store.count(&s.name, p);
         resp["@odata.count"] = json!(count);
     }
-    info!("returning {count} rows");
     resp
 }
 
@@ -1348,41 +1612,41 @@ async fn index(State(state): State<AppState>) -> Json<Value> {
     }))
 }
 async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
-    let _entities: Vec<EntityType> = state
+    let entity_lst: Vec<EntityType> = state
         .ddic
         .active_entities()
-        .map(|x| EntityType::from_entity(&state.ddic, x))
+        .map(|x| EntityType::from_entity(x))
         .collect();
-    let _entity_sets: Vec<EntitySet> = state
+    let entity_set_lst: Vec<EntitySet> = state
         .ddic
         .apps()
         .map(|x| EntitySet::from_entity(&state.ddic, &x.main_entity(&state.ddic)))
         .collect();
-    let _annotations: Vec<Annotations> = state
+    let annotation_lst: Vec<Annotations> = state
         .ddic
         .active_entities()
         .map(|x| Annotations::from_entity(x))
         .flatten()
         .collect();
-    let _sample_entity = sample::sample_entity();
-    let _sample_entity_set = sample::sample_entity_set();
-    let xml = sample::sample_annotations();
-    let sample_annotations: Annotations = quick_xml::de::from_str(&xml).unwrap();
-    for a in &sample_annotations.annotations {
-        trace!("A: {} {:?}", a.term, a.qualifier);
-    }
+    // let _sample_entity = sample::sample_entity();
+    // let _sample_entity_set = sample::sample_entity_set();
+    // let xml = sample::sample_annotations();
+    // let sample_annotations: Annotations = quick_xml::de::from_str(&xml).unwrap();
+    // for a in &sample_annotations.annotations {
+    //     trace!("A: {} {:?}", a.term, a.qualifier);
+    // }
 
     let meta = edmx_template();
     let mut type_defs = vec![]; //quick_xml::se::to_string(&sample_entity).unwrap()];
-    for x in _entities {
+    for x in entity_lst {
         type_defs.push(quick_xml::se::to_string(&x).unwrap());
     }
     let mut entity_sets = vec![]; //quick_xml::se::to_string(&sample_entity_set).unwrap()];
-    for x in _entity_sets {
+    for x in entity_set_lst {
         entity_sets.push(quick_xml::se::to_string(&x).unwrap());
     }
     let mut annotations = vec![];
-    for x in _annotations {
+    for x in annotation_lst {
         annotations.push(quick_xml::se::to_string(&x).unwrap());
     }
     for x in state.ddic.active_entities() {
@@ -1492,7 +1756,7 @@ mod tests {
         ddic.activate();
         let entity = ddic.active_entity("Entity").unwrap();
 
-        let entity_type = EntityType::from_entity(&ddic, entity);
+        let entity_type = EntityType::from_entity(entity);
         dbg!(&entity_type);
         assert!(
             entity_type
@@ -1500,11 +1764,6 @@ mod tests {
                 .iter()
                 .any(|property| property.name == "name" && property.type_ == "Edm.String")
         );
-        assert!(entity_type.navigation_properties.iter().any(|navigation| {
-            navigation.name == "package"
-                && navigation.type_ == "Service.Package"
-                && navigation.contains_target == Some(false)
-        }));
     }
 
     #[test]

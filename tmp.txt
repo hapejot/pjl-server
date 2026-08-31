@@ -1,0 +1,2 @@
+GET PackageSet?$count=true&$select=HasActiveEntity,HasDraftEntity,ID,IsActiveEntity,name&$expand=DraftAdministrativeData($select=DraftUUID,InProcessByUser)&$filter=(IsActiveEntity%20eq%20false%20or%20SiblingEntity/IsActiveEntity%20eq%20null)&$skip=0&$top=30 HTTP/1.1
+GET PackageSet?$select=ID,IsActiveEntity,name&$count=true&$orderby=ID&$filter=IsActiveEntity%20eq%20true&$skip=0&$top=52 HTTP/1.1

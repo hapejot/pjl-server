@@ -53,7 +53,8 @@ mod tests {
         store.create_entity("Orders", &data).unwrap();
 
         let key = EntityKey::new(id, false);
-        let read = store.read_entity("Orders", &key).unwrap();
+        let q = ODataQuery::new();
+        let read = store.read_entity("Orders", &key, &q).unwrap();
         assert_eq!(read["CustomerName"], "Mueller GmbH");
     }
 
@@ -69,7 +70,8 @@ mod tests {
             .patch_entity("Orders", &key, &json!({ "Status": "Released" }))
             .unwrap();
 
-        let read = store.read_entity("Orders", &key).unwrap();
+        let q = ODataQuery::new();
+        let read = store.read_entity("Orders", &key, &q).unwrap();
         assert_eq!(read["Status"], "Released");
         assert_eq!(read["Amount"], 100); // unveraendert
     }
@@ -169,7 +171,8 @@ mod tests {
 
         let reopened = YamlStore::open(dir.path()).unwrap();
         let key = EntityKey::new_active("00000000-0000-0000-0000-000000000001");
-        let read = reopened.read_entity("Orders", &key).unwrap();
+        let q = ODataQuery::new();
+        let read = reopened.read_entity("Orders", &key, &q).unwrap();
         assert_eq!(read["Amount"], 42);
     }
     #[test]
@@ -220,8 +223,9 @@ mod tests {
             }
             _ => panic!(),
         }
+        let q = ODataQuery::new();
         let _r = store
-            .read_entity("Orders", &EntityKey::new_active(""))
+            .read_entity("Orders", &EntityKey::new_active(""), &q)
             .unwrap();
     }
 }

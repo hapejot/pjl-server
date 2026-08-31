@@ -26,8 +26,8 @@ impl DataDictonary {
         let _core = Package::new("core");
         let core = Package::new("core");
 
-        let mut package_fld = FieldSpec::atom("package", "Package", "Edm.Guid");
-        package_fld.lookup("Package");
+        // let mut package_fld = FieldSpec::atom("package", "Package", "Edm.Guid");
+        // package_fld.lookup("Package");
 
         let entity_ent = EntitySpec::new("Entity", core.name(), "Entities")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
@@ -40,13 +40,11 @@ impl DataDictonary {
             .field(FieldSpec::atom("role", "Role", "Edm.String"))
             .field(FieldSpec::atom("label", "Label", "Edm.String"))
             .field(FieldSpec::atom("type", "Type", "Edm.String"))
-            .field(FieldSpec::atom("package", "Package", "Edm.String"))
-            .field(FieldSpec::atom("max_length", "MaxLength", "Edm.Int"))
-            .field(FieldSpec::atom("precision", "Precision", "Edm.Int"))
-            .field(FieldSpec::atom("scale", "Scale", "Edm.Int"))
-            .field(FieldSpec::atom("computed", "Package", "Edm.Boolean"))
-            .field(FieldSpec::atom("immutable", "Immutable", "Edm.Boolean"))
-            .field(FieldSpec::atom("package", "Package", "Edm.String"));
+            .field(FieldSpec::atom("max_length", "MaxLength", "Edm.Int64"))
+            .field(FieldSpec::atom("precision", "Precision", "Edm.Int64"))
+            .field(FieldSpec::atom("scale", "Scale", "Edm.Int64"))
+            .field(FieldSpec::atom("computed", "Computed", "Edm.Boolean"))
+            .field(FieldSpec::atom("immutable", "Immutable", "Edm.Boolean"));
 
         let relation_ent = EntitySpec::new("Relation", core.name(), "Relations")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
@@ -203,7 +201,9 @@ impl DataDictonary {
                     entity: target_entity,
                     collection,
                 } => {
-                    let target = entities.iter().find(|candidate| candidate.name() == target_entity)?;
+                    let target = entities
+                        .iter()
+                        .find(|candidate| candidate.name() == target_entity)?;
                     Some(NavigationInfo {
                         name: name.clone(),
                         source_entity: entity.name().to_string(),
@@ -279,7 +279,9 @@ impl DataDictonary {
     }
 
     pub fn active_entity_by_setname(&self, set_name: &str) -> Option<&EntitySpec> {
-        self.active.values().find(|entity| entity.setname() == set_name)
+        self.active
+            .values()
+            .find(|entity| entity.setname() == set_name)
     }
 
     pub fn activate(&mut self) {

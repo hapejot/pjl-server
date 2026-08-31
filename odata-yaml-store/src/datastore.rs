@@ -116,6 +116,11 @@ impl DataRecord {
     pub fn get(&self, segment: &str) -> Option<Value> {
         match segment {
             "ID" => Some(json!(self.id)),
+            "IsActiveEntity" => Some(json!(self.is_active_entity)),
+            "HasActiveEntity" => Some(json!(self.has_active_entity)),
+            "HasDraftEntity" => Some(json!(self.has_draft_entity)),
+            "DraftMessages" => Some(json!(self.draft_messages)),
+            "DraftAdministrativeData" => Some(json!(self.draft_admin_data)),
             x => self.fields.get(x).cloned(),
         }
     }
@@ -226,9 +231,9 @@ impl IndexMut<&str> for DataRecord {
 #[derive(Debug, Default)]
 pub struct Navigation {
     pub single: bool,
-    pub from_entity: Option<String>,
+    pub from_set: Option<String>,
     pub from_field: Option<String>,
-    pub to_entity: Option<String>,
+    pub to_set: Option<String>,
     pub to_field: Option<String>,
 }
 impl Navigation {
@@ -239,15 +244,15 @@ impl Navigation {
         }
     }
 
-    pub fn from(&mut self, arg_1: &str, arg_2: &str) -> &mut Self {
-        self.from_entity = Some(arg_1.into());
-        self.from_field = Some(arg_2.into());
+    pub fn from(&mut self, set_name: &str, field_name: &str) -> &mut Self {
+        self.from_set = Some(set_name.into());
+        self.from_field = Some(field_name.into());
         self
     }
 
-    pub fn to(&mut self, arg_1: &str, arg_2: &str) -> &mut Self {
-        self.to_entity = Some(arg_1.into());
-        self.to_field = Some(arg_2.into());
+    pub fn to(&mut self, set_name: &str, field_name: &str) -> &mut Self {
+        self.to_set = Some(set_name.into());
+        self.to_field = Some(field_name.into());
         self
     }
 }
@@ -263,7 +268,12 @@ pub trait DataStore: Send + Sync {
     fn count(&self, set_name: &str, query: &ODataQuery) -> usize;
 
     // -- Single Entity CRUD --
-    fn read_entity(&self, set_name: &str, key: &EntityKey) -> Result<DataRecord, StoreError>;
+    fn read_entity(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+        query: &ODataQuery,
+    ) -> Result<DataRecord, StoreError>;
 
     fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError>;
 

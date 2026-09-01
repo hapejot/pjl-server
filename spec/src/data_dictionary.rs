@@ -37,6 +37,7 @@ impl DataDictonary {
 
         let relation_ent = EntitySpec::new("Relation", core.name(), "Relations")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
+            .field(FieldSpec::bool_field("owned", "Owned"))
             .field(FieldSpec::atom("source", "Source", "Edm.String"))
             .field(FieldSpec::atom(
                 "source_field",
@@ -71,9 +72,16 @@ impl DataDictonary {
             .field(FieldSpec::atom("title", "Title", "Edm.String"))
             .field(FieldSpec::atom("description", "Description", "Edm.String"));
 
+        let app_ent = EntitySpec::new("App", core.name(), "Apps")
+            .field(FieldSpec::atom("name", "Name", "Edm.String"))
+            .field(FieldSpec::atom("title", "Title", "Edm.String"))
+            .field(FieldSpec::atom("subtitle", "Subtitle", "Edm.String"))
+            .field(FieldSpec::atom("icon", "Icon", "Edm.String"));
+
         let rel = Relationship::new("entity_fields", core.name())
             .with_one("Entity", "_Fields")
-            .with_many("Field", "entity");
+            .with_many("Field", "entity")
+            .owned();
         let r2 = Relationship::new("entity_package", core.name())
             .with_many("Entity", "package")
             .with_one("Package", "_Entitites");
@@ -86,6 +94,12 @@ impl DataDictonary {
         let r5 = Relationship::new("field_package", core.name())
             .with_many("Field", "package")
             .with_one("Package", "_Fields");
+        let r6 = Relationship::new("app_entity", core.name())
+            .with_one("Entity", "_Apps")
+            .with_many("App", "main_entity");
+        let r7 = Relationship::new("app_package", core.name())
+            .with_one("Package", "_Apps")
+            .with_many("App", "package");
         let a1 = App::new(
             "relations".into(),
             "Relations".into(),
@@ -118,12 +132,27 @@ impl DataDictonary {
             Some("sap-icon://world".into()),
             core.clone(),
         );
+        let a5 = App::new(
+            "apps".into(),
+            "Apps".into(),
+            "App".into(),
+            Some("Maintain Apps".into()),
+            Some("sap-icon://world".into()),
+            core.clone(),
+        );
 
         Self {
             packages: vec![core],
-            entities: vec![entity_ent, relation_ent, field_ent, value_ent, package_ent],
-            relationships: vec![rel, r2, r3, r4, r5],
-            apps: vec![a1, a2, a3, a4],
+            entities: vec![
+                entity_ent,
+                relation_ent,
+                field_ent,
+                value_ent,
+                package_ent,
+                app_ent,
+            ],
+            relationships: vec![rel, r2, r3, r4, r5, r6, r7],
+            apps: vec![a1, a2, a3, a4, a5],
             active: HashMap::new(),
         }
     }
@@ -173,6 +202,81 @@ impl DataDictonary {
 
     pub fn relationships(&self) -> impl Iterator<Item = &Relationship> {
         self.relationships.iter()
+    }
+
+    /// Composition in der `entity` die abhaengige (N-)Seite ist.
+    pub fn owning_relationship(&self, entity: &str) -> Option<&Relationship> {
+        self.relationships
+            .iter()
+            .find(|r| r.is_owned() && r.many.as_deref() == Some(entity))
+    }
+
+    /// Compositions, deren Kinder an `entity` haengen.
+    pub fn owned_children(&self, entity: &str) -> impl Iterator<Item = &Relationship> {
+        self.relationships
+            .iter()
+            .filter(move |r| r.is_owned() && r.one.as_deref() == Some(entity))
+    }
+
+    /// Register a package unless one with the same name already exists.
+    pub fn add_package(&mut self, package: Package) -> bool {
+        if self.packages.iter().any(|p| p.name() == package.name()) {
+            return false;
+        }
+        self.packages.push(package);
+        true
+    }
+
+    /// Register an entity unless one with the same name already exists.
+    pub fn add_entity(&mut self, entity: EntitySpec) -> bool {
+        if self.entities.iter().any(|e| e.name() == entity.name()) {
+            return false;
+        }
+        self.entities.push(entity);
+        true
+    }
+
+    /// Register a relationship unless one with the same name already exists.
+    pub fn add_relationship(&mut self, relationship: Relationship) -> bool {
+        if self
+            .relationships
+            .iter()
+            .any(|r| r.name() == relationship.name())
+        {
+            return false;
+        }
+        self.relationships.push(relationship);
+        true
+    }
+
+    /// Register an app unless one with the same name already exists.
+    pub fn add_app(&mut self, app: App) -> bool {
+        if self.apps.iter().any(|a| a.name() == app.name()) {
+            return false;
+        }
+        self.apps.push(app);
+        true
+    }
+
+    /// Append a field to an already registered entity.
+    ///
+    /// Lookups are never added here - they are derived from the relationships.
+    pub fn add_field(&mut self, entity: &str, field: FieldSpec) -> bool {
+        if matches!(field, FieldSpec::Lookup { .. }) {
+            return false;
+        }
+        match self.entities.iter_mut().find(|e| e.name() == entity) {
+            Some(e) => {
+                e.fields.push(field);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Names of all registered entities, including the ones loaded at runtime.
+    pub fn entity_names(&self) -> impl Iterator<Item = &str> {
+        self.entities.iter().map(|e| e.name())
     }
 
     /// Resolve the foreign-key field on the target side of a `FieldSpec::Lookup`.

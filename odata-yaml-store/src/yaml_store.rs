@@ -15,7 +15,7 @@ use uuid::Uuid;
 pub struct YamlStore {
     root: PathBuf,
     current_change: RwLock<Option<Uuid>>,
-    navigations: Vec<Navigation>,
+    navigations: RwLock<Vec<Navigation>>,
     // cache: RwLock<HashMap<String, HashMap<Uuid, DataRecord>>>,
 }
 
@@ -55,7 +55,7 @@ impl YamlStore {
         let store = Self {
             root,
             current_change: RwLock::new(None),
-            navigations: vec![],
+            navigations: RwLock::new(vec![]),
             // cache: RwLock::new(HashMap::new()),
         };
         // store.load_all()?;
@@ -184,9 +184,13 @@ fn load_record_from_file(path: PathBuf) -> Result<DataRecord, StoreError> {
 
 impl DataStore for YamlStore {
     fn navigation(&mut self, single: bool) -> &mut Navigation {
-        let nav = Navigation::new(single);
-        self.navigations.push(nav);
-        self.navigations.last_mut().expect("last navigation")
+        let navigations = self.navigations.get_mut().expect("navigations lock");
+        navigations.push(Navigation::new(single));
+        navigations.last_mut().expect("last navigation")
+    }
+
+    fn set_navigations(&self, navigations: Vec<Navigation>) {
+        *self.navigations.write().expect("navigations lock") = navigations;
     }
 
     fn get_collection(
@@ -208,7 +212,7 @@ impl DataStore for YamlStore {
             .collect();
         info!("total records: {}", records.len());
         for x in query.expand.iter() {
-            for n in self.navigations.iter() {
+            for n in self.navigations.read().expect("navigations lock").iter() {
                 if let Navigation {
                     single,
                     from_set: Some(from_entity),
@@ -291,7 +295,7 @@ impl DataStore for YamlStore {
             .or_else(|e| Err(StoreError::Deserialize(format!("{e}"))))
             .and_then(|x| DataRecord::from_json(&x))?;
         for x in query.expand.iter() {
-            for n in self.navigations.iter() {
+            for n in self.navigations.read().expect("navigations lock").iter() {
                 if let Navigation {
                     single,
                     from_set: Some(from_entity),
@@ -322,7 +326,7 @@ impl DataStore for YamlStore {
     fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
         let mut rec: DataRecord = DataRecord::from_json(data)?;
         if !rec.is_active_entity() {
-            rec.edit();
+            rec.create_draft();
         }
         self.write_record(set_name, rec.clone())?;
         Ok(rec)

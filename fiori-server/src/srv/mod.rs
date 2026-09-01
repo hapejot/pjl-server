@@ -7,7 +7,7 @@ use axum::{
     response::Html,
     response::IntoResponse,
     response::Response,
-    routing::get,
+    routing::{get, post},
 };
 use odata::{
     path::{PathSegment, parse_odata_path},
@@ -315,10 +315,19 @@ impl EntitySet {
     }
 }
 
-fn draft_annotations_for_entity(entity_name: &str, set_name: &str) -> Vec<String> {
-    vec![
+fn draft_annotations_for_entity(ddic: &DataDictonary, entity: &EntitySpec) -> Vec<String> {
+    let entity_name = entity.name();
+    let set_name = entity.setname();
+    // Ein Kind einer Composition ist DraftNode, alles andere ein eigenstaendiger DraftRoot.
+    let draft_role = match ddic.owning_relationship(entity_name) {
+        Some(_) => r##"<Annotation Term="Common.DraftNode"><Record Type="Common.DraftNodeType"><PropertyValue Property="PreparationAction" String="Service.draftPrepare"/></Record></Annotation>"##.to_string(),
+        None => r##"<Annotation Term="Common.DraftRoot"><Record Type="Common.DraftRootType"><PropertyValue Property="ActivationAction" String="Service.draftActivate"/><PropertyValue Property="EditAction" String="Service.draftEdit"/><PropertyValue Property="PreparationAction" String="Service.draftPrepare"/></Record></Annotation>"##.to_string(),
+    };
+
+    let result = vec![
         format!(
-            r##"<Annotations Target="Service.EntityContainer/{set_name}"><Annotation Term="Org.OData.Capabilities.V1.UpdateRestrictions"><Record><PropertyValue Property="Updatable" Bool="true"/></Record></Annotation><Annotation Term="Org.OData.Capabilities.V1.InsertRestrictions"><Record Type="Capabilities.InsertRestrictionsType"><PropertyValue Property="NonInsertableProperties"><Collection><PropertyPath>ID</PropertyPath><PropertyPath>IsActiveEntity</PropertyPath><PropertyPath>HasActiveEntity</PropertyPath><PropertyPath>HasDraftEntity</PropertyPath></Collection></PropertyValue></Record></Annotation><Annotation Term="Common.DraftRoot"><Record Type="Common.DraftRootType"><PropertyValue Property="ActivationAction" String="Service.draftActivate"/><PropertyValue Property="EditAction" String="Service.draftEdit"/><PropertyValue Property="PreparationAction" String="Service.draftPrepare"/></Record></Annotation></Annotations>"##,
+            r##"<Annotations Target="Service.EntityContainer/{set_name}"><Annotation Term="Org.OData.Capabilities.V1.UpdateRestrictions"><Record><PropertyValue Property="Updatable" Bool="true"/></Record></Annotation><Annotation Term="Org.OData.Capabilities.V1.DeleteRestrictions"><Record><PropertyValue Property="Deletable" Bool="true"/></Record></Annotation><Annotation Term="Org.OData.Capabilities.V1.InsertRestrictions"><Record Type="Capabilities.InsertRestrictionsType"><PropertyValue Property="Insertable" Bool="true"/><PropertyValue Property="NonInsertableProperties"><Collection><PropertyPath>ID</PropertyPath><PropertyPath>IsActiveEntity</PropertyPath><PropertyPath>HasActiveEntity</PropertyPath><PropertyPath>HasDraftEntity</PropertyPath></Collection></PropertyValue></Record></Annotation>{draft_role}{navigation_restrictions}</Annotations>"##,
+            navigation_restrictions = navigation_restrictions(ddic, entity),
         ),
         format!(
             r##"<Annotations Target="Service.{entity_name}/IsActiveEntity"><Annotation Term="Org.OData.Core.V1.Computed" Bool="true"/></Annotations>"##,
@@ -329,7 +338,29 @@ fn draft_annotations_for_entity(entity_name: &str, set_name: &str) -> Vec<String
         format!(
             r##"<Annotations Target="Service.{entity_name}/HasDraftEntity"><Annotation Term="Org.OData.Core.V1.Computed" Bool="true"/></Annotations>"##,
         ),
-    ]
+    ];
+
+    result
+}
+
+/// Ohne explizite `NavigationRestrictions` bietet Fiori Elements in einer
+/// Object-Page-Tabelle kein Anlegen an.
+fn navigation_restrictions(ddic: &DataDictonary, entity: &EntitySpec) -> String {
+    let restricted: String = ddic
+        .owned_children(entity.name())
+        .map(|relationship| {
+            format!(
+                r##"<Record><PropertyValue Property="NavigationProperty" NavigationPropertyPath="{nav}"/><PropertyValue Property="InsertRestrictions"><Record><PropertyValue Property="Insertable" Bool="true"/></Record></PropertyValue><PropertyValue Property="DeleteRestrictions"><Record><PropertyValue Property="Deletable" Bool="true"/></Record></PropertyValue></Record>"##,
+                nav = relationship.one_property()
+            )
+        })
+        .collect();
+    if restricted.is_empty() {
+        return String::new();
+    }
+    format!(
+        r##"<Annotation Term="Org.OData.Capabilities.V1.NavigationRestrictions"><Record><PropertyValue Property="RestrictedProperties"><Collection>{restricted}</Collection></PropertyValue></Record></Annotation>"##
+    )
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -895,12 +926,12 @@ const INFO_TEMPLATE: &str = include_str!("../../templates/info.hbs");
 // Für `EntitySpec` bauen wir mit `serde_json::json!` ein flaches Ad-hoc-Format,
 // weil `setname()` berechnet ist und `FieldSpec` als Enum untauglich fürs Template.
 fn render_info_page(state: &AppState) -> String {
-    let packages: Vec<&Package> = state.ddic.packages().collect();
-    let apps: Vec<&App> = state.ddic.apps().collect();
-    let relationships: Vec<&Relationship> = state.ddic.relationships().collect();
+    let ddic = state.ddic();
+    let packages: Vec<&Package> = ddic.packages().collect();
+    let apps: Vec<&App> = ddic.apps().collect();
+    let relationships: Vec<&Relationship> = ddic.relationships().collect();
 
-    let entities: Vec<Value> = state
-        .ddic
+    let entities: Vec<Value> = ddic
         .active_entities()
         .cloned()
         .map(|ent| {
@@ -922,8 +953,7 @@ fn render_info_page(state: &AppState) -> String {
                         entity: target_entity,
                         collection,
                     } => {
-                        let target_set = state
-                            .ddic
+                        let target_set = ddic
                             .active_entity(target_entity)
                             .map(|e| e.setname())
                             .unwrap_or_else(|| format!("{target_entity}Set"));
@@ -934,7 +964,7 @@ fn render_info_page(state: &AppState) -> String {
                             "target_entity": target_entity,
                             "target_set": target_set,
                             "collection": *collection,
-                            "foreign_key_field": state.ddic.foreign_key_field(&ent, field),
+                            "foreign_key_field": ddic.foreign_key_field(&ent, field),
                         }))
                     }
                     _ => None,
@@ -1007,10 +1037,26 @@ pub fn router() -> Router<AppState> {
         .route("/", get(index))
         .route("/$metadata", get(metadata))
         .route("/info", get(info))
+        .route("/reload", post(reload))
         .route(
             "/{*path}",
-            get(get_handler).post(post_handler).patch(patch_handler),
+            get(get_handler)
+                .post(post_handler)
+                .patch(patch_handler)
+                .delete(delete_handler),
         )
+}
+
+/// Das Data Dictionary aus dem Storage neu aufbauen.
+async fn reload(State(state): State<AppState>) -> impl IntoResponse {
+    let ddic = state.reload();
+    info!("data dictionary reloaded");
+    to_json_response(json!({
+        "packages": ddic.packages().count(),
+        "entities": ddic.active_entities().count(),
+        "relationships": ddic.relationships().count(),
+        "apps": ddic.apps().count(),
+    }))
 }
 
 fn build_query(params: &HashMap<String, String>) -> ODataQuery {
@@ -1142,7 +1188,7 @@ fn to_json_response(body: Value) -> ([(HeaderName, String); 2], String) {
 
 fn entity_spec_for_segment(state: &AppState, s: &PathSegment) -> Result<EntitySpec, ODataError> {
     state
-        .ddic
+        .ddic()
         .active_entity_by_setname(&s.name)
         .cloned()
         .ok_or_else(|| ODataError::not_found(format!("Unknown entity set '{}'", s.name)))
@@ -1260,6 +1306,28 @@ fn resolve_get_path(
     query: &ODataQuery,
     segments: &[PathSegment],
 ) -> Result<GetResult, ODataError> {
+    let resolved = resolve_path(state, query, segments)?;
+    materialize(
+        resolved.cursor,
+        resolved.suffix,
+        &resolved.query,
+        &resolved.context,
+    )
+}
+
+struct ResolvedPath<'a> {
+    cursor: Cursor,
+    suffix: Option<&'a str>,
+    /// Query, die auf dem Zielsegment wirkt.
+    query: ODataQuery,
+    context: String,
+}
+
+fn resolve_path<'a>(
+    state: &AppState,
+    query: &ODataQuery,
+    segments: &'a [PathSegment],
+) -> Result<ResolvedPath<'a>, ODataError> {
     // `$count`/`$value` beschreiben die Darstellung des Vorgaengersegments, nicht eine Navigation.
     let suffix = segments
         .last()
@@ -1315,7 +1383,12 @@ fn resolve_get_path(
         cursor = follow_segment(state, cursor, segment, navigation_query, &mut context)?;
     }
 
-    materialize(cursor, suffix, &target_query, &context)
+    Ok(ResolvedPath {
+        cursor,
+        suffix,
+        query: target_query,
+        context,
+    })
 }
 
 fn materialize(
@@ -1400,7 +1473,7 @@ fn follow_segment(
                 FieldSpec::Lookup {
                     entity, collection, ..
                 } => {
-                    let target = state.ddic.active_entity(entity).cloned().ok_or_else(|| {
+                    let target = state.ddic().active_entity(entity).cloned().ok_or_else(|| {
                         ODataError::not_found(format!("Unknown entity '{entity}'"))
                     })?;
                     if *collection {
@@ -1469,7 +1542,7 @@ fn follow_to_many(
     query: &ODataQuery,
 ) -> Result<Cursor, ODataError> {
     let foreign_key = state
-        .ddic
+        .ddic()
         .foreign_key_field(spec, field)
         .map(|f| format!("{f}_ID"))
         .ok_or_else(|| {
@@ -1589,45 +1662,192 @@ async fn post_handler(
     state: State<AppState>,
     params: Query<HashMap<String, String>>,
     payload: Option<Json<Value>>,
-) -> impl IntoResponse {
+) -> Response {
     let _p = build_query(&params);
-    let path_struct = parse_odata_path(&path).unwrap();
+    let path_struct = match parse_odata_path(&path) {
+        Ok(p) => p,
+        Err(e) => {
+            return ODataError::bad_request(format!("Invalid path '{}': {}", e.segment, e.message))
+                .into_response();
+        }
+    };
+    let body = payload.map(|Json(v)| v).unwrap_or_else(|| json!({}));
 
     match path_struct.segments.as_slice() {
-        [_entity] => {
-            let r = state
-                .store
-                .create_entity(_entity.name.as_str(), payload.as_ref().unwrap())
-                .unwrap();
-            return to_json_response(json!(r));
-        }
-        [entity, action] => {
-            if !entity.keys.is_empty() && action.keys.is_empty() {
-                let action_name = action.name.rsplit('.').next().unwrap_or_default();
-                let key: EntityKey = entity.into();
-                match action_name {
-                    "draftEdit" => {
-                        let r = state.store.draft_edit(&entity.name, &key).unwrap();
-                        return to_json_response(r);
-                    }
-                    "draftActivate" => {
-                        let r = state.store.draft_activate(&entity.name, &key).unwrap();
-                        return to_json_response(r);
-                    }
-                    "draftPrepare" => {
-                        let r = state.store.draft_prepare(&entity.name, &key).unwrap();
-                        return to_json_response(r);
-                    }
-                    _ => {}
-                };
+        [entity] => match state.store.create_entity(&entity.name, &body) {
+            Ok(r) => created_response(json!(r)),
+            Err(e) => ODataError::from_store(e).into_response(),
+        },
+        [entity, action]
+            if !entity.keys.is_empty() && action.keys.is_empty() && action.name.contains('.') =>
+        {
+            let action_name = action.name.rsplit('.').next().unwrap_or_default();
+            let key: EntityKey = entity.into();
+            match draft_action(&state, &entity.name, &key, action_name) {
+                Ok(r) => to_json_response(r).into_response(),
+                Err(e) => e.into_response(),
             }
         }
-        _ => todo!(),
+        segments if segments.len() > 1 => match create_in_navigation(&state, segments, body) {
+            Ok(r) => created_response(r),
+            Err(e) => e.into_response(),
+        },
+        _ => ODataError::bad_request("POST is not supported for this path").into_response(),
+    }
+}
+
+fn created_response(body: Value) -> Response {
+    (
+        StatusCode::CREATED,
+        [content_type_json(), odata_version()],
+        body.to_string(),
+    )
+        .into_response()
+}
+
+fn draft_action(
+    state: &AppState,
+    set: &str,
+    key: &EntityKey,
+    action: &str,
+) -> Result<Value, ODataError> {
+    match action {
+        "draftEdit" => {
+            let r = state
+                .store
+                .draft_edit(set, key)
+                .map_err(ODataError::from_store)?;
+            for (child_set, foreign_key) in owned_children_of(state, set) {
+                for child in children_of(state, &child_set, &foreign_key, key.id)? {
+                    if child.is_active_entity() {
+                        state
+                            .store
+                            .draft_edit(&child_set, &EntityKey::from(&child))
+                            .map_err(ODataError::from_store)?;
+                    }
+                }
+            }
+            Ok(r)
+        }
+        "draftActivate" => {
+            for (child_set, foreign_key) in owned_children_of(state, set) {
+                for child in children_of(state, &child_set, &foreign_key, key.id)? {
+                    if !child.is_active_entity() {
+                        state
+                            .store
+                            .draft_activate(&child_set, &EntityKey::from(&child))
+                            .map_err(ODataError::from_store)?;
+                    }
+                }
+            }
+            state
+                .store
+                .draft_activate(set, key)
+                .map_err(ODataError::from_store)
+        }
+        "draftPrepare" => state
+            .store
+            .draft_prepare(set, key)
+            .map_err(ODataError::from_store),
+        other => Err(ODataError::not_found(format!("Unknown action '{other}'"))),
+    }
+}
+
+/// Ein neues Kind in einer To-Many-Navigation anlegen.
+fn create_in_navigation(
+    state: &AppState,
+    segments: &[PathSegment],
+    mut body: Value,
+) -> Result<Value, ODataError> {
+    let (parent_segments, navigation) = segments.split_at(segments.len() - 1);
+    let navigation = &navigation[0];
+    if !navigation.keys.is_empty() {
+        return Err(ODataError::bad_request(
+            "POST addresses a collection, not a single entity",
+        ));
     }
 
-    to_json_response(
-        json!({ "error": {"code": "NotImplemented", "message": "POST not yet implemented"}}),
-    )
+    let resolved = resolve_path(state, &ODataQuery::default(), parent_segments)?;
+    let Cursor::Entity { spec, record, .. } = resolved.cursor else {
+        return Err(ODataError::bad_request(
+            "Navigation requires a single parent entity",
+        ));
+    };
+
+    let ddic = state.ddic();
+    let field = spec
+        .fields()
+        .find(|f| f.name() == navigation.name)
+        .cloned()
+        .ok_or_else(|| {
+            ODataError::not_found(format!(
+                "'{}' is not a member of '{}'",
+                navigation.name,
+                spec.name()
+            ))
+        })?;
+    let FieldSpec::Lookup {
+        entity: target_entity,
+        collection: true,
+        ..
+    } = &field
+    else {
+        return Err(ODataError::bad_request(format!(
+            "'{}' is not a collection navigation",
+            navigation.name
+        )));
+    };
+    let target = ddic
+        .active_entity(target_entity)
+        .ok_or_else(|| ODataError::not_found(format!("Unknown entity '{target_entity}'")))?;
+    let foreign_key = ddic
+        .foreign_key_field(&spec, &field)
+        .map(|f| format!("{f}{}", spec::ID_SUFFIX))
+        .ok_or_else(|| {
+            ODataError::not_found(format!(
+                "No foreign key for navigation '{}'",
+                navigation.name
+            ))
+        })?;
+
+    body[foreign_key] = json!(record.id().to_string());
+    // Das Kind teilt den Draft-Zustand seines Parents.
+    body["IsActiveEntity"] = json!(record.is_active_entity());
+    let created = state
+        .store
+        .create_entity(&target.setname(), &body)
+        .map_err(ODataError::from_store)?;
+    Ok(json!(created))
+}
+
+/// Zielset und FK-Feld aller Compositions unterhalb von `set`.
+fn owned_children_of(state: &AppState, set: &str) -> Vec<(String, String)> {
+    let ddic = state.ddic();
+    let Some(parent) = ddic.active_entity_by_setname(set) else {
+        return vec![];
+    };
+    ddic.owned_children(parent.name())
+        .filter_map(|relationship| {
+            let child = ddic.active_entity(relationship.many())?;
+            Some((
+                child.setname(),
+                format!("{}{}", relationship.many_property(), spec::ID_SUFFIX),
+            ))
+        })
+        .collect()
+}
+
+fn children_of(
+    state: &AppState,
+    set: &str,
+    foreign_key: &str,
+    parent: uuid::Uuid,
+) -> Result<Vec<DataRecord>, ODataError> {
+    let query = ODataQuery::new().filter(Expr::equals_guid(parent.to_string(), foreign_key));
+    state
+        .store
+        .get_collection(set, &query)
+        .map_err(ODataError::from_store)
 }
 
 async fn patch_handler(
@@ -1647,6 +1867,71 @@ async fn patch_handler(
         json!([]).to_string(),
     )
 }
+
+async fn delete_handler(path: Path<String>, state: State<AppState>) -> Response {
+    let path_struct = match parse_odata_path(&path) {
+        Ok(p) => p,
+        Err(e) => {
+            return ODataError::bad_request(format!("Invalid path '{}': {}", e.segment, e.message))
+                .into_response();
+        }
+    };
+    match delete_entity(&state, &path_struct.segments) {
+        Ok(()) => (StatusCode::NO_CONTENT, [odata_version()]).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+fn delete_entity(state: &AppState, segments: &[PathSegment]) -> Result<(), ODataError> {
+    let resolved = resolve_path(state, &ODataQuery::default(), segments)?;
+    if let Some(suffix) = resolved.suffix {
+        return Err(ODataError::bad_request(format!(
+            "'{suffix}' cannot be deleted"
+        )));
+    }
+    let Cursor::Entity { set, record, .. } = resolved.cursor else {
+        return Err(ODataError::bad_request(
+            "DELETE requires a single entity addressed by key",
+        ));
+    };
+
+    let key = EntityKey::from(&*record);
+    delete_owned_children(state, &set, &key)?;
+    state
+        .store
+        .delete_entity(&set, &key)
+        .map_err(ODataError::from_store)?;
+    // Mit dem aktiven Satz verschwindet auch ein noch offener Draft.
+    if key.is_active_entity {
+        state
+            .store
+            .delete_entity(&set, &key.sibling())
+            .map_err(ODataError::from_store)?;
+    }
+    Ok(())
+}
+
+/// Kinder einer Composition mitloeschen. Wird nur der Draft verworfen, bleiben
+/// die aktiven Kinder erhalten.
+fn delete_owned_children(
+    state: &AppState,
+    set: &str,
+    parent: &EntityKey,
+) -> Result<(), ODataError> {
+    for (child_set, foreign_key) in owned_children_of(state, set) {
+        for child in children_of(state, &child_set, &foreign_key, parent.id)? {
+            if !parent.is_active_entity && child.is_active_entity() {
+                continue;
+            }
+            state
+                .store
+                .delete_entity(&child_set, &EntityKey::from(&child))
+                .map_err(ODataError::from_store)?;
+        }
+    }
+    Ok(())
+}
+
 #[allow(dead_code)]
 fn not_implemented(msg: impl Into<String>) -> Value {
     json!({"error": {"code": "NotImplemented", "message": format!("{} not yet implemented", msg.into())}})
@@ -1666,7 +1951,7 @@ fn content_type_json() -> (HeaderName, String) {
 async fn index(State(state): State<AppState>) -> Json<Value> {
     trace!("index");
     let mut value: Vec<Value> = state
-        .ddic
+        .ddic()
         .active_entities()
         .map(|e| {
             let set = e.setname();
@@ -1689,18 +1974,16 @@ async fn index(State(state): State<AppState>) -> Json<Value> {
     }))
 }
 async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
-    let entity_lst: Vec<EntityType> = state
-        .ddic
+    let ddic = state.ddic();
+    let entity_lst: Vec<EntityType> = ddic
         .active_entities()
         .map(|x| EntityType::from_entity(x))
         .collect();
-    let entity_set_lst: Vec<EntitySet> = state
-        .ddic
-        .apps()
-        .map(|x| EntitySet::from_entity(&state.ddic, &x.main_entity(&state.ddic)))
+    let entity_set_lst: Vec<EntitySet> = ddic
+        .active_entities()
+        .map(|x| EntitySet::from_entity(&ddic, x))
         .collect();
-    let annotation_lst: Vec<Annotations> = state
-        .ddic
+    let annotation_lst: Vec<Annotations> = ddic
         .active_entities()
         .map(|x| Annotations::from_entity(x))
         .flatten()
@@ -1726,14 +2009,12 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
     for x in annotation_lst {
         annotations.push(quick_xml::se::to_string(&x).unwrap());
     }
-    for x in state.ddic.active_entities() {
-        let set_name = x.setname();
-        annotations.extend(draft_annotations_for_entity(x.name(), &set_name));
+    for x in ddic.active_entities() {
+        annotations.extend(draft_annotations_for_entity(&ddic, x));
     }
 
     let mut actions = vec![];
-    for x in state.ddic.apps() {
-        let e = x.main_entity(&state.ddic);
+    for e in ddic.active_entities() {
         let entity_name = format!("Service.{}", e.name());
         actions.push(format!(
             r##"<Action Name="draftEdit" IsBound="true" EntitySetPath="in">

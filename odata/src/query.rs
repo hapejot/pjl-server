@@ -313,13 +313,16 @@ impl Expr {
     pub fn parse(input: &str) -> Result<Self, String> {
         let tokens = tokenize(input).map_err(|e| {
             format!(
-                "Tokenizer-Fehler an Position {}: '{}'",
-                e.position, e.snippet
+                "Tokenizer-Fehler an Position {}: '{}' von '{}'",
+                e.position, e.snippet, input
             )
         })?;
-        Parser::new(tokens)
-            .parse()
-            .map_err(|e| format!("Parse-Fehler bei Token {}: {}", e.position, e.message))
+        Parser::new(tokens).parse().map_err(|e| {
+            format!(
+                "Parse-Fehler bei Token {}: {} von '{}'",
+                e.position, e.message, input
+            )
+        })
     }
 }
 

@@ -65,19 +65,19 @@ impl KeyLiteral {
             KeyLiteral::Bool(b) => b.to_string(),
         }
     }
-    
+
     pub fn as_guid(&self) -> Option<Uuid> {
         match self {
             KeyLiteral::Guid(g) => Uuid::parse_str(g).ok(),
             _ => None,
         }
     }
-    
+
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             KeyLiteral::Bool(b) => Some(*b),
             _ => None,
-        }   
+        }
     }
 }
 

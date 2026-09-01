@@ -1,6 +1,5 @@
 use axum::{Router, routing::get};
-use odata_yaml_store::{DataStore, YamlStore};
-use spec::data_dictionary::DataDictonary;
+use odata_yaml_store::YamlStore;
 use std::{net::SocketAddr, sync::Arc};
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::{error, info};
@@ -10,15 +9,10 @@ use fiori_server::*;
 
 async fn main_loop() -> anyhow::Result<()> {
     info!("init");
-    let mut store = YamlStore::open("data")?;
-    let mut ddic = DataDictonary::new();
-    ddic.activate();
-    prepare_navigations_from_ddic(&mut store, &ddic)?;
+    let store = Arc::new(YamlStore::open("data")?);
 
-    let ddic = Arc::new(ddic);
-    let store = Arc::new(store);
-
-    let state = AppState { store, ddic };
+    let state = AppState::new(store);
+    state.reload();
     let app = Router::new()
         // .nest("/users", services::users::router())
         .nest("/Service/", batch::router(srv::router(), state.clone()))
@@ -36,31 +30,6 @@ async fn main_loop() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     info!("läuft");
     axum::serve(listener, app).await?;
-    Ok(())
-}
-
-fn prepare_navigations_from_ddic(
-    store: &mut impl DataStore,
-    ddic: &DataDictonary,
-) -> anyhow::Result<()> {
-    for entity in ddic.entities().iter() {
-        let n = format!("{}Set", entity.name());
-        for f in entity.fields() {
-            match f {
-                spec::FieldSpec::Lookup {
-                    name,
-                    entity,
-                    collection,
-                } => {
-                    store
-                        .navigation(!collection)
-                        .from(&n, f.name())
-                        .to(&format!("{}Set", entity), name);
-                }
-                _ => {}
-            }
-        }
-    }
     Ok(())
 }
 

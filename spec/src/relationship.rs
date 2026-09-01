@@ -121,6 +121,16 @@ impl Relationship {
         self
     }
 
+    /// Mark this relationship as a composition: the many side lives inside the one side's draft.
+    pub fn owned(mut self) -> Self {
+        self.owned = true;
+        self
+    }
+
+    pub fn is_owned(&self) -> bool {
+        self.owned
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }

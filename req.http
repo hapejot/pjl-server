@@ -36,3 +36,30 @@ GET {{host}}/{{entity}}/DraftAdministrativeData
 
 ### Unbekannte Navigation -> 404
 GET {{host}}/{{entity}}/gibtsnicht
+
+### Data Dictionary aus dem Storage neu laden
+POST {{host}}/reload
+
+### Draft verwerfen (aktiver Satz bleibt)
+DELETE {{host}}/EntitySet(ID=889a5bcc-847b-41f5-978a-7d745d89015d,IsActiveEntity=false)
+
+### Aktiven Satz loeschen (loescht auch einen offenen Draft)
+DELETE {{host}}/{{entity}}
+
+### Loeschen ueber eine Navigation
+DELETE {{host}}/{{package}}/_Entitites(ID=889a5bcc-847b-41f5-978a-7d745d89015d,IsActiveEntity=true)
+
+### Draft anlegen, Kind hinzufuegen, aktivieren
+POST {{host}}/{{entity}}/Service.draftEdit
+
+### Kind in der To-Many-Liste anlegen
+POST {{host}}/EntitySet(ID=889a5bcc-847b-41f5-978a-7d745d89015d,IsActiveEntity=false)/_Fields
+Content-Type: application/json
+
+{ "name": "vorname", "label": "Vorname", "type": "Edm.String" }
+
+### Draft aktivieren (Kinder werden mitaktiviert)
+POST {{host}}/EntitySet(ID=889a5bcc-847b-41f5-978a-7d745d89015d,IsActiveEntity=false)/Service.draftActivate
+
+### Draft verwerfen (Kind-Drafts verschwinden mit)
+DELETE {{host}}/EntitySet(ID=889a5bcc-847b-41f5-978a-7d745d89015d,IsActiveEntity=false)

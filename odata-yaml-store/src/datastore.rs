@@ -193,6 +193,12 @@ impl DataRecord {
         });
     }
 
+    /// Neu angelegter Draft - im Gegensatz zu `edit()` gibt es noch keinen aktiven Satz.
+    pub fn create_draft(&mut self) {
+        self.edit();
+        self.has_active_entity = false;
+    }
+
     pub fn core_json(&self) -> Value {
         let mut m = Map::new();
         m.insert("ID".into(), json!(self.id));
@@ -323,6 +329,9 @@ pub trait DataStore: Send + Sync {
     }
 
     fn navigation(&mut self, single: bool) -> &mut Navigation;
+
+    /// Replace all registered navigations - used when the data dictionary is reloaded.
+    fn set_navigations(&self, navigations: Vec<Navigation>);
 }
 
 /// Optionale Debug-Erweiterung. Bewusst getrennt vom Kern-Trait, damit

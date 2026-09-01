@@ -8,6 +8,7 @@ use axum::{
     routing::get,
 };
 use serde_json::{Value, json};
+use spec::app::App;
 use tracing::{debug, info};
 
 use crate::AppState;
@@ -43,25 +44,36 @@ pub fn router() -> Router<AppState> {
         .route("/site.json", get(site))
 }
 
+const DEFAULT_APP_ICON: &str = "sap-icon://settings";
+
+fn subtitle_of(app: &App) -> &str {
+    app.subtitle().map(String::as_str).unwrap_or_default()
+}
+
+fn icon_of(app: &App) -> &str {
+    app.icon().map(String::as_str).unwrap_or(DEFAULT_APP_ICON)
+}
+
 async fn site(State(_state): State<AppState>) -> Json<Value> {
     info!("site");
+    let ddic = _state.ddic();
     let mut apps: HashMap<String, Value> = HashMap::new();
-    for app in _state.ddic.apps() {
+    for app in ddic.apps() {
         let app_json = json!({
             "sap.app":{
                 "crossNavigation":{
                     "inbounds":{
-                        format!("{}-{}", app.main_entity(&_state.ddic).name(), app.action()):{
+                        format!("{}-{}", app.main_entity(&ddic).name(), app.action()):{
                             "action":app.action(),
-                            "semanticObject":app.main_entity(&_state.ddic).name(),
+                            "semanticObject":app.main_entity(&ddic).name(),
                             "signature":{
                                 "additionalParameters":"allowed",
                                 "parameters":{}}}}},
                 "id":app.name(),
-                "subTitle":"...",
+                "subTitle":subtitle_of(app),
                 "title":app.title()},
             "sap.flp":{ "type":"application"},
-            "sap.platform.runtime":{ "componentProperties": {"url": format!("./apps/{}/", app.main_entity(&_state.ddic).name())}},                                            
+            "sap.platform.runtime":{ "componentProperties": {"url": format!("./apps/{}/", app.main_entity(&ddic).name())}},                                            
             "sap.ui":{"deviceTypes":{"desktop":true,"phone":true,"tablet":true}, "technology":"UI5"},
             "sap.ui5":{"componentName":app.name()}});
         apps.insert(app.name().to_string(), app_json);
@@ -70,34 +82,30 @@ async fn site(State(_state): State<AppState>) -> Json<Value> {
     let mut viz: HashMap<String, Value> = HashMap::new();
     let mut viz_refs: HashMap<String, Value> = HashMap::new();
     let mut viz_order: Vec<String> = Vec::new();
-    for app in _state.ddic.apps() {
+    for app in ddic.apps() {
         let viz_json = json!({
             "businessApp": app.name(),
             "target": {
                 "action": app.action(),
-                "semanticObject": app.main_entity(&_state.ddic).name()
+                "semanticObject": app.main_entity(&ddic).name()
             },
             "vizConfig": {
                 "sap.app": {
-                    "icon": "sap-icon://settings",
+                    "icon": icon_of(app),
                     "info": "",
-                    "subTitle": "...",
+                    "subTitle": subtitle_of(app),
                     "title": app.title()
                 },
                 "sap.flp": {
                     "target": {
                         "appId": app.name(),
-                        "inboundId": format!("{}-{}", app.main_entity(&_state.ddic).name(), app.action())
+                        "inboundId": format!("{}-{}", app.main_entity(&ddic).name(), app.action())
                     }
                 }
             },
             "vizType": "sap.ushell.StaticAppLauncher"
         });
-        let viz_name = format!(
-            "{}-{}-viz",
-            app.main_entity(&_state.ddic).name(),
-            app.action()
-        );
+        let viz_name = format!("{}-{}-viz", app.main_entity(&ddic).name(), app.action());
         viz.insert(viz_name.clone(), viz_json);
         viz_refs.insert(
             viz_name.clone(),
@@ -197,13 +205,11 @@ pub async fn app_component_handler(
 ) -> impl IntoResponse {
     debug!("Component.js for {}", app);
 
-    let a = _state
-        .ddic
+    let ddic = _state.ddic();
+    let a = ddic
         .apps()
-        .find(|x| x.main_entity(&_state.ddic).name() == app)
+        .find(|x| x.main_entity(&ddic).name() == app)
         .unwrap();
-
-    dbg!(a);
 
     (
         [(
@@ -227,13 +233,12 @@ pub async fn app_manifest_handler(
 ) -> Result<Json<Value>, AppError> {
     debug!("manifest.json for {}", app);
 
-    let a = _state
-        .ddic
+    let ddic = _state.ddic();
+    let a = ddic
         .apps()
-        .find(|x| x.main_entity(&_state.ddic).name() == app)
+        .find(|x| x.main_entity(&ddic).name() == app)
         .unwrap();
-    dbg!(a);
-    let main_entity = a.main_entity(&_state.ddic);
+    let main_entity = a.main_entity(&ddic);
     let main_name = main_entity.name().to_string();
     let main_set = main_entity.setname();
     let list_target = format!("{}List", main_name);
@@ -300,7 +305,7 @@ pub async fn app_manifest_handler(
 
     let mut object_navigation: serde_json::Map<String, Value> = serde_json::Map::new();
 
-    for rel in _state.ddic.relationships().filter(|r| r.one() == main_name) {
+    for rel in ddic.relationships().filter(|r| r.one() == main_name) {
         let nav = rel.name().to_string();
         let child_entity = rel.many().to_string();
         let child_object_target = format!("{}ObjectPage", child_entity);
@@ -341,7 +346,7 @@ pub async fn app_manifest_handler(
         );
     }
 
-    let sem = format!("{}-{}", a.main_entity(&_state.ddic).name(), a.action());
+    let sem = format!("{}-{}", a.main_entity(&ddic).name(), a.action());
     let sap_app = json!({
       "applicationVersion": {
         "version": "1.0.0"
@@ -350,7 +355,7 @@ pub async fn app_manifest_handler(
         "inbounds": {
           sem: {
             "action": a.action(),
-            "semanticObject": a.main_entity(&_state.ddic).name(),
+            "semanticObject": a.main_entity(&ddic).name(),
             "signature": {
               "additionalParameters": "allowed",
               "parameters": {}
@@ -370,6 +375,7 @@ pub async fn app_manifest_handler(
       "description": "Fiori Elements List Report + Object Page",
       "i18n": "i18n/i18n.properties",
       "id": a.name(),
+      "subTitle": subtitle_of(a),
       "title": a.title(),
       "type": "application"
     });
@@ -432,10 +438,8 @@ pub async fn app_handler(
 ) -> impl IntoResponse {
     debug!("{} {}", app, path);
 
-    let a = _state
-        .ddic
-        .apps()
-        .find(|x| x.main_entity(&_state.ddic).name() == app);
+    let ddic = _state.ddic();
+    let a = ddic.apps().find(|x| x.main_entity(&ddic).name() == app);
     debug!("{:?}", a);
 
     (

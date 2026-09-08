@@ -1,32 +1,48 @@
-use std::fmt;
+use std::{backtrace::Backtrace, path::PathBuf};
 
-#[derive(Debug)]
+use thiserror::Error;
+
+#[derive(Debug, Error)]
 pub enum StoreError {
-    NotFound(String),
+    #[error("Datei {path} nicht gefunden in {bt}")]
+    NotFound { path: PathBuf, bt: Box<Backtrace> },
+
+    #[error("IO Fehler: {0}")]
     Io(std::io::Error),
+
+    #[error("Serialisirungsfehler: {0}")]
     Serialize(String),
+
+    #[error("Deserialisierungsfehler: {0}")]
     Deserialize(String),
+
+    #[error("Konvertierungsfehler")]
+    Conversion(#[from] serde_yaml::Error),
+
+    #[error("Metadata Fehler {0}")]
     Metadata(String),
+
+    #[error("Conflict: {0}")]
     Conflict(String),
-}
 
-impl fmt::Display for StoreError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            StoreError::NotFound(s) => write!(f, "Nicht gefunden: {s}"),
-            StoreError::Io(e) => write!(f, "IO-Fehler: {e}"),
-            StoreError::Serialize(s) => write!(f, "Serialisierungsfehler: {s}"),
-            StoreError::Deserialize(s) => write!(f, "Deserialisierungsfehler: {s}"),
-            StoreError::Metadata(s) => write!(f, "Metadaten-Fehler: {s}"),
-            StoreError::Conflict(s) => write!(f, "Konflikt: {s}"),
-        }
-    }
-}
+    #[error("Property not Found {0}")]
+    PropertyNotFound(String),
 
-impl std::error::Error for StoreError {}
+    #[error("Falscher Draft Status")]
+    InvalidState,
+}
 
 impl From<std::io::Error> for StoreError {
     fn from(e: std::io::Error) -> Self {
         StoreError::Io(e)
+    }
+}
+
+impl StoreError {
+    pub fn not_found(path: impl Into<std::path::PathBuf>) -> Self {
+        StoreError::NotFound {
+            path: path.into(),
+            bt: Box::new(Backtrace::capture()),
+        }
     }
 }

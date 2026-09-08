@@ -51,7 +51,10 @@ fn parse_raw_http_request(raw: &[u8]) -> Request<Body> {
     let request_line = lines.next().unwrap();
     let mut parts = request_line.split_whitespace();
     let method = Method::from_bytes(parts.next().unwrap().as_bytes()).unwrap();
-    let path = parts.next().unwrap();
+    let path = match parts.next() {
+        Some(p) => p,
+        None => panic!("no path here: {}", request_line),
+    };
 
     let mut builder = Request::builder()
         .method(method)

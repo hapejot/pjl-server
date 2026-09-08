@@ -57,6 +57,7 @@ impl EntityType {
                     name,
                     entity,
                     collection,
+                    owned: _,
                 } => {
                     let p = if *collection {
                         NavigationProperty::new(name, format!("Service.{}", entity), None)
@@ -284,6 +285,7 @@ pub struct EntitySet {
     #[serde(rename = "NavigationPropertyBinding", default)]
     pub navigation_property_bindings: Vec<NavigationPropertyBinding>,
 }
+
 impl EntitySet {
     fn from_entity(ddic: &DataDictonary, x: &EntitySpec) -> EntitySet {
         let mut navigation_property_bindings = Vec::new();
@@ -296,7 +298,16 @@ impl EntitySet {
             target: "DraftAdministrativeData".into(),
         });
         for field in x.fields() {
-            if let FieldSpec::Lookup { name, entity, .. } = field {
+            if let FieldSpec::Lookup {
+                name,
+                entity,
+                collection,
+                owned,
+            } = field
+            {
+                if !collection && *owned {
+                    continue;
+                }
                 let Some(target) = ddic.active_entity(entity) else {
                     continue;
                 };
@@ -477,6 +488,7 @@ impl Annotations {
                 name,
                 entity,
                 collection,
+                owned: _,
             } => {
                 if !collection {
                     let name = format!("{}_ID", name);
@@ -952,6 +964,7 @@ fn render_info_page(state: &AppState) -> String {
                         name,
                         entity: target_entity,
                         collection,
+                        owned: _,
                     } => {
                         let target_set = ddic
                             .active_entity(target_entity)
@@ -1220,7 +1233,7 @@ impl ODataError {
 
     fn from_store(e: StoreError) -> Self {
         match e {
-            StoreError::NotFound(_) => Self::not_found(e.to_string()),
+            StoreError::NotFound { .. } => Self::not_found(e.to_string()),
             _ => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 code: "InternalError",
@@ -1460,7 +1473,7 @@ fn follow_segment(
                     set,
                     record: Box::new(record),
                 }),
-                Err(StoreError::NotFound(_)) => Ok(Cursor::Empty),
+                Err(StoreError::NotFound { .. }) => Ok(Cursor::Empty),
                 Err(e) => Err(ODataError::from_store(e)),
             }
         }

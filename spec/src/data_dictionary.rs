@@ -183,6 +183,7 @@ impl DataDictonary {
                     name: one_field.clone().unwrap(),
                     entity: many.clone().unwrap(),
                     collection: true,
+                    owned: false,
                 });
             }
 
@@ -194,6 +195,7 @@ impl DataDictonary {
                     name: many_property.clone().unwrap(),
                     entity: one.clone().unwrap(),
                     collection: false,
+                    owned: false,
                 });
             }
         }
@@ -289,6 +291,7 @@ impl DataDictonary {
             name,
             entity: target,
             collection,
+            owned: _,
         } = lookup
         else {
             return None;
@@ -312,6 +315,7 @@ impl DataDictonary {
                         name: rev_name,
                         entity: rev_entity,
                         collection: false,
+                        owned,
                     } if rev_entity == source.name() => Some(rev_name.clone()),
                     _ => None,
                 })
@@ -358,6 +362,7 @@ impl DataDictonary {
                             name: one_field.clone(),
                             entity: many.clone(),
                             collection: true,
+                            owned: false,
                         });
                     }
                     if many == &active.name {
@@ -365,6 +370,7 @@ impl DataDictonary {
                             name: many_property.clone(),
                             entity: one.clone(),
                             collection: false,
+                            owned: false,
                         });
                     }
                 }
@@ -407,7 +413,7 @@ mod tests {
 
         assert!(package_fields.iter().any(|field| matches!(
             field,
-            FieldSpec::Lookup { name, entity, collection }
+            FieldSpec::Lookup { name, entity, collection, owned }
                 if name == "_Entitites" && entity == "Entity" && *collection
         )));
 
@@ -418,17 +424,17 @@ mod tests {
 
         assert!(entity_fields.iter().any(|field| matches!(
             field,
-            FieldSpec::Lookup { name, entity, collection }
+            FieldSpec::Lookup { name, entity, collection, owned }
                 if name == "_Fields" && entity == "Field" && *collection
         )));
         assert!(entity_fields.iter().any(|field| matches!(
             field,
-            FieldSpec::Lookup { name, entity, collection }
+            FieldSpec::Lookup { name, entity, collection, owned }
                 if name == "_Many" && entity == "Relation" && *collection
         )));
         assert!(entity_fields.iter().any(|field| matches!(
             field,
-            FieldSpec::Lookup { name, entity, collection }
+            FieldSpec::Lookup { name, entity, collection, owned }
                 if name == "package" && entity == "Package" && !*collection
         )));
 
@@ -439,7 +445,7 @@ mod tests {
 
         assert!(field_fields.iter().any(|field| matches!(
             field,
-            FieldSpec::Lookup { name, entity, collection }
+            FieldSpec::Lookup { name, entity, collection, owned }
                 if name == "entity" && entity == "Entity" && !*collection
         )));
 

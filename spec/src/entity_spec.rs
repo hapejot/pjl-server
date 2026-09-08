@@ -131,6 +131,7 @@ pub enum FieldSpec {
         name: String,
         entity: String,
         collection: bool,
+        owned: bool,
     },
     /// Simple value: text, number, date, boolean, coded value with optional dropdown.
     Atom {

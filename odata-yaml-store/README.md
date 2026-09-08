@@ -23,14 +23,25 @@ entfernen oder lockern.
 src/
   error.rs        StoreError
   key.rs          EntityKey (inkl. RAP-Draft-Dimension)
-  query.rs        ODataQuery, FilterExpr, ExpandItem, ... (kompletter Query-AST)
-  filter_eval.rs   Auswertung von FilterExpr gegen serde_json::Value
-  datastore.rs     DataStore-Trait (+ DataStoreDebugExt)
-  yaml_store.rs    YamlStore: Datei-basierte Implementierung von DataStore
-  lib.rs           Re-Exports + DraftActionExt + Tests
+  filter_eval.rs  Auswertung von FilterExpr gegen serde_json::Value
+  datastore.rs    DataStore-Trait (+ DataStoreDebugExt), DataRecord-Datenmodell, Navigation
+  yaml_store.rs   YamlStore: Datei-basierte Implementierung von DataStore
+  lib.rs          Re-Exports + DraftDataStore-Trait + Tests
 examples/
   demo.rs          Lauffähiges Beispiel (CRUD, Filter, Expand, Draft-Workflow)
 ```
+
+**Hinweis zum Query-AST:** Der Query-Builder (`ODataQuery`,
+`FilterExpr`, `ExpandItem`, `Navigation`, …) wird **nicht** in diesem Crate
+lokal definiert — er stammt aus der externen `odata`-Abhängigkeit
+(`odata::query`). Die frühere `query.rs` entfällt deshalb; die
+Query-Struktur ist vollständig bei `odata::query::*`, womit der
+`DataStore`-Trait von der konkreten Query-Implementierung losgekoppelt
+ist. `lib.rs` re-exportet öffentlich: `DataStore`, den
+`DraftDataStore`-Trait (`draft_edit` / `draft_activate` /
+`draft_prepare`), `DataStoreDebugExt`, `EntityKey`, `YamlStore` und
+`StoreError`. Die Datentypen `DraftAction`, `DraftAdministrativeData`
+und `DraftMessage` gehören in `datastore.rs`.
 
 ## Verwenden
 
@@ -46,29 +57,31 @@ cargo run --example demo
 <root>/
   Orders/
     active/
-      <hash>.yaml
+      <storage_id>.yaml
     draft/
-      <hash>.yaml
+      <storage_id>.yaml
   OrderItems/
     active/
-      <hash>.yaml
+      <storage_id>.yaml
+    draft/
+      <storage_id>.yaml
 ```
 
-Jede Datei enthält den vollständigen `EntityKey` (lesbar, nicht nur den
-Hash im Dateinamen) sowie die eigentlichen Daten:
+Jede YAML-Datei enthält den vollständigen `DataRecord` — also die Metadaten
+(`ID`, `IsActiveEntity`, ggf. `DraftAdministrativeData`, …) und die
+Geschäftsfelder (`CustomerName`, `Status`, …) im selben flachen Mapping:
 
 ```yaml
-key:
-  fields:
-    ID: "1"
-  is_active_entity: true
-data:
-  ID: "1"
-  CustomerName: "Müller GmbH"
-  Status: "Released"
+ID: "00000000-0000-0000-0000-000000000001"
+IsActiveEntity: "true"
+HasActiveEntity: "true"
+CustomerName: "Müller GmbH"
+Status: "Released"
 ```
 
-Der Dateiname selbst ist ein Hash des Keys (`storage_id()`), weil
+Die Systemfelder werden über `serde(rename)` positioniert und über
+`#[serde(flatten)]` zusammen mit den Geschäftsfeldern serialisiert. Der
+Dateiname selbst ist ein String des `storage_id()` des Keys, weil
 zusammengesetzte Keys oder GUIDs Zeichen enthalten können, die als
 Dateiname problematisch wären.
 
@@ -99,6 +112,16 @@ let store = YamlStore::open("./data")?;
   Validierungen/Determinations analog zu RAP.
 - **Kein Parser für rohe OData-URI-Strings.** `ODataQuery` muss von
   aufrufendem Code (z.B. deinem bestehenden URI-Parsing) befüllt werden.
+- **Nicht implementierte Stellen (aktuell `todo!()`):**
+  - `DataStore::read_sibling_entity` ist **nicht implementiert**.
+  - `YamlStore::expand_single_row` liefert für eine **Single-Referenz mit
+    mehr als einem Child** (`match subrows { [v] => …, _ => todo!() }`,
+    line ~148) `todo!()`. Die **Sammlungsnavigation** hingegen liefert
+    stets die volle Trefferliste (`row[from_field] = subrows`) und trifft
+    hier nicht auf den Fallback.
+  - In `filter_eval.rs` sind alle relationalen Vergleichsoperatoren
+    (`Gt`, `Ge`, `Lt`, `Le`) sowie `evaluate_operand` und
+    `FunctionCall` (`Expr::FunctionCall`) **`todo!()`**.
 
 ## Migration nach Postgres
 

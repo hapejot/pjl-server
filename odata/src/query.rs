@@ -302,8 +302,13 @@ impl Expr {
                 right: Box::new(Expr::Identifier(identifier.into())),
             },
 
-            Value::Null => todo!(),
-            Value::Bool(_) => todo!(),
+            Value::Null => Expr::Bool(false),
+            Value::Bool(b) => Expr::BinaryOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Bool(*b)),
+                right: Box::new(Expr::Identifier(identifier.into())),
+            },
+
             Value::Number(_) => todo!(),
             Value::Array(_) => todo!(),
             Value::Object(_) => todo!(),

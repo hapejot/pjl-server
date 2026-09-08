@@ -120,6 +120,12 @@ impl DataRecord {
             "HasActiveEntity" => Some(json!(self.has_active_entity)),
             "HasDraftEntity" => Some(json!(self.has_draft_entity)),
             "DraftMessages" => Some(json!(self.draft_messages)),
+            "DraftAdministrativeData_ID" => Some(
+                self.draft_admin_data
+                    .as_ref()
+                    .map(|x| json!(x.draft_uuid))
+                    .unwrap_or(Value::Null),
+            ),
             "DraftAdministrativeData" => Some(json!(self.draft_admin_data)),
             x => self.fields.get(x).cloned(),
         }
@@ -202,10 +208,25 @@ impl DataRecord {
     pub fn core_json(&self) -> Value {
         let mut m = Map::new();
         m.insert("ID".into(), json!(self.id));
+        m.insert("IsActiveEntity".into(), json!(self.is_active_entity));
+        m.insert("HasActiveEntity".into(), json!(self.has_active_entity));
         for (k, v) in self.fields.iter() {
             m.insert(k.clone(), v.clone());
         }
         json!(m)
+    }
+
+    pub fn set_draft_uuid(&mut self, draft_uid: Uuid) {
+        if let Some(data) = self.draft_admin_data.as_mut() {
+            data.draft_uuid = draft_uid;
+        } else {
+            self.draft_admin_data = Some(DraftAdministrativeData {
+                draft_uuid: draft_uid,
+                draft_is_created_by_me: true,
+                in_process_by_user: "user".into(),
+                last_changed_by_user: "user".into(),
+            });
+        }
     }
 }
 
@@ -234,9 +255,10 @@ impl IndexMut<&str> for DataRecord {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Navigation {
     pub single: bool,
+    pub owning: bool,
     pub from_set: Option<String>,
     pub from_field: Option<String>,
     pub to_set: Option<String>,
@@ -250,13 +272,17 @@ impl Navigation {
         }
     }
 
-    pub fn from(&mut self, set_name: &str, field_name: &str) -> &mut Self {
+    pub fn from(
+        &mut self,
+        set_name: impl Into<String>,
+        field_name: impl Into<String>,
+    ) -> &mut Self {
         self.from_set = Some(set_name.into());
         self.from_field = Some(field_name.into());
         self
     }
 
-    pub fn to(&mut self, set_name: &str, field_name: &str) -> &mut Self {
+    pub fn to(&mut self, set_name: impl Into<String>, field_name: impl Into<String>) -> &mut Self {
         self.to_set = Some(set_name.into());
         self.to_field = Some(field_name.into());
         self

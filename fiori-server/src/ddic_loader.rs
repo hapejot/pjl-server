@@ -32,16 +32,22 @@ pub fn load_ddic_from_store(ddic: &mut DataDictonary, store: &dyn DataStore) {
     load_apps(ddic, store, &entities, &packages, &known);
 }
 
-/// Alle Navigationen, die der Store fuer `$expand` braucht.
+/// Alle Navigationen, die der Store braucht um die Abhängigkeiten zwischen den Records zu kennen..
 pub fn navigations_from_ddic(ddic: &DataDictonary) -> Vec<Navigation> {
-    let mut navigations = Vec::new();
+    let mut navigations: Vec<Navigation> = Vec::new();
     for entity in ddic.entities().iter() {
         let from_set = format!("{}Set", entity.name());
+        let mut draft_nav = Navigation::new(true);
+        draft_nav
+            .from(&from_set, "DraftAdministrativeData")
+            .to("DraftAdministrativeData", "ID");
+        navigations.push(draft_nav);
         for field in entity.fields() {
             let FieldSpec::Lookup {
                 name,
                 entity: target,
                 collection,
+                owned: _,
             } = field
             else {
                 continue;

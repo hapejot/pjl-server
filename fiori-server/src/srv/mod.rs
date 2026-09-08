@@ -60,7 +60,11 @@ impl EntityType {
                     owned: _,
                 } => {
                     let p = if *collection {
-                        NavigationProperty::new(name, format!("Service.{}", entity), None)
+                        NavigationProperty::new(
+                            name,
+                            format!("Collection(Service.{})", entity),
+                            None,
+                        )
                     } else {
                         let ref_name = format!("{}_ID", name);
                         properties.push(Property::new(&ref_name, "Edm.Guid"));

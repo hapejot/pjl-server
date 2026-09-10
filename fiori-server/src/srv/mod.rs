@@ -1037,7 +1037,7 @@ fn format_field_value(f: &FieldSpec) -> String {
 /// Serve an HTML page describing the current data dictionary.
 async fn info(State(state): State<AppState>) -> impl IntoResponse {
     let html = render_info_page(&state);
-    log::info!("serving HTML data dictionary page");
+    info!("serving HTML data dictionary page");
     (
         [
             (header::CONTENT_TYPE, "text/html; charset=utf-8"),
@@ -1914,15 +1914,25 @@ fn delete_entity(state: &AppState, segments: &[PathSegment]) -> Result<(), OData
 
     let key = EntityKey::from(&*record);
     delete_owned_children(state, &set, &key)?;
-    state
-        .store
-        .delete_entity(&set, &key)
-        .map_err(ODataError::from_store)?;
-    // Mit dem aktiven Satz verschwindet auch ein noch offener Draft.
-    if key.is_active_entity {
+    
+    // If deleting a draft, don't also delete active sibling (discard only the draft)
+    // If deleting an active, also delete its draft sibling (cleanup both versions)
+    if !key.is_active_entity {
         state
             .store
-            .delete_entity(&set, &key.sibling())
+            .delete_entity_tree_only(&set, &key)
+            .map_err(ODataError::from_store)?;
+    } else {
+        state
+            .store
+            .delete_entity(&set, &key)
+            .map_err(ODataError::from_store)?;
+        // Mit dem aktiven Satz verschwindet auch ein noch offener Draft.
+        // The store doesn't automatically delete the draft when deleting an active,
+        // so we need to do it explicitly in fiori-server.
+        state
+            .store
+            .delete_entity_tree_only(&set, &key.sibling())
             .map_err(ODataError::from_store)?;
     }
     Ok(())
@@ -1930,6 +1940,13 @@ fn delete_entity(state: &AppState, segments: &[PathSegment]) -> Result<(), OData
 
 /// Kinder einer Composition mitloeschen. Wird nur der Draft verworfen, bleiben
 /// die aktiven Kinder erhalten.
+/// 
+/// When deleting a draft parent:
+/// - Delete draft children using delete_entity_tree_only (which doesn't also delete active siblings)
+/// - Keep active children
+///
+/// When deleting an active parent:
+/// - Delete both draft and active children
 fn delete_owned_children(
     state: &AppState,
     set: &str,
@@ -1937,13 +1954,20 @@ fn delete_owned_children(
 ) -> Result<(), ODataError> {
     for (child_set, foreign_key) in owned_children_of(state, set) {
         for child in children_of(state, &child_set, &foreign_key, parent.id)? {
-            if !parent.is_active_entity && child.is_active_entity() {
-                continue;
+            if !parent.is_active_entity && !child.is_active_entity() {
+                // Parent is draft, child is also draft: delete it WITHOUT deleting active sibling
+                state
+                    .store
+                    .delete_entity_tree_only(&child_set, &EntityKey::from(&child))
+                    .map_err(ODataError::from_store)?;
+            } else if parent.is_active_entity {
+                // Parent is active: delete all children (will also delete active siblings if draft)
+                state
+                    .store
+                    .delete_entity(&child_set, &EntityKey::from(&child))
+                    .map_err(ODataError::from_store)?;
             }
-            state
-                .store
-                .delete_entity(&child_set, &EntityKey::from(&child))
-                .map_err(ODataError::from_store)?;
+            // else: parent is draft and child is active - skip deletion (keep active children)
         }
     }
     Ok(())

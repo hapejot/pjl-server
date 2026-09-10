@@ -544,6 +544,15 @@ impl DataStore for YamlStore {
         Ok(())
     }
 
+    fn delete_entity_tree_only(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+    ) -> Result<(), StoreError> {
+        self.delete_entity_tree(set_name, key)?;
+        Ok(())
+    }
+
     fn get_property(
         &self,
         set_name: &str,

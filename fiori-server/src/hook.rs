@@ -217,7 +217,7 @@ mod test {
 
     impl ExampleHook {
         pub fn create_count(&self) -> u64 {
-            self.inner.read().unwrap().created
+            self.inner.try_read().unwrap().created
         }
     }
 
@@ -230,21 +230,37 @@ mod test {
             value: &mut DataRecord,
         ) -> Result<(), HookError> {
             debug!(?op, ?value);
-            let mut w = self.inner.write().unwrap();
-            match set_name {
-                "OrderSet" => match op {
-                    Operation::Create => {
-                        w.created += 1;
-                        store.create_entity(
-                            "OrderItemSet",
-                            &json!({"Pos": "10", "Order_ID": value.id()}),
-                        )?;
-                    }
-                    Operation::DraftActivate => w.activated += 1,
-                    _ => {}
-                },
-                _ => {}
+            
+            // Track whether we need to create an OrderItem
+            let should_create_item = {
+                let mut w = self.inner.try_write().map_err(|_| {
+                    HookError::Hook("Failed to acquire write lock".to_string())
+                })?;
+                
+                match set_name {
+                    "OrderSet" => match op {
+                        Operation::Create => {
+                            w.created += 1;
+                            true
+                        }
+                        Operation::DraftActivate => {
+                            w.activated += 1;
+                            false
+                        }
+                        _ => false
+                    },
+                    _ => false
+                }
+            }; // Lock is released here
+            
+            // Create OrderItem outside the lock
+            if should_create_item {
+                store.create_entity(
+                    "OrderItemSet",
+                    &json!({"Pos": "10", "Order_ID": value.id()}),
+                )?;
             }
+            
             Ok(())
         }
     }

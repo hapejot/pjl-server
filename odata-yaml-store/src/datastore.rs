@@ -318,6 +318,19 @@ pub trait DataStore: Send + Sync {
 
     fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError>;
 
+    /// Delete an entity tree without also deleting the sibling (used for composition children).
+    /// When deleting a child as part of discarding a draft parent, we don't want to also
+    /// delete the active sibling.
+    fn delete_entity_tree_only(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+    ) -> Result<(), StoreError> {
+        // Default implementation: just call delete_entity
+        // Implementations should override to not delete sibling
+        self.delete_entity(set_name, key)
+    }
+
     // -- Sibling Entity (draft <-> active) --
     fn read_sibling_entity(
         &self,

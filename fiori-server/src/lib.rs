@@ -6,6 +6,7 @@ use spec::data_dictionary::DataDictonary;
 pub mod batch;
 pub mod ddic_loader;
 pub mod flp;
+pub mod hook;
 pub mod srv;
 
 #[derive(Clone)]

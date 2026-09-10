@@ -1,213 +1,57 @@
-use data_store::{DataRecord, DataStore, EntityKey, Navigation, StoreError};
-use crate::filter_eval::evaluate;
-use crate::DraftDataStore;
-use odata::query::{Expr, ODataQuery, SortDirection};
-use serde_json::{json, Value};
-use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::RwLock;
+
+use data_store::nav::{NavLink, composition_parent, nav_links};
+use data_store::query::{apply_query, count_query};
+use data_store::{DataRecord, DataStore, DraftDataStore, EntityKey, Navigation, StoreError};
+use odata::query::{Expr, ODataQuery};
+use serde_json::{Value, json};
 use tracing::{debug, trace};
 use uuid::Uuid;
+
+const ACTIVE_DIR: &str = "active";
+const DRAFT_DIR: &str = "draft";
 
 pub struct YamlStore {
     root: PathBuf,
     current_change: RwLock<Option<Uuid>>,
     navigations: RwLock<Vec<Navigation>>,
-    // cache: RwLock<HashMap<String, HashMap<Uuid, DataRecord>>>,
-}
-
-impl DraftDataStore for YamlStore {
-    fn draft_edit(&self, set_name: &str, active_key: &EntityKey) -> Result<Value, StoreError> {
-        // let draft_key = active_key.sibling(); // is_active_entity = false
-        assert!(active_key.is_active_entity);
-        if !active_key.is_active_entity {
-            return Err(StoreError::InvalidState);
-        }
-
-        let q = ODataQuery::new();
-
-        let mut draft_data = self.read_entity(set_name, active_key, &q)?;
-        let parent = self.extract_parent(set_name, &draft_data)?;
-        if let Some((parent_set, parent_key)) = parent {
-            assert!(parent_key.is_active_entity);
-            if let Err(_) = self.read_entity(&parent_set, &parent_key.sibling(), &q) {
-                // Zum Parent konnte kein Draft gelesen werden, also Fehler
-                return Err(StoreError::InvalidState);
-            }
-        }
-        draft_data.edit();
-        self.write_record(set_name, draft_data.clone())?;
-        for (set, key) in self.get_children(set_name, active_key)?.iter() {
-            self.draft_edit_child(&draft_data, set, key)?;
-        }
-
-        Ok(json!(draft_data))
-    }
-
-    fn draft_activate(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
-        debug!("activate draft {} {:?}", set_name, key);
-        let path = self.path_for(set_name, key);
-        let mut draft = load_record_from_file(path)?;
-        for (set, key) in self.get_children(set_name, key)?.iter() {
-            self.draft_activate(set, key)?;
-        }
-
-        draft.activate()?;
-        self.write_record(set_name, draft.clone())?;
-        self.remove_record(set_name, key)?;
-        Ok(json!(draft))
-    }
-
-    fn draft_prepare(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
-        let path = self.path_for(set_name, key);
-        let draft = load_record_from_file(path)?;
-        Ok(json!(draft))
-    }
 }
 
 impl YamlStore {
     pub fn open(root: impl Into<PathBuf>) -> Result<Self, StoreError> {
-        let root = root.into();
-        let store = Self {
-            root,
+        Ok(Self {
+            root: root.into(),
             current_change: RwLock::new(None),
             navigations: RwLock::new(vec![]),
-            // cache: RwLock::new(HashMap::new()),
-        };
-        // store.load_all()?;
-        Ok(store)
+        })
     }
 
-    fn draft_edit_child(
-        &self,
-        draft_data: &DataRecord,
-        set_name: &str,
-        active_key: &EntityKey,
-    ) -> Result<(), StoreError> {
-        //
-        // let draft_key = active_key.sibling(); // is_active_entity = false
-        let _ = draft_data;
-        assert!(active_key.is_active_entity);
-        if !active_key.is_active_entity {
-            return Err(StoreError::InvalidState);
-        }
-
-        let q = ODataQuery::new();
-
-        let mut draft_data = self.read_entity(set_name, active_key, &q)?;
-        draft_data.edit();
-        self.write_record(set_name, draft_data.clone())?;
-        for (set, key) in self.get_children(set_name, active_key)?.iter() {
-            self.draft_edit_child(&draft_data, set, key)?;
-        }
-
-        Ok(())
-    }
-    fn extract_parent(
-        &self,
-        set_name: &str,
-        rec: &DataRecord,
-    ) -> Result<Option<(String, EntityKey)>, StoreError> {
-        let mut result: Option<(String, EntityKey)> = None;
-        let nav = self.nav_hash_tab(set_name);
-        for ((from_set, from_field), (collection, owned, to_set, _to_field)) in nav.iter() {
-            if *collection && *owned {
-                trace!("{from_set}.{from_field}");
-                if let Some(r) = rec
-                    .get(from_field)
-                    .expect(&format!(
-                        "expected field {} in record {:#?}",
-                        from_field, rec
-                    ))
-                    .as_str()
-                {
-                    let refid =
-                        Uuid::parse_str(r).map_err(|e| StoreError::Conflict(e.to_string()))?;
-                    trace!("refid: {refid}");
-                    result = Some((to_set.into(), EntityKey::new(refid, rec.is_active_entity())));
-                }
-                break;
-            }
-        }
-        Ok(result)
-    }
-
-    fn get_children(
-        &self,
-        set_name: &str,
-        active_key: &EntityKey,
-    ) -> Result<Vec<(String, EntityKey)>, StoreError> {
-        let mut result: Vec<(String, EntityKey)> = vec![];
-        let nav = self.nav_hash_tab(set_name);
-        let guid = active_key.id;
-        for ((_from_set, _from_field), (_collection, owned, to_set, _to_field)) in nav.iter() {
-            if *owned {
-                let query = ODataQuery::new().filter(Expr::equals_guid(guid, _to_field));
-                match to_set.as_str() {
-                    "DraftAdministrativeData" => {}
-                    _ => result.extend(
-                        self.get_collection(to_set, &query)?
-                            .iter()
-                            .map(|r| (to_set.into(), r.into())),
-                    ),
-                }
-            }
-        }
-        Ok(result)
-    }
     pub fn get_change(&self) -> Uuid {
-        let mut c = self.current_change.write().unwrap();
-        match *c {
-            Some(x) => x,
-            None => {
-                let new_change = Uuid::new_v4();
-                *c = Some(new_change);
-                new_change
-            }
-        }
+        let mut c = self.current_change.write().expect("current change lock");
+        *c.get_or_insert_with(Uuid::new_v4)
     }
 
-    fn load_records(&self, set_name: &str) -> Result<Vec<DataRecord>, StoreError> {
-        // erst alle Drafts, dann alle Active laden, die nicht schon in Drafts sind.
-        let p = self.path_for_set(set_name, true);
-        let mut result = collect_records(p)?;
-        let p = self.path_for_set(set_name, false);
-        for x in collect_records(p)? {
-            if result.iter().any(|r| r.id() == x.id()) {
-                continue;
-            }
-            result.push(x);
-        }
+    // -- Ablage ---------------------------------------------------------------
 
-        Ok(result)
-    }
-
-    fn path_for_set(&self, set_name: &str, draft: bool) -> PathBuf {
-        const DRAFT: &str = "draft";
-        const ACTIVE: &str = "active";
-        let state = match draft {
-            true => DRAFT,
-            false => ACTIVE,
-        };
+    fn path_for_set(&self, set_name: &str, active: bool) -> PathBuf {
         let entity_path = self.root.join(set_name);
         if !entity_path.exists() {
-            fs::create_dir_all(&entity_path).expect("entity path");
-            fs::create_dir(&entity_path.join(ACTIVE)).expect("active");
-            fs::create_dir(&entity_path.join(DRAFT)).expect("draft");
+            fs::create_dir_all(entity_path.join(ACTIVE_DIR)).expect("active dir");
+            fs::create_dir_all(entity_path.join(DRAFT_DIR)).expect("draft dir");
         }
-        entity_path.join(state)
+        entity_path.join(if active { ACTIVE_DIR } else { DRAFT_DIR })
     }
 
     fn path_for(&self, set_name: &str, key: &EntityKey) -> PathBuf {
-        let p = self.path_for_set(set_name, !key.is_active_entity);
-        p.join(format!("{}.yaml", key.storage_id()))
+        self.path_for_set(set_name, key.is_active_entity)
+            .join(format!("{}.yaml", key.storage_id()))
     }
 
     fn write_record(&self, set_name: &str, record: DataRecord) -> Result<(), StoreError> {
-        let key: EntityKey = EntityKey::from(&record);
-        let path = self.path_for(set_name, &key);
+        let path = self.path_for(set_name, &EntityKey::from(&record));
         let yaml =
             serde_yaml::to_string(&record).map_err(|e| StoreError::Serialize(e.to_string()))?;
         let tmp_path = path.with_extension("yaml.tmp");
@@ -224,130 +68,215 @@ impl YamlStore {
         Ok(())
     }
 
-    fn expand_single_row(
-        &self,
-        from_id_field: &String,
-        row: &mut DataRecord,
-        single: &bool,
-        from_field: &String,
-        to_entity: &String,
-        to_field: &String,
-    ) -> Result<(), StoreError> {
-        Ok(if *single {
-            if let Some(from_id) = row.get(from_id_field.as_str()) {
-                match to_entity.as_str() {
-                    "DraftAdministrativeData" => {
-                        if let Some(d) = row.draft_admin_data() {
-                            debug!("copy admin data {:?} to {}", &row, from_field);
-                            row[from_field] = json!(d);
-                        }
-                    }
-                    _ => {
-                        let q = ODataQuery::new().filter(Expr::equals_value(&from_id, "ID"));
-                        let subrows = self
-                            .get_collection(to_entity, &q)?
-                            .iter()
-                            .map(|x| x.core_json())
-                            .collect::<Vec<_>>();
-                        match subrows.as_slice() {
-                            [] => row[from_field] = Value::Null,
-                            [v] => row[from_field] = json!(v),
-                            _ => todo!(),
-                        }
-                    }
-                }
-            } else {
-                row[from_field] = Value::Null
-            }
-        } else {
-            let q = ODataQuery::new().filter(Expr::equals_guid(row.id(), to_field));
-            let subrows = json!(self
-                .get_collection(to_entity, &q)?
-                .iter()
-                .map(|x| x.core_json())
-                .collect::<Vec<_>>());
-            row[from_field] = subrows;
-        })
-    }
-
-    fn nav_hash_tab(
-        &self,
-        entity_set: &str,
-    ) -> HashMap<(String, String), (bool, bool, String, String)> {
-        let mut navs = HashMap::new();
-        for nav in self
-            .navigations
-            .read()
-            .expect("navigations")
-            .iter()
-            .cloned()
-        {
-            if let Navigation {
-                single,
-                owning,
-                from_set: Some(from_set),
-                from_field: Some(from_field),
-                to_set: Some(to_set),
-                to_field: Some(to_field),
-            } = nav
-            {
-                if from_set == entity_set {
-                    debug!(
-                        "Navigation: {}.{} {}->{} {}.{}",
-                        &from_set, &from_field, &single, &owning, &to_set, &to_field
-                    );
-                    navs.insert((from_set, from_field), (single, owning, to_set, to_field));
-                } else if to_set == entity_set {
-                    debug!(
-                        "Navigation: {}.{} {}<-{} {}.{}",
-                        &from_set, &from_field, &single, &owning, &to_set, &to_field
-                    );
-                    navs.insert((to_set, to_field), (!single, owning, from_set, from_field));
-                }
-            }
-        }
-        navs
-    }
-
     fn load_entity_record(
         &self,
         key: &EntityKey,
         set_name: &str,
     ) -> Result<DataRecord, StoreError> {
-        let p = self.path_for(set_name, key);
-        let content = fs::read_to_string(&p).or_else(|_| Err(StoreError::not_found(p)))?;
-        let row = serde_yaml::from_str(&content)
-            .map_err(|e| StoreError::Deserialize(format!("YAML parse error: {}", e)))?;
-        Ok(row)
+        let path = self.path_for(set_name, key);
+        if !path.exists() {
+            return Err(StoreError::not_found(path));
+        }
+        load_record_from_file(&path)
     }
+
+    /// Alle Datensaetze eines Zustands (`active` oder `draft`).
+    fn load_records_by_state(
+        &self,
+        set_name: &str,
+        active: bool,
+    ) -> Result<Vec<DataRecord>, StoreError> {
+        let mut result = vec![];
+        for entry in fs::read_dir(self.path_for_set(set_name, active))? {
+            let path = entry?.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+                continue;
+            }
+            result.push(load_record_from_file(&path)?);
+        }
+        result.sort_by_key(|r| r.id());
+        Ok(result)
+    }
+
+    /// Erst alle Drafts, dann die aktiven Saetze, die noch keinen Draft haben.
+    fn load_records(&self, set_name: &str) -> Result<Vec<DataRecord>, StoreError> {
+        let mut result = self.load_records_by_state(set_name, false)?;
+        for x in self.load_records_by_state(set_name, true)? {
+            if result.iter().any(|r| r.id() == x.id()) {
+                continue;
+            }
+            result.push(x);
+        }
+        Ok(result)
+    }
+
+    // -- Navigation / Kompositionen ------------------------------------------
+
+    fn nav_links(&self, entity_set: &str) -> HashMap<String, NavLink> {
+        nav_links(
+            self.navigations.read().expect("navigations lock").as_slice(),
+            entity_set,
+        )
+    }
+
+    /// Der haltende Parent eines Kompositions-Kindes - `None` bei Wurzel-Sets.
+    fn extract_parent(
+        &self,
+        set_name: &str,
+        rec: &DataRecord,
+    ) -> Result<Option<(String, EntityKey)>, StoreError> {
+        let links = self.nav_links(set_name);
+        let Some((field, link)) = composition_parent(&links) else {
+            return Ok(None);
+        };
+        trace!("parent link {set_name}.{field}");
+        let value = rec
+            .get(field)
+            .ok_or_else(|| StoreError::PropertyNotFound(format!("{set_name}.{field}")))?;
+        let Some(raw) = value.as_str() else {
+            return Ok(None);
+        };
+        let refid = Uuid::parse_str(raw).map_err(|e| StoreError::Conflict(e.to_string()))?;
+        Ok(Some((
+            link.to_set.clone(),
+            EntityKey::new(refid, rec.is_active_entity()),
+        )))
+    }
+
+    /// Kinder einer Komposition **im selben Zustand** wie der Parent.
+    ///
+    /// Bewusst nicht ueber `get_collection`: dort verdecken Drafts die aktiven
+    /// Saetze, wodurch beim Aufraeumen eines aktiven Baums der aktive Kindsatz
+    /// unsichtbar waere (bzw. faelschlich der Draft angefasst wuerde).
+    fn children(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+    ) -> Result<Vec<(String, EntityKey)>, StoreError> {
+        let mut result = vec![];
+        for link in self.nav_links(set_name).values() {
+            if !link.is_composition_child() {
+                continue;
+            }
+            let candidates = self.load_records_by_state(&link.to_set, key.is_active_entity)?;
+            result.extend(
+                candidates
+                    .iter()
+                    .filter(|rec| references(rec, &link.to_field, key.id))
+                    .map(|rec| (link.to_set.clone(), EntityKey::from(rec))),
+            );
+        }
+        Ok(result)
+    }
+
     fn delete_entity_tree(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
-        self.remove_record(set_name, key)?;
-        for (set, key) in self.get_children(set_name, key)?.iter() {
-            self.delete_entity_tree(set, key)?;
+        for (set, child) in self.children(set_name, key)?.iter() {
+            self.delete_entity_tree(set, child)?;
+        }
+        self.remove_record(set_name, key)
+    }
+
+    fn draft_edit_tree(&self, set_name: &str, active_key: &EntityKey) -> Result<(), StoreError> {
+        let mut draft = self.load_entity_record(active_key, set_name)?;
+        draft.edit();
+        self.write_record(set_name, draft)?;
+        for (set, child) in self.children(set_name, active_key)?.iter() {
+            self.draft_edit_tree(set, child)?;
+        }
+        Ok(())
+    }
+
+    // -- $expand --------------------------------------------------------------
+
+    fn expand_single_row(
+        &self,
+        row: &mut DataRecord,
+        field: &str,
+        link: &NavLink,
+    ) -> Result<(), StoreError> {
+        if !link.single {
+            let q = ODataQuery::new().filter(Expr::equals_guid(row.id(), &link.to_field));
+            row[field] = json!(
+                self.get_collection(&link.to_set, &q)?
+                    .iter()
+                    .map(|x| x.core_json())
+                    .collect::<Vec<_>>()
+            );
+            return Ok(());
+        }
+
+        if link.to_set == data_store::DRAFT_ADMIN_SET {
+            if let Some(d) = row.draft_admin_data() {
+                row[field] = json!(d);
+            }
+            return Ok(());
+        }
+
+        let Some(from_id) = row.get(&format!("{field}_ID")) else {
+            row[field] = Value::Null;
+            return Ok(());
+        };
+        let q = ODataQuery::new().filter(Expr::equals_value(&from_id, "ID"));
+        let subrows = self
+            .get_collection(&link.to_set, &q)?
+            .iter()
+            .map(|x| x.core_json())
+            .collect::<Vec<_>>();
+        row[field] = match subrows.as_slice() {
+            [] => Value::Null,
+            [v] => json!(v),
+            _ => {
+                return Err(StoreError::Conflict(format!(
+                    "{}: mehr als ein Treffer fuer {field}",
+                    link.to_set
+                )));
+            }
+        };
+        Ok(())
+    }
+
+    fn expand_rows(
+        &self,
+        set_name: &str,
+        rows: &mut [DataRecord],
+        query: &ODataQuery,
+        strict: bool,
+    ) -> Result<(), StoreError> {
+        if query.expand.is_empty() {
+            return Ok(());
+        }
+        let links = self.nav_links(set_name);
+        for item in query.expand.iter() {
+            match links.get(&item.navigation_property) {
+                Some(link) => {
+                    for row in rows.iter_mut() {
+                        self.expand_single_row(row, &item.navigation_property, link)?;
+                    }
+                }
+                None if strict => {
+                    return Err(StoreError::Metadata(format!(
+                        "navigation declaration for {} missing.",
+                        item.navigation_property
+                    )));
+                }
+                None => {}
+            }
         }
         Ok(())
     }
 }
 
-fn collect_records(p: PathBuf) -> Result<Vec<DataRecord>, StoreError> {
-    let mut result = vec![];
-    for entry in fs::read_dir(&p)? {
-        let path = entry?.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
-            continue;
-        }
-        let record = load_record_from_file(path)?;
-        result.push(record);
-    }
-    Ok(result)
+fn references(rec: &DataRecord, field: &str, parent: Uuid) -> bool {
+    rec.get(field)
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .and_then(|s| Uuid::parse_str(&s).ok())
+        == Some(parent)
 }
 
-fn load_record_from_file(path: PathBuf) -> Result<DataRecord, StoreError> {
-    let content =
-        fs::read_to_string(&path).expect(&format!("load record from file {}", path.display()));
-    let record: DataRecord = serde_yaml::from_str(&content)
-        .map_err(|e| StoreError::Deserialize(format!("{path:?}: {e}")))?;
-    Ok(record)
+fn load_record_from_file(path: &Path) -> Result<DataRecord, StoreError> {
+    let content = fs::read_to_string(path)?;
+    serde_yaml::from_str(&content)
+        .map_err(|e| StoreError::Deserialize(format!("{}: {e}", path.display())))
 }
 
 impl DataStore for YamlStore {
@@ -369,8 +298,7 @@ impl DataStore for YamlStore {
         debug!("get collection {set_name} {:?}", query);
         let mut records: Vec<DataRecord> = self
             .load_records(set_name)?
-            .iter()
-            .cloned()
+            .into_iter()
             .map(|mut r| {
                 for s in query.select.iter() {
                     r.touch(s);
@@ -378,78 +306,16 @@ impl DataStore for YamlStore {
                 r
             })
             .collect();
-        debug!("total records: {}", records.len());
-        for x in query.expand.iter() {
-            for n in self.navigations.read().expect("navigations lock").iter() {
-                if let Navigation {
-                    single,
-                    owning,
-                    from_set: Some(from_entity),
-                    from_field: Some(from_field),
-                    to_set: Some(to_entity),
-                    to_field: Some(to_field),
-                } = n
-                {
-                    let _ = owning;
-                    let from_id_field = format!("{from_field}_ID");
-                    debug!("... {:?}", n);
-                    if from_entity == set_name && from_field == &x.navigation_property {
-                        debug!("using...");
-                        for row in records.iter_mut() {
-                            self.expand_single_row(
-                                &from_id_field,
-                                row,
-                                single,
-                                from_field,
-                                to_entity,
-                                to_field,
-                            )?;
-                        }
-                    }
-                }
-            }
-        }
 
-        if let Some(filter) = &query.filter {
-            records.retain(|r| evaluate(r, filter) == Value::Bool(true));
-        }
-
-        for item in query.orderby.iter().rev() {
-            records.sort_by(|a, b| {
-                let (va, vb) = (
-                    evaluate(a, &Expr::Identifier(item.property.clone())),
-                    evaluate(b, &Expr::Identifier(item.property.clone())),
-                );
-                let ord = compare_json(&va, &vb);
-                if item.direction == SortDirection::Desc {
-                    ord.reverse()
-                } else {
-                    ord
-                }
-            });
-        }
-
-        if let Some(skip) = query.skip {
-            records.drain(..(skip as usize).min(records.len()));
-        }
-        if let Some(top) = query.top {
-            records.truncate(top as usize);
-        }
+        self.expand_rows(set_name, &mut records, query, false)?;
+        apply_query(&mut records, query);
         Ok(records)
     }
 
     fn count(&self, set_name: &str, query: &ODataQuery) -> usize {
-        // Einfachste Variante fuer den Prototyp: Collection ohne
-        // top/skip/select/expand aufbauen und zaehlen.
-        let mut q = query.clone();
-        q.top = None;
-        q.skip = None;
-        q.expand.clear();
-        q.select = vec![];
-        match self.get_collection(set_name, &q) {
-            Ok(items) => items.len(),
-            _ => 0,
-        }
+        self.get_collection(set_name, &count_query(query))
+            .map(|x| x.len())
+            .unwrap_or(0)
     }
 
     fn read_entity(
@@ -458,48 +324,21 @@ impl DataStore for YamlStore {
         key: &EntityKey,
         query: &ODataQuery,
     ) -> Result<DataRecord, StoreError> {
-        let navs = self.nav_hash_tab(set_name);
-        let set_name = set_name.to_string();
-
-        let mut row = self.load_entity_record(key, &set_name)?;
-        for x in query.expand.iter() {
-            if let Some((single, owning, to_set, to_field)) =
-                navs.get(&(set_name.clone(), x.navigation_property.clone()))
-            {
-                let _ = owning;
-                let from_id_field = format!("{}_ID", x.navigation_property);
-                self.expand_single_row(
-                    &from_id_field,
-                    &mut row,
-                    single,
-                    &x.navigation_property,
-                    to_set,
-                    to_field,
-                )?;
-            } else {
-                return Err(StoreError::Metadata(format!(
-                    "navigation declaration for {} missing.",
-                    x.navigation_property
-                )));
-            }
-        }
+        let mut row = [self.load_entity_record(key, set_name)?];
+        self.expand_rows(set_name, &mut row, query, true)?;
+        let [row] = row;
         Ok(row)
     }
 
     fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
         trace!("create entity {set_name}");
-        let mut rec: DataRecord = DataRecord::from_json(data)?;
-        // IsActiveEntity
-        // true - der Draft-Flow wird umgangen und es wird direkt als active gespeichert.
-        // false - regulärer Draft-Flow und es wird zunächst
-        let parent = self.extract_parent(set_name, &rec)?;
-        match &parent {
+        let mut rec = DataRecord::from_json(data)?;
+        // IsActiveEntity == true umgeht den Draft-Flow und schreibt direkt aktiv.
+        match self.extract_parent(set_name, &rec)? {
             Some((parent_set, parent_key)) => {
-                let parent = self.load_entity_record(parent_key, parent_set)?;
+                let parent = self.load_entity_record(&parent_key, &parent_set)?;
                 match (rec.is_active_entity(), parent.draft_admin_data()) {
-                    (true, None) => {
-                        self.write_record(set_name, rec.clone())?;
-                    }
+                    (true, None) => self.write_record(set_name, rec.clone())?,
                     (true, Some(_)) => return Err(StoreError::InvalidState),
                     (false, None) => return Err(StoreError::InvalidState),
                     (false, Some(parent_draft)) => {
@@ -509,12 +348,10 @@ impl DataStore for YamlStore {
                 }
             }
             None => {
-                if rec.is_active_entity() {
-                    self.write_record(set_name, rec.clone())?;
-                } else {
+                if !rec.is_active_entity() {
                     rec.create_draft();
-                    self.write_record(set_name, rec.clone())?;
                 }
+                self.write_record(set_name, rec.clone())?;
             }
         }
         Ok(rec)
@@ -526,8 +363,7 @@ impl DataStore for YamlStore {
         key: &EntityKey,
         patch: &Value,
     ) -> Result<Value, StoreError> {
-        trace!("patching yaml");
-        let mut r = self.read_entity(set_name, key, &ODataQuery::new())?;
+        let mut r = self.load_entity_record(key, set_name)?;
         r.merge(patch);
         self.write_record(set_name, r)?;
         Ok(patch.clone())
@@ -536,18 +372,22 @@ impl DataStore for YamlStore {
     fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
         self.delete_entity_tree(set_name, key)?;
         if !key.is_active_entity {
+            // Draft verwerfen heisst auch: den zugehoerigen aktiven Baum loeschen.
             self.delete_entity_tree(set_name, &key.sibling())?;
         }
         Ok(())
     }
 
-    fn delete_entity_tree_only(
+    fn delete_entity_tree_only(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
+        self.delete_entity_tree(set_name, key)
+    }
+
+    fn read_sibling_entity(
         &self,
         set_name: &str,
         key: &EntityKey,
-    ) -> Result<(), StoreError> {
-        self.delete_entity_tree(set_name, key)?;
-        Ok(())
+    ) -> Result<DataRecord, StoreError> {
+        self.load_entity_record(&key.sibling(), set_name)
     }
 
     fn get_property(
@@ -556,31 +396,56 @@ impl DataStore for YamlStore {
         key: &EntityKey,
         property: &str,
     ) -> Result<Value, StoreError> {
-        let entity = self.read_entity(set_name, key, &ODataQuery::new())?;
-        entity
+        self.read_entity(set_name, key, &ODataQuery::new())?
             .get(property)
             .ok_or_else(|| StoreError::PropertyNotFound(property.into()))
     }
 
     fn commit(&self) {}
-
-    fn read_sibling_entity(
-        &self,
-        _set_name: &str,
-        _key: &EntityKey,
-    ) -> Result<DataRecord, StoreError> {
-        todo!()
-    }
 }
 
-fn compare_json(va: &Value, vb: &Value) -> Ordering {
-    match (va, vb) {
-        (Value::Number(x), Value::Number(y)) => x
-            .as_f64()
-            .partial_cmp(&y.as_f64())
-            .unwrap_or(Ordering::Equal),
-        (Value::String(x), Value::String(y)) => x.cmp(y),
-        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
-        _ => todo!("Comparison not implemented for these JSON value types"),
+impl DraftDataStore for YamlStore {
+    fn draft_edit(&self, set_name: &str, active_key: &EntityKey) -> Result<Value, StoreError> {
+        if !active_key.is_active_entity {
+            return Err(StoreError::InvalidState);
+        }
+        let q = ODataQuery::new();
+        let mut draft_data = self.read_entity(set_name, active_key, &q)?;
+
+        // Ein Kind darf nur bearbeitet werden, wenn der Parent schon im Draft ist.
+        if let Some((parent_set, parent_key)) = self.extract_parent(set_name, &draft_data)? {
+            if self
+                .read_entity(&parent_set, &parent_key.sibling(), &q)
+                .is_err()
+            {
+                return Err(StoreError::InvalidState);
+            }
+        }
+
+        draft_data.edit();
+        self.write_record(set_name, draft_data.clone())?;
+        for (set, child) in self.children(set_name, active_key)?.iter() {
+            self.draft_edit_tree(set, child)?;
+        }
+        Ok(json!(draft_data))
+    }
+
+    fn draft_activate(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
+        debug!("activate draft {} {:?}", set_name, key);
+        if key.is_active_entity {
+            return Err(StoreError::InvalidState);
+        }
+        let mut draft = self.load_entity_record(key, set_name)?;
+        for (set, child) in self.children(set_name, key)?.iter() {
+            self.draft_activate(set, child)?;
+        }
+        draft.activate()?;
+        self.write_record(set_name, draft.clone())?;
+        self.remove_record(set_name, key)?;
+        Ok(json!(draft))
+    }
+
+    fn draft_prepare(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
+        Ok(json!(self.load_entity_record(key, set_name)?))
     }
 }

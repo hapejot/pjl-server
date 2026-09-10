@@ -5,14 +5,14 @@
 //! Anstelle von `<root>/<Set>/{active,draft}/<uuid>.yaml` liegt jeder Datensatz
 //! in einer Zeile der Tabelle `records`.
 
-use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, RwLock};
 
-use data_store::filter_eval::evaluate;
+use data_store::nav::{NavLink, composition_parent, nav_links};
+use data_store::query::{apply_query, count_query};
 use data_store::{DataRecord, DataStore, DraftDataStore, EntityKey, Navigation, StoreError};
-use odata::query::{Expr, ODataQuery, SortDirection};
+use odata::query::{Expr, ODataQuery};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 use tracing::{debug, trace};
@@ -50,14 +50,12 @@ impl SqliteStore {
 
     /// Fluechtiger Store - vor allem fuer Tests.
     pub fn open_in_memory() -> Result<Self, StoreError> {
-        let conn = Connection::open_in_memory().map_err(sql_err)?;
-        Self::from_connection(conn)
+        Self::from_connection(Connection::open_in_memory().map_err(sql_err)?)
     }
 
     fn from_connection(conn: Connection) -> Result<Self, StoreError> {
         conn.execute_batch(SCHEMA).map_err(sql_err)?;
         conn.pragma_update(None, "journal_mode", "WAL").ok();
-        conn.pragma_update(None, "foreign_keys", "ON").ok();
         Ok(Self {
             conn: Mutex::new(conn),
             navigations: RwLock::new(vec![]),
@@ -67,17 +65,10 @@ impl SqliteStore {
 
     pub fn get_change(&self) -> Uuid {
         let mut c = self.current_change.write().expect("current change lock");
-        match *c {
-            Some(x) => x,
-            None => {
-                let new_change = Uuid::new_v4();
-                *c = Some(new_change);
-                new_change
-            }
-        }
+        *c.get_or_insert_with(Uuid::new_v4)
     }
 
-    // -- Persistenz-Primitive -------------------------------------------------
+    // -- Ablage ---------------------------------------------------------------
 
     fn write_record(&self, set_name: &str, record: DataRecord) -> Result<(), StoreError> {
         let key = EntityKey::from(&record);
@@ -131,8 +122,7 @@ impl SqliteStore {
         match payload {
             Some(p) => parse_record(&p),
             None => Err(StoreError::not_found(format!(
-                "{}/{}/{}",
-                set_name,
+                "{set_name}/{}/{}",
                 if key.is_active_entity {
                     "active"
                 } else {
@@ -143,18 +133,7 @@ impl SqliteStore {
         }
     }
 
-    /// Erst alle Drafts, dann alle aktiven Saetze, die noch keinen Draft haben.
-    fn load_records(&self, set_name: &str) -> Result<Vec<DataRecord>, StoreError> {
-        let mut result = self.load_records_by_state(set_name, false)?;
-        for x in self.load_records_by_state(set_name, true)? {
-            if result.iter().any(|r| r.id() == x.id()) {
-                continue;
-            }
-            result.push(x);
-        }
-        Ok(result)
-    }
-
+    /// Alle Datensaetze eines Zustands (`active` oder `draft`).
     fn load_records_by_state(
         &self,
         set_name: &str,
@@ -162,7 +141,9 @@ impl SqliteStore {
     ) -> Result<Vec<DataRecord>, StoreError> {
         let conn = self.conn.lock().expect("connection lock");
         let mut stmt = conn
-            .prepare("SELECT payload FROM records WHERE set_name = ?1 AND is_active = ?2 ORDER BY id")
+            .prepare(
+                "SELECT payload FROM records WHERE set_name = ?1 AND is_active = ?2 ORDER BY id",
+            )
             .map_err(sql_err)?;
         let rows = stmt
             .query_map(params![set_name, active as i64], |row| {
@@ -172,6 +153,18 @@ impl SqliteStore {
         let mut result = vec![];
         for row in rows {
             result.push(parse_record(&row.map_err(sql_err)?)?);
+        }
+        Ok(result)
+    }
+
+    /// Erst alle Drafts, dann die aktiven Saetze, die noch keinen Draft haben.
+    fn load_records(&self, set_name: &str) -> Result<Vec<DataRecord>, StoreError> {
+        let mut result = self.load_records_by_state(set_name, false)?;
+        for x in self.load_records_by_state(set_name, true)? {
+            if result.iter().any(|r| r.id() == x.id()) {
+                continue;
+            }
+            result.push(x);
         }
         Ok(result)
     }
@@ -200,100 +193,76 @@ impl SqliteStore {
 
     // -- Navigation / Kompositionen ------------------------------------------
 
-    fn nav_hash_tab(
-        &self,
-        entity_set: &str,
-    ) -> HashMap<(String, String), (bool, bool, String, String)> {
-        let mut navs = HashMap::new();
-        for nav in self
-            .navigations
-            .read()
-            .expect("navigations lock")
-            .iter()
-            .cloned()
-        {
-            if let Navigation {
-                single,
-                owning,
-                from_set: Some(from_set),
-                from_field: Some(from_field),
-                to_set: Some(to_set),
-                to_field: Some(to_field),
-            } = nav
-            {
-                if from_set == entity_set {
-                    navs.insert((from_set, from_field), (single, owning, to_set, to_field));
-                } else if to_set == entity_set {
-                    navs.insert((to_set, to_field), (!single, owning, from_set, from_field));
-                }
-            }
-        }
-        navs
+    fn nav_links(&self, entity_set: &str) -> HashMap<String, NavLink> {
+        nav_links(
+            self.navigations.read().expect("navigations lock").as_slice(),
+            entity_set,
+        )
     }
 
+    /// Der haltende Parent eines Kompositions-Kindes - `None` bei Wurzel-Sets.
     fn extract_parent(
         &self,
         set_name: &str,
         rec: &DataRecord,
     ) -> Result<Option<(String, EntityKey)>, StoreError> {
-        let mut result: Option<(String, EntityKey)> = None;
-        for ((from_set, from_field), (collection, owned, to_set, _to_field)) in
-            self.nav_hash_tab(set_name).iter()
-        {
-            if *collection && *owned {
-                trace!("{from_set}.{from_field}");
-                let field = rec.get(from_field).ok_or_else(|| {
-                    StoreError::PropertyNotFound(format!("{from_set}.{from_field}"))
-                })?;
-                if let Some(r) = field.as_str() {
-                    let refid =
-                        Uuid::parse_str(r).map_err(|e| StoreError::Conflict(e.to_string()))?;
-                    result = Some((to_set.into(), EntityKey::new(refid, rec.is_active_entity())));
-                }
-                break;
-            }
-        }
-        Ok(result)
+        let links = self.nav_links(set_name);
+        let Some((field, link)) = composition_parent(&links) else {
+            return Ok(None);
+        };
+        trace!("parent link {set_name}.{field}");
+        let value = rec
+            .get(field)
+            .ok_or_else(|| StoreError::PropertyNotFound(format!("{set_name}.{field}")))?;
+        let Some(raw) = value.as_str() else {
+            return Ok(None);
+        };
+        let refid = Uuid::parse_str(raw).map_err(|e| StoreError::Conflict(e.to_string()))?;
+        Ok(Some((
+            link.to_set.clone(),
+            EntityKey::new(refid, rec.is_active_entity()),
+        )))
     }
 
-    fn get_children(
+    /// Kinder einer Komposition **im selben Zustand** wie der Parent.
+    ///
+    /// Bewusst nicht ueber `get_collection`: dort verdecken Drafts die aktiven
+    /// Saetze, wodurch beim Aufraeumen eines aktiven Baums der aktive Kindsatz
+    /// unsichtbar waere (bzw. faelschlich der Draft angefasst wuerde).
+    fn children(
         &self,
         set_name: &str,
         key: &EntityKey,
     ) -> Result<Vec<(String, EntityKey)>, StoreError> {
-        let mut result: Vec<(String, EntityKey)> = vec![];
-        for ((_from_set, _from_field), (_collection, owned, to_set, to_field)) in
-            self.nav_hash_tab(set_name).iter()
-        {
-            if *owned && to_set != "DraftAdministrativeData" {
-                let query = ODataQuery::new().filter(Expr::equals_guid(key.id, to_field));
-                result.extend(
-                    self.get_collection(to_set, &query)?
-                        .iter()
-                        .map(|r| (to_set.clone(), EntityKey::from(r))),
-                );
+        let mut result = vec![];
+        for link in self.nav_links(set_name).values() {
+            if !link.is_composition_child() {
+                continue;
             }
+            let candidates = self.load_records_by_state(&link.to_set, key.is_active_entity)?;
+            result.extend(
+                candidates
+                    .iter()
+                    .filter(|rec| references(rec, &link.to_field, key.id))
+                    .map(|rec| (link.to_set.clone(), EntityKey::from(rec))),
+            );
         }
         Ok(result)
     }
 
     fn delete_entity_tree(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
-        self.remove_record(set_name, key)?;
-        for (set, child) in self.get_children(set_name, key)?.iter() {
+        for (set, child) in self.children(set_name, key)?.iter() {
             self.delete_entity_tree(set, child)?;
         }
-        Ok(())
+        self.remove_record(set_name, key)
     }
 
-    fn draft_edit_child(&self, set_name: &str, active_key: &EntityKey) -> Result<(), StoreError> {
-        if !active_key.is_active_entity {
-            return Err(StoreError::InvalidState);
-        }
-        let mut draft_data = self.read_entity(set_name, active_key, &ODataQuery::new())?;
-        draft_data.edit();
-        self.write_record(set_name, draft_data)?;
-        for (set, key) in self.get_children(set_name, active_key)?.iter() {
-            self.draft_edit_child(set, key)?;
+    fn draft_edit_tree(&self, set_name: &str, active_key: &EntityKey) -> Result<(), StoreError> {
+        let mut draft = self.load_entity_record(active_key, set_name)?;
+        draft.edit();
+        self.write_record(set_name, draft)?;
+        for (set, child) in self.children(set_name, active_key)?.iter() {
+            self.draft_edit_tree(set, child)?;
         }
         Ok(())
     }
@@ -302,72 +271,91 @@ impl SqliteStore {
 
     fn expand_single_row(
         &self,
-        from_id_field: &str,
         row: &mut DataRecord,
-        single: bool,
-        from_field: &str,
-        to_entity: &str,
-        to_field: &str,
+        field: &str,
+        link: &NavLink,
     ) -> Result<(), StoreError> {
-        if single {
-            if let Some(from_id) = row.get(from_id_field) {
-                match to_entity {
-                    "DraftAdministrativeData" => {
-                        if let Some(d) = row.draft_admin_data() {
-                            row[from_field] = json!(d);
-                        }
-                    }
-                    _ => {
-                        let q = ODataQuery::new().filter(Expr::equals_value(&from_id, "ID"));
-                        let subrows = self
-                            .get_collection(to_entity, &q)?
-                            .iter()
-                            .map(|x| x.core_json())
-                            .collect::<Vec<_>>();
-                        match subrows.as_slice() {
-                            [] => row[from_field] = Value::Null,
-                            [v] => row[from_field] = json!(v),
-                            _ => {
-                                return Err(StoreError::Conflict(format!(
-                                    "{to_entity}: mehr als ein Treffer fuer {from_field}"
-                                )));
-                            }
-                        }
-                    }
-                }
-            } else {
-                row[from_field] = Value::Null;
-            }
-        } else {
-            let q = ODataQuery::new().filter(Expr::equals_guid(row.id(), to_field));
-            row[from_field] = json!(
-                self.get_collection(to_entity, &q)?
+        if !link.single {
+            let q = ODataQuery::new().filter(Expr::equals_guid(row.id(), &link.to_field));
+            row[field] = json!(
+                self.get_collection(&link.to_set, &q)?
                     .iter()
                     .map(|x| x.core_json())
                     .collect::<Vec<_>>()
             );
+            return Ok(());
+        }
+
+        if link.to_set == data_store::DRAFT_ADMIN_SET {
+            if let Some(d) = row.draft_admin_data() {
+                row[field] = json!(d);
+            }
+            return Ok(());
+        }
+
+        let Some(from_id) = row.get(&format!("{field}_ID")) else {
+            row[field] = Value::Null;
+            return Ok(());
+        };
+        let q = ODataQuery::new().filter(Expr::equals_value(&from_id, "ID"));
+        let subrows = self
+            .get_collection(&link.to_set, &q)?
+            .iter()
+            .map(|x| x.core_json())
+            .collect::<Vec<_>>();
+        row[field] = match subrows.as_slice() {
+            [] => Value::Null,
+            [v] => json!(v),
+            _ => {
+                return Err(StoreError::Conflict(format!(
+                    "{}: mehr als ein Treffer fuer {field}",
+                    link.to_set
+                )));
+            }
+        };
+        Ok(())
+    }
+
+    fn expand_rows(
+        &self,
+        set_name: &str,
+        rows: &mut [DataRecord],
+        query: &ODataQuery,
+        strict: bool,
+    ) -> Result<(), StoreError> {
+        if query.expand.is_empty() {
+            return Ok(());
+        }
+        let links = self.nav_links(set_name);
+        for item in query.expand.iter() {
+            match links.get(&item.navigation_property) {
+                Some(link) => {
+                    for row in rows.iter_mut() {
+                        self.expand_single_row(row, &item.navigation_property, link)?;
+                    }
+                }
+                None if strict => {
+                    return Err(StoreError::Metadata(format!(
+                        "navigation declaration for {} missing.",
+                        item.navigation_property
+                    )));
+                }
+                None => {}
+            }
         }
         Ok(())
     }
 }
 
-fn parse_record(payload: &str) -> Result<DataRecord, StoreError> {
-    serde_json::from_str(payload).map_err(|e| StoreError::Deserialize(e.to_string()))
+fn references(rec: &DataRecord, field: &str, parent: Uuid) -> bool {
+    rec.get(field)
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .and_then(|s| Uuid::parse_str(&s).ok())
+        == Some(parent)
 }
 
-fn compare_json(va: &Value, vb: &Value) -> Ordering {
-    match (va, vb) {
-        (Value::Number(x), Value::Number(y)) => x
-            .as_f64()
-            .partial_cmp(&y.as_f64())
-            .unwrap_or(Ordering::Equal),
-        (Value::String(x), Value::String(y)) => x.cmp(y),
-        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
-        (Value::Null, Value::Null) => Ordering::Equal,
-        (Value::Null, _) => Ordering::Less,
-        (_, Value::Null) => Ordering::Greater,
-        _ => Ordering::Equal,
-    }
+fn parse_record(payload: &str) -> Result<DataRecord, StoreError> {
+    serde_json::from_str(payload).map_err(|e| StoreError::Deserialize(e.to_string()))
 }
 
 impl DataStore for SqliteStore {
@@ -398,70 +386,15 @@ impl DataStore for SqliteStore {
             })
             .collect();
 
-        for x in query.expand.iter() {
-            let navs = self.navigations.read().expect("navigations lock").clone();
-            for n in navs.iter() {
-                if let Navigation {
-                    single,
-                    from_set: Some(from_entity),
-                    from_field: Some(from_field),
-                    to_set: Some(to_entity),
-                    to_field: Some(to_field),
-                    ..
-                } = n
-                {
-                    if from_entity == set_name && from_field == &x.navigation_property {
-                        let from_id_field = format!("{from_field}_ID");
-                        for row in records.iter_mut() {
-                            self.expand_single_row(
-                                &from_id_field,
-                                row,
-                                *single,
-                                from_field,
-                                to_entity,
-                                to_field,
-                            )?;
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some(filter) = &query.filter {
-            records.retain(|r| evaluate(r, filter) == Value::Bool(true));
-        }
-
-        for item in query.orderby.iter().rev() {
-            records.sort_by(|a, b| {
-                let (va, vb) = (
-                    evaluate(a, &Expr::Identifier(item.property.clone())),
-                    evaluate(b, &Expr::Identifier(item.property.clone())),
-                );
-                let ord = compare_json(&va, &vb);
-                if item.direction == SortDirection::Desc {
-                    ord.reverse()
-                } else {
-                    ord
-                }
-            });
-        }
-
-        if let Some(skip) = query.skip {
-            records.drain(..(skip as usize).min(records.len()));
-        }
-        if let Some(top) = query.top {
-            records.truncate(top as usize);
-        }
+        self.expand_rows(set_name, &mut records, query, false)?;
+        apply_query(&mut records, query);
         Ok(records)
     }
 
     fn count(&self, set_name: &str, query: &ODataQuery) -> usize {
-        let mut q = query.clone();
-        q.top = None;
-        q.skip = None;
-        q.expand.clear();
-        q.select = vec![];
-        self.get_collection(set_name, &q).map(|x| x.len()).unwrap_or(0)
+        self.get_collection(set_name, &count_query(query))
+            .map(|x| x.len())
+            .unwrap_or(0)
     }
 
     fn read_entity(
@@ -470,33 +403,16 @@ impl DataStore for SqliteStore {
         key: &EntityKey,
         query: &ODataQuery,
     ) -> Result<DataRecord, StoreError> {
-        let navs = self.nav_hash_tab(set_name);
-        let mut row = self.load_entity_record(key, set_name)?;
-        for x in query.expand.iter() {
-            let Some((single, _owning, to_set, to_field)) =
-                navs.get(&(set_name.to_string(), x.navigation_property.clone()))
-            else {
-                return Err(StoreError::Metadata(format!(
-                    "navigation declaration for {} missing.",
-                    x.navigation_property
-                )));
-            };
-            let from_id_field = format!("{}_ID", x.navigation_property);
-            self.expand_single_row(
-                &from_id_field,
-                &mut row,
-                *single,
-                &x.navigation_property,
-                to_set,
-                to_field,
-            )?;
-        }
+        let mut row = [self.load_entity_record(key, set_name)?];
+        self.expand_rows(set_name, &mut row, query, true)?;
+        let [row] = row;
         Ok(row)
     }
 
     fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
         trace!("create entity {set_name}");
         let mut rec = DataRecord::from_json(data)?;
+        // IsActiveEntity == true umgeht den Draft-Flow und schreibt direkt aktiv.
         match self.extract_parent(set_name, &rec)? {
             Some((parent_set, parent_key)) => {
                 let parent = self.load_entity_record(&parent_key, &parent_set)?;
@@ -526,7 +442,7 @@ impl DataStore for SqliteStore {
         key: &EntityKey,
         patch: &Value,
     ) -> Result<Value, StoreError> {
-        let mut r = self.read_entity(set_name, key, &ODataQuery::new())?;
+        let mut r = self.load_entity_record(key, set_name)?;
         r.merge(patch);
         self.write_record(set_name, r)?;
         Ok(patch.clone())
@@ -535,6 +451,7 @@ impl DataStore for SqliteStore {
     fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
         self.delete_entity_tree(set_name, key)?;
         if !key.is_active_entity {
+            // Draft verwerfen heisst auch: den zugehoerigen aktiven Baum loeschen.
             self.delete_entity_tree(set_name, &key.sibling())?;
         }
         Ok(())
@@ -574,7 +491,7 @@ impl DraftDataStore for SqliteStore {
         let q = ODataQuery::new();
         let mut draft_data = self.read_entity(set_name, active_key, &q)?;
 
-        // Ein Kind darf nur bearbeitet werden, wenn der Parent bereits im Draft ist.
+        // Ein Kind darf nur bearbeitet werden, wenn der Parent schon im Draft ist.
         if let Some((parent_set, parent_key)) = self.extract_parent(set_name, &draft_data)? {
             if self
                 .read_entity(&parent_set, &parent_key.sibling(), &q)
@@ -586,16 +503,19 @@ impl DraftDataStore for SqliteStore {
 
         draft_data.edit();
         self.write_record(set_name, draft_data.clone())?;
-        for (set, key) in self.get_children(set_name, active_key)?.iter() {
-            self.draft_edit_child(set, key)?;
+        for (set, child) in self.children(set_name, active_key)?.iter() {
+            self.draft_edit_tree(set, child)?;
         }
         Ok(json!(draft_data))
     }
 
     fn draft_activate(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
         debug!("activate draft {} {:?}", set_name, key);
+        if key.is_active_entity {
+            return Err(StoreError::InvalidState);
+        }
         let mut draft = self.load_entity_record(key, set_name)?;
-        for (set, child) in self.get_children(set_name, key)?.iter() {
+        for (set, child) in self.children(set_name, key)?.iter() {
             self.draft_activate(set, child)?;
         }
         draft.activate()?;

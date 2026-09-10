@@ -2,10 +2,13 @@ pub mod datastore;
 pub mod error;
 pub mod filter_eval;
 pub mod key;
+pub mod nav;
+pub mod query;
 
 pub use datastore::{
     DataRecord, DataStore, DraftAction, DraftAdministrativeData, DraftMessage, Navigation,
 };
+pub use nav::{DRAFT_ADMIN_SET, NavLink, nav_links};
 #[cfg(any(test, feature = "debug-tools"))]
 pub use datastore::DataStoreDebugExt;
 pub use error::StoreError;

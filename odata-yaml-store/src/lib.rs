@@ -1,22 +1,19 @@
-// Re-export public types from data-store crate - it's the main abstract interface
+//! YAML-Implementierung des in `data-store` definierten Interfaces.
+//!
+//! Jeder Datensatz liegt als eigene Datei unter
+//! `<root>/<EntitySet>/{active,draft}/<uuid>.yaml`.
+
+// Re-export der abstrakten Schnittstelle, damit Nutzer nur ein Crate brauchen.
 pub use data_store::{
-    DataRecord, DataStore, DraftAction, DraftAdministrativeData, DraftMessage, EntityKey,
-    Navigation, StoreError, DraftDataStore,
+    DataRecord, DataStore, DraftAction, DraftAdministrativeData, DraftDataStore, DraftMessage,
+    EntityKey, Navigation, StoreError,
 };
 
-// Implementation modules specific to YAML backend
-pub mod filter_eval;
-pub mod error;
-pub mod key;
-
-// YamlStore is the YAML file-based implementation of DataStore
 pub mod yaml_store;
 pub use yaml_store::YamlStore;
 
 #[cfg(test)]
 mod tests {
-    use data_store::Navigation;
-
     use super::*;
 
     use odata::query::{ODataQuery, SortDirection};
@@ -291,6 +288,77 @@ mod tests {
         check_entity_dirs(&dir, ORDERS, 2, 1)?;
         check_entity_dirs(&dir, CUSTOMERS, 2, 0)?;
         check_entity_dirs(&dir, ORDER_ITEMS, 2, 1)?;
+        Ok(())
+    }
+
+    /// Regression: beim Aktivieren eines Drafts darf ein Kind, das es *nur*
+    /// aktiv gibt, nicht angefasst werden. Zuvor lieferte die Kindsuche wegen
+    /// der Draft-Ueberdeckung den aktiven Satz zurueck, der dann im Zuge der
+    /// "Aktivierung" geloescht wurde.
+    #[test]
+    fn draft_activate_keeps_active_only_child() -> anyhow::Result<()> {
+        let (dir, mut store) = make_store();
+        setup_data(&mut store)?;
+        let parent = EntityKey::new_active(to_uuid(2));
+        store.draft_edit(ORDERS, &parent)?;
+
+        // Kind direkt aktiv anlegen - es hat damit keinen Draft-Zwilling.
+        store.create_entity(
+            ORDER_ITEMS,
+            &json!({ "ID": to_uuid(20), "IsActiveEntity": true, "Order_ID": to_uuid(2), "Material": "M-900", "Qty": 1}),
+        )?;
+        check_entity_dirs(&dir, ORDER_ITEMS, 4, 1)?;
+
+        store.draft_activate(ORDERS, &parent.sibling())?;
+
+        // 10, 11, 12 (aktiviert) und 20 (unveraendert aktiv)
+        check_entity_dirs(&dir, ORDER_ITEMS, 4, 0)?;
+        let survivor = store.read_entity(
+            ORDER_ITEMS,
+            &EntityKey::new_active(to_uuid(20)),
+            &ODataQuery::new(),
+        )?;
+        assert_eq!(survivor["Material"], json!("M-900"));
+        Ok(())
+    }
+
+    /// Regression: das Loeschen eines aktiven Baums muss den aktiven Kindsatz
+    /// treffen - nicht den Draft, der ihn in Collections ueberdeckt.
+    #[test]
+    fn delete_active_parent_removes_active_children() -> anyhow::Result<()> {
+        let (dir, mut store) = make_store();
+        setup_data(&mut store)?;
+        let parent = EntityKey::new_active(to_uuid(2));
+        store.draft_edit(ORDERS, &parent)?;
+        check_entity_dirs(&dir, ORDER_ITEMS, 3, 1)?;
+
+        store.delete_entity(ORDERS, &parent)?;
+
+        // Der aktive Kindsatz 12 ist mit dem aktiven Parent verschwunden und
+        // bleibt nicht als Waise zurueck.
+        check_entity_dirs(&dir, ORDER_ITEMS, 2, 1)?;
+        assert!(
+            store
+                .read_entity(
+                    ORDER_ITEMS,
+                    &EntityKey::new_active(to_uuid(12)),
+                    &ODataQuery::new()
+                )
+                .is_err()
+        );
+        Ok(())
+    }
+
+    /// `draft_activate` arbeitet nur auf Draft-Schluesseln.
+    #[test]
+    fn draft_activate_rejects_active_key() -> anyhow::Result<()> {
+        let (_dir, mut store) = make_store();
+        setup_data(&mut store)?;
+        assert!(
+            store
+                .draft_activate(ORDERS, &EntityKey::new_active(to_uuid(2)))
+                .is_err()
+        );
         Ok(())
     }
 

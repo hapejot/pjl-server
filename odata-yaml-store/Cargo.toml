@@ -19,6 +19,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 thiserror = "2.0.20"
 
 [dev-dependencies]
+data-store = { version = "0.1.0", path = "../data-store", features = ["conformance"] }
 tempfile = "=3.10.1"
 
 [features]

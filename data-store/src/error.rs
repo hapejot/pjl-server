@@ -16,8 +16,11 @@ pub enum StoreError {
     #[error("Deserialisierungsfehler: {0}")]
     Deserialize(String),
 
-    #[error("Konvertierungsfehler")]
+    #[error("Konvertierungsfehler: {0}")]
     Conversion(String),
+
+    #[error("Nicht unterstuetzt: {0}")]
+    Unsupported(String),
 
     #[error("Metadata Fehler {0}")]
     Metadata(String),

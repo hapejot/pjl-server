@@ -6,5 +6,7 @@ members = [
     "odata",
     "odata-yaml-store",
     "sqlite-data-store",
+    "sqlite-relational-store",
     "spec",
+    "spec-schema",
 ]

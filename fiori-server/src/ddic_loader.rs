@@ -29,46 +29,21 @@ pub fn load_ddic_from_store(ddic: &mut DataDictonary, store: &dyn DataStore) {
     load_apps(ddic, store, &entities, &packages, &known);
 }
 
-/// Alle Navigationen, die der Store braucht um die Abhängigkeiten zwischen den Records zu kennen..
+/// Alle Navigationen, die der Store braucht um die Abhängigkeiten zwischen den Records zu kennen.
+///
+/// Geht ueber `spec-schema`: das validierte [`data_store::schema::Schema`] ist
+/// die Quelle, die flache Navigationsliste nur noch dessen Projektion. Damit
+/// kommt insbesondere die Ownership korrekt an - die frühere Direktableitung
+/// liess `Navigation::owning` immer auf `false` stehen, wodurch der Store
+/// keine Komposition erkennen konnte.
 pub fn navigations_from_ddic(ddic: &DataDictonary) -> Vec<Navigation> {
-    let mut navigations: Vec<Navigation> = Vec::new();
-    for entity in ddic.entities().iter() {
-        let from_set = format!("{}Set", entity.name());
-        let mut draft_nav = Navigation::new(true);
-        draft_nav
-            .from(&from_set, "DraftAdministrativeData")
-            .to("DraftAdministrativeData", "ID");
-        navigations.push(draft_nav);
-        for field in entity.fields() {
-            let FieldSpec::Lookup {
-                name,
-                entity: target,
-                collection,
-                owned: _,
-            } = field
-            else {
-                continue;
-            };
-            // Der Store filtert To-Many ueber die FK-Spalte des Kindes, To-One ueber dessen ID.
-            let to_field = if *collection {
-                match ddic.foreign_key_field(entity, field) {
-                    Some(fk) => format!("{fk}{}", spec::ID_SUFFIX),
-                    None => {
-                        warn!("no foreign key for '{}' of '{}'", name, entity.name());
-                        continue;
-                    }
-                }
-            } else {
-                "ID".to_string()
-            };
-            let mut navigation = Navigation::new(!collection);
-            navigation
-                .from(&from_set, name)
-                .to(&format!("{target}Set"), &to_field);
-            navigations.push(navigation);
+    match spec_schema::schema_from_ddic(ddic) {
+        Ok(schema) => schema.to_navigations(),
+        Err(e) => {
+            warn!("Schema aus dem DDIC nicht ableitbar: {e}");
+            vec![]
         }
     }
-    navigations
 }
 
 fn load_packages(ddic: &mut DataDictonary, store: &dyn DataStore) -> HashMap<String, String> {

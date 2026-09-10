@@ -13,7 +13,7 @@ use odata::{
     path::{PathSegment, parse_odata_path},
     query::{BinOp, ExpandItem, Expr, ODataQuery},
 };
-use odata_yaml_store::{EntityKey, StoreError, datastore::DataRecord};
+use data_store::{DataRecord, EntityKey, StoreError};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use spec::{

@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock};
 
-use odata_yaml_store::DraftDataStore;
+use data_store::DraftDataStore;
 use spec::data_dictionary::DataDictonary;
 
 pub mod batch;

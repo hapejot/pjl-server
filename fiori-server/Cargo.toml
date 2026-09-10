@@ -1,11 +1,12 @@
 [package]
 name = "fiori-server"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 anyhow = "1.0.104"
 axum = { version = "0.8.9", features = ["tracing"] }
+data-store = { version = "0.1.0", path = "../data-store" }
 futures-util = "0.3.32"
 handlebars = "6.3"
 multer = "3.1.0"

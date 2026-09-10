@@ -5,10 +5,7 @@
 use std::collections::{HashMap, HashSet};
 
 use odata::query::ODataQuery;
-use odata_yaml_store::{
-    DataStore,
-    datastore::{DataRecord, Navigation},
-};
+use data_store::{DataRecord, DataStore, Navigation};
 use serde_json::Value;
 use spec::{
     EntitySpec, FieldSpec, Relationship, app::App, data_dictionary::DataDictonary, package::Package,

@@ -1,5 +1,5 @@
 [workspace]
 resolver = "3"
-members = ["fiori-server", "odata",
+members = ["data-store", "fiori-server", "odata",
 "odata-yaml-store"
 , "spec"]

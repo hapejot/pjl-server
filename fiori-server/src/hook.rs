@@ -4,9 +4,7 @@ use serde_json::Value;
 use thiserror::Error;
 use tracing::debug;
 
-use odata_yaml_store::datastore::{DataRecord, Navigation};
-use odata_yaml_store::key::EntityKey;
-use odata_yaml_store::{DataStore, DraftDataStore, StoreError};
+use data_store::{DataRecord, DataStore, DraftDataStore, EntityKey, Navigation, StoreError};
 
 /// Identifiziert eine durchlaufende Operation (für Logging/Vorschau im Hook).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,7 +120,7 @@ impl DataStore for Extender {
         &self,
         set_name: &str,
         query: &odata::query::ODataQuery,
-    ) -> Result<Vec<odata_yaml_store::datastore::DataRecord>, StoreError> {
+    ) -> Result<Vec<DataRecord>, StoreError> {
         self.inner.get_collection(set_name, query)
     }
 
@@ -135,7 +133,7 @@ impl DataStore for Extender {
         set_name: &str,
         key: &EntityKey,
         query: &odata::query::ODataQuery,
-    ) -> Result<odata_yaml_store::datastore::DataRecord, StoreError> {
+    ) -> Result<DataRecord, StoreError> {
         self.inner.read_entity(set_name, key, query)
     }
 
@@ -143,7 +141,7 @@ impl DataStore for Extender {
         &self,
         set_name: &str,
         data: &Value,
-    ) -> Result<odata_yaml_store::datastore::DataRecord, StoreError> {
+    ) -> Result<DataRecord, StoreError> {
         let mut value = data.clone();
         self.hook
             .before(self, set_name, Operation::Create, &mut value)?;
@@ -169,7 +167,7 @@ impl DataStore for Extender {
         &self,
         set_name: &str,
         key: &EntityKey,
-    ) -> Result<odata_yaml_store::datastore::DataRecord, StoreError> {
+    ) -> Result<DataRecord, StoreError> {
         self.inner.read_sibling_entity(set_name, key)
     }
 

@@ -3,7 +3,7 @@ use serde_json::{Number, Value};
 use std::cmp::Ordering;
 use tracing::trace;
 
-use crate::datastore::DataRecord;
+use data_store::DataRecord;
 
 pub fn resolve_property(record: &DataRecord, path: &str) -> Value {
     let mut parts = path.split('/');

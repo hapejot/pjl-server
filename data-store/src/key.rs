@@ -1,0 +1,68 @@
+use odata::path::PathSegment;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::hash::Hash;
+use uuid::Uuid;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct EntityKey {
+    pub id: Uuid,
+    pub is_active_entity: bool,
+}
+
+impl EntityKey {
+    pub fn new(id: Uuid, is_active_entity: bool) -> Self {
+        Self {
+            id: id.into(),
+            is_active_entity,
+        }
+    }
+    pub fn new_active(id: impl Into<String>) -> Self {
+        Self {
+            id: Uuid::parse_str(id.into().as_str()).unwrap(),
+            is_active_entity: true,
+        }
+    }
+
+    pub fn storage_id(&self) -> String {
+        format!("{:}", self.id)
+    }
+
+    pub fn sibling(&self) -> EntityKey {
+        EntityKey {
+            id: self.id,
+            is_active_entity: !self.is_active_entity,
+        }
+    }
+
+    pub fn new_from_json(value: &Value) -> Option<EntityKey> {
+        let id = value.get("ID").and_then(|x| x.as_str());
+        let is_active = value.get("IsActiveEntity").and_then(|x| x.as_bool());
+        match (id, is_active) {
+            (None, None) => None,
+            (None, Some(_)) => None,
+            (Some(id), None) => Uuid::parse_str(&id)
+                .ok()
+                .and_then(|x| Some(EntityKey::new(x, true))),
+            (Some(id), Some(a)) => Uuid::parse_str(&id)
+                .ok()
+                .and_then(|x| Some(EntityKey::new(x, a))),
+        }
+    }
+}
+
+impl From<&PathSegment> for EntityKey {
+    fn from(value: &PathSegment) -> Self {
+        let k = value
+            .keys
+            .iter()
+            .find(|x| x.name == Some("ID".into()))
+            .and_then(|x| Uuid::parse_str(&x.value.to_string_value()).ok());
+        let is_active = value
+            .keys
+            .iter()
+            .find(|x| x.name == Some("IsActiveEntity".into()))
+            .and_then(|x| x.value.as_bool());
+        EntityKey::new(k.unwrap(), is_active.unwrap_or(true))
+    }
+}

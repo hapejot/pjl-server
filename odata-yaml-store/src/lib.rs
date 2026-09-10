@@ -1,34 +1,21 @@
-pub mod datastore;
-pub mod error;
+// Re-export public types from data-store crate - it's the main abstract interface
+pub use data_store::{
+    DataRecord, DataStore, DraftAction, DraftAdministrativeData, DraftMessage, EntityKey,
+    Navigation, StoreError, DraftDataStore,
+};
+
+// Implementation modules specific to YAML backend
 pub mod filter_eval;
+pub mod error;
 pub mod key;
+
+// YamlStore is the YAML file-based implementation of DataStore
 pub mod yaml_store;
-
-pub use datastore::{DataStore, DraftAction};
-pub use error::StoreError;
-pub use key::EntityKey;
 pub use yaml_store::YamlStore;
-
-#[cfg(any(test, feature = "debug-tools"))]
-pub use datastore::DataStoreDebugExt;
-
-pub trait DraftDataStore: DataStore {
-    fn draft_edit(&self, set_name: &str, key: &EntityKey) -> Result<serde_json::Value, StoreError>;
-    fn draft_activate(
-        &self,
-        set_name: &str,
-        key: &EntityKey,
-    ) -> Result<serde_json::Value, StoreError>;
-    fn draft_prepare(
-        &self,
-        set_name: &str,
-        key: &EntityKey,
-    ) -> Result<serde_json::Value, StoreError>;
-}
 
 #[cfg(test)]
 mod tests {
-    use crate::datastore::Navigation;
+    use data_store::Navigation;
 
     use super::*;
 

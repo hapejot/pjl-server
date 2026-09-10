@@ -1,7 +1,5 @@
-use crate::datastore::{DataRecord, DataStore, Navigation};
-use crate::error::StoreError;
+use data_store::{DataRecord, DataStore, EntityKey, Navigation, StoreError};
 use crate::filter_eval::evaluate;
-use crate::key::EntityKey;
 use crate::DraftDataStore;
 use odata::query::{Expr, ODataQuery, SortDirection};
 use serde_json::{json, Value};
@@ -318,9 +316,8 @@ impl YamlStore {
     ) -> Result<DataRecord, StoreError> {
         let p = self.path_for(set_name, key);
         let content = fs::read_to_string(&p).or_else(|_| Err(StoreError::not_found(p)))?;
-        let row = serde_yaml::from_str(&content)?;
-        // .or_else(|e| Err(StoreError::Deserialize(format!("{e}"))))
-        // .and_then(|x| DataRecord::from_json(&x))?;
+        let row = serde_yaml::from_str(&content)
+            .map_err(|e| StoreError::Deserialize(format!("YAML parse error: {}", e)))?;
         Ok(row)
     }
     fn delete_entity_tree(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {

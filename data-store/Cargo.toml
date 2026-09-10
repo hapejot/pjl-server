@@ -10,3 +10,6 @@ serde_json = "1.0.151"
 thiserror = "2.0.20"
 tracing = "0.1.44"
 uuid = { version = "1.26.1", features = ["v4", "serde"] }
+
+[features]
+debug-tools = []

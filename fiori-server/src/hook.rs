@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use thiserror::Error;
 use tracing::debug;
 
@@ -16,6 +16,7 @@ pub enum Operation {
     Delete,
     DraftEdit,
     DraftActivate,
+    DraftPrepare,
 }
 
 /// Ergebnis einer Audit-Zwischenoperation.
@@ -78,40 +79,86 @@ pub trait Hook: Send + Sync {
 pub struct Extender {
     inner: Arc<dyn DraftDataStore>,
     hook: Arc<dyn Hook>,
+    navigation: Navigation,
 }
 
 impl Extender {
+    /// Erzeugt einen neuen [`Extender`], der einen bestehenden Store mit dem
+    /// angegebenen [`Hook`] verdrahtet.
     pub fn new(
         inner: Arc<dyn DraftDataStore>,
         hook: Arc<dyn Hook>,
     ) -> Result<Arc<dyn DraftDataStore>, HookError> {
-        Ok(Arc::new(Extender { inner, hook }))
+        Ok(Arc::new(Extender::build(inner, hook)))
+    }
+
+    /// Konstruiert einen [`Extender`] ohne `Arc`-Huehulli (nuerzuelich fuer
+    /// Tests / interne Nutzung).
+    pub fn build(inner: Arc<dyn DraftDataStore>, hook: Arc<dyn Hook>) -> Self {
+        Extender {
+            inner,
+            hook,
+            navigation: Navigation::default(),
+        }
+    }
+
+    /// JSON-Key-Payload für `before`-Hooks.
+    fn key_value(key: &EntityKey) -> Value {
+        json!({
+            "ID": key.id.to_string(),
+            "IsActiveEntity": key.is_active_entity,
+        })
+    }
+
+    /// Synthisiert ein [`DataRecord`] aus einem [`EntityKey`].
+    /// Wird als `after`-Payload für Operationen verwendet, die keinen
+    /// Rückgabewert liefern (Delete).
+    fn key_record(key: &EntityKey) -> DataRecord {
+        DataRecord::from_json(&Self::key_value(key)).expect("key payload")
     }
 }
 
 impl DraftDataStore for Extender {
     fn draft_edit(
         &self,
-        _set_name: &str,
-        _key: &EntityKey,
+        set_name: &str,
+        key: &EntityKey,
     ) -> Result<serde_json::Value, StoreError> {
-        todo!()
+        let mut value = Self::key_value(key);
+        self.hook
+            .before(self, set_name, Operation::DraftEdit, &mut value)?;
+        let result = self.inner.draft_edit(set_name, key)?;
+        let mut record = DataRecord::from_json(&result)?;
+        self.hook.after(self, set_name, Operation::DraftEdit, &mut record)?;
+        Ok(result)
     }
 
     fn draft_activate(
         &self,
-        _set_name: &str,
-        _key: &EntityKey,
+        set_name: &str,
+        key: &EntityKey,
     ) -> Result<serde_json::Value, StoreError> {
-        todo!()
+        let mut value = Self::key_value(key);
+        self.hook
+            .before(self, set_name, Operation::DraftActivate, &mut value)?;
+        let result = self.inner.draft_activate(set_name, key)?;
+        let mut record = DataRecord::from_json(&result)?;
+        self.hook.after(self, set_name, Operation::DraftActivate, &mut record)?;
+        Ok(result)
     }
 
     fn draft_prepare(
         &self,
-        _set_name: &str,
-        _key: &EntityKey,
+        set_name: &str,
+        key: &EntityKey,
     ) -> Result<serde_json::Value, StoreError> {
-        todo!()
+        let mut value = Self::key_value(key);
+        self.hook
+            .before(self, set_name, Operation::DraftPrepare, &mut value)?;
+        let result = self.inner.draft_prepare(set_name, key)?;
+        let mut record = DataRecord::from_json(&result)?;
+        self.hook.after(self, set_name, Operation::DraftPrepare, &mut record)?;
+        Ok(result)
     }
 }
 
@@ -156,11 +203,41 @@ impl DataStore for Extender {
         key: &EntityKey,
         patch: &Value,
     ) -> Result<Value, StoreError> {
-        self.inner.patch_entity(set_name, key, patch)
+        let mut value = patch.clone();
+        self.hook
+            .before(self, set_name, Operation::Patch, &mut value)?;
+        let result = self.inner.patch_entity(set_name, key, patch)?;
+        let mut record = self
+            .inner
+            .read_entity(set_name, key, &odata::query::ODataQuery::new())?;
+        self.hook.after(self, set_name, Operation::Patch, &mut record)?;
+        Ok(result)
     }
 
     fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
-        self.inner.delete_entity(set_name, key)
+        let mut value = Self::key_value(key);
+        self.hook
+            .before(self, set_name, Operation::Delete, &mut value)?;
+        let result = self.inner.delete_entity(set_name, key);
+        result?;
+        let mut record = Self::key_record(key);
+        self.hook.after(self, set_name, Operation::Delete, &mut record)?;
+        Ok(())
+    }
+
+    fn delete_entity_tree_only(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+    ) -> Result<(), StoreError> {
+        let mut value = Self::key_value(key);
+        self.hook
+            .before(self, set_name, Operation::Delete, &mut value)?;
+        let result = self.inner.delete_entity_tree_only(set_name, key);
+        result?;
+        let mut record = Self::key_record(key);
+        self.hook.after(self, set_name, Operation::Delete, &mut record)?;
+        Ok(())
     }
 
     fn read_sibling_entity(
@@ -181,17 +258,51 @@ impl DataStore for Extender {
     }
 
     fn commit(&self) {
-        todo!()
+        self.inner.commit();
     }
 
-    fn navigation(&mut self, _single: bool) -> &mut Navigation {
-        todo!()
+    fn navigation(&mut self, single: bool) -> &mut Navigation {
+        self.navigation.single = single;
+        &mut self.navigation
     }
 
-    fn set_navigations(&self, _navigations: Vec<Navigation>) {
-        todo!()
+    fn set_navigations(&self, navigations: Vec<Navigation>) {
+        self.inner.set_navigations(navigations);
     }
 }
+
+/// Produktions-Hook: verandert nichts, loggt aber jede durchlaufende
+/// CRUD/Draft-Operation. So laesst sich das Hook-System aktivieren, ohne
+/// das Verhalten des Stores zu aendern.
+#[derive(Default)]
+pub struct DefaultHook;
+
+impl Hook for DefaultHook {
+    fn before(
+        &self,
+        store: &Extender,
+        set_name: &str,
+        op: Operation,
+        value: &mut Value,
+    ) -> Result<(), HookError> {
+        debug!(set_name, ?op, ?value, "before");
+        let _ = store;
+        Ok(())
+    }
+
+    fn after(
+        &self,
+        store: &Extender,
+        set_name: &str,
+        op: Operation,
+        value: &mut DataRecord,
+    ) -> Result<(), HookError> {
+        debug!(set_name, ?op, ?value, "after");
+        let _ = store;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::sync::RwLock;

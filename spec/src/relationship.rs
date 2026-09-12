@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 
-/// A side of a relationship — identifies the entity and its navigation property name.
+/// Eine Seite einer Beziehung: identifiziert die Entitaet und den Namen der Navigationsproperty.
 #[derive(Debug, Clone)]
 pub struct Side {
-    /// EntitySet name (e.g. "Customers", "Orders")
+    /// Name der EntitySet (z. B. "Customers", "Orders")
     pub entity: String,
-    /// Navigation property name on this entity (e.g. "Orders" on Customers, "Customer" on Orders).
-    /// Prefix with `_` to suppress TableFacet generation (nav exists in EDMX for $expand but is hidden in UI).
+    /// Name der Navigationsproperty auf dieser Entitaet (z. B. "Orders" bei Customers, "Customer" bei Orders).
+    /// Mit `_` prefixen, um die TableFacet-Generierung zu unterdruecken (Navigation gibt es im EDMX fuer $expand, ist im UI aber versteckt).
     pub nav_name: String,
 }
 
@@ -19,25 +19,26 @@ impl Side {
     }
 }
 
-/// A condition type that narrows a relationship to a subset of another.
+/// Ein Bedingungstyp, der eine Beziehung auf eine Teilmenge einer anderen beengt.
 #[derive(Debug, Clone)]
 pub enum Condition {
-    /// Pick one entity from the collection of the referenced relationship.
-    /// The value list is automatically filtered: `(parent ID) = (child FK)`.
+    // Waehle eine Entitaet aus der Sammlung der referenzierten Beziehung.
+    // Der Wertebereich wird automatisch gefiltert: `(parent ID) = (child FK)`.
     SubsetOf,
     // Future: Where { field: String, value: String },
 }
 
-/// A conditional reference — "this relationship picks from another relationship's collection."
+/// EinBedungsverweis: „dieseWaehlt aus der einer anderen Beziehung.Sammlung.
 ///
-/// When present on a `Relationship`, it means the FK doesn't point to an independent
-/// entity but to a member of another relationship's collection. The value list is
-/// automatically filtered by the referenced relationship's FK.
+/// Wenn auf einer `Relationship` vorhanden, bedeutet das, dass der Fremdschluessel
+/// nicht auf eine unabhaengige Entitaet, sondern auf ein Mitglied der Sammlung einer
+/// anderen Beziehung zeigt. Der Wertebereich wird automatisch nach dem
+/// Fremdschluessel der referenzierten Beziehung gefiltert.
 #[derive(Debug, Clone)]
 pub struct ConditionalRef {
-    /// The condition type.
+    /// Der Bedingungstyp.
     pub condition: Condition,
-    /// Name of the relationship whose collection this picks from.
+    /// Name der Beziehung aus deren Sammlung diese waehlt.
     pub reference: String,
 }
 

@@ -6,10 +6,12 @@ use tracing::{error, info};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 use fiori_server::*;
+use fiori_server::hook::{DefaultHook, Extender};
 
 async fn main_loop() -> anyhow::Result<()> {
     info!("init");
-    let store = Arc::new(YamlStore::open("data")?);
+    let ystore = Arc::new(YamlStore::open("data")?);
+    let store = Extender::new(ystore, Arc::new(DefaultHook))?;
 
     let state = AppState::new(store);
     state.reload();

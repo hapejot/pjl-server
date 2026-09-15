@@ -15,13 +15,8 @@ impl DataDictonary {
         let _core = Package::new("core");
         let core = Package::new("core");
 
-        // let mut package_fld = FieldSpec::atom("package", "Package", "Edm.Guid");
-        // package_fld.lookup("Package");
-
         let entity_ent = EntitySpec::new("Entity", core.name(), "Entities")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
-            // .field(FieldSpec::atom("package", "Package", "Edm.String"))
-            // .field(package_fld)
             .field(FieldSpec::atom("plural", "Plural", "Edm.String"));
 
         let field_ent = EntitySpec::new("Field", core.name(), "Fields")
@@ -229,7 +224,7 @@ impl DataDictonary {
         true
     }
 
-    /// Register an entity unless one with the same name already exists.
+    /// Registriert eine Entitaet, es sei denn, es existiert bereits eine mit dem gleichen Namen.
     pub fn add_entity(&mut self, entity: EntitySpec) -> bool {
         if self.entities.iter().any(|e| e.name() == entity.name()) {
             return false;
@@ -238,7 +233,7 @@ impl DataDictonary {
         true
     }
 
-    /// Register a relationship unless one with the same name already exists.
+    /// Registrier eine Beziehunge, falls keine mit gleichem Namen existiert.
     pub fn add_relationship(&mut self, relationship: Relationship) -> bool {
         if self
             .relationships

@@ -1,17 +1,22 @@
-use axum::{Router, routing::get};
-use odata_yaml_store::YamlStore;
+use axum::{routing::get, Router};
+use data_store::StaticSchema;
+use sqlite_relational_store::RelationalStore;
 use std::{net::SocketAddr, sync::Arc};
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::{error, info};
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-use fiori_server::*;
 use fiori_server::hook::{DefaultHook, Extender};
+use fiori_server::*;
 
 async fn main_loop() -> anyhow::Result<()> {
     info!("init");
-    let ystore = Arc::new(YamlStore::open("data")?);
-    let store = Extender::new(ystore, Arc::new(DefaultHook))?;
+    // let ystore = Arc::new(odata_yaml_store::YamlStore::open("data")?);
+    let store = Arc::new(RelationalStore::open(
+        "rel-data",
+        Arc::new(StaticSchema::new(schema())),
+    )?);
+    let store = Extender::new(store, Arc::new(DefaultHook))?;
 
     let state = AppState::new(store);
     state.reload();
@@ -33,6 +38,10 @@ async fn main_loop() -> anyhow::Result<()> {
     info!("läuft");
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+fn schema() -> data_store::Schema {
+    data_store::Schema::default()
 }
 
 #[tokio::main]

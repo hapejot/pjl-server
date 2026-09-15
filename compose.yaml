@@ -1,0 +1,9 @@
+
+services:
+  app-server:
+    build:
+      context: .
+      target: run
+      args:
+        BIN_NAME: pjl-fiori
+    restart: unless-stopped

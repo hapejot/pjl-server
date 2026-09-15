@@ -23,7 +23,7 @@ pub const DRAFT_ADMIN_TABLE: &str = "DraftAdministrativeData";
 pub const REVISION_TABLE: &str = "_schema_revision";
 
 pub fn sql_err(e: rusqlite::Error) -> StoreError {
-    StoreError::Conversion(e.to_string())
+    StoreError::Conversion(format!("DDL: {e}"))
 }
 
 /// Bezeichner sicher quoten.
@@ -49,11 +49,7 @@ pub fn sqlite_type(data_type: &DataType) -> &'static str {
 }
 
 fn column_ddl(column: &Column) -> String {
-    let mut ddl = format!(
-        "{} {}",
-        quote(&column.name),
-        sqlite_type(&column.data_type)
-    );
+    let mut ddl = format!("{} {}", quote(&column.name), sqlite_type(&column.data_type));
     if !column.nullable {
         ddl.push_str(" NOT NULL");
     }
@@ -68,7 +64,10 @@ fn literal(value: &serde_json::Value) -> String {
         serde_json::Value::Null => "NULL".into(),
         serde_json::Value::Bool(b) => (if *b { "1" } else { "0" }).into(),
         serde_json::Value::Number(n) => n.to_string(),
-        other => format!("'{}'", other.as_str().unwrap_or_default().replace('\'', "''")),
+        other => format!(
+            "'{}'",
+            other.as_str().unwrap_or_default().replace('\'', "''")
+        ),
     }
 }
 
@@ -96,11 +95,7 @@ pub fn create_table_sql(schema: &Schema, set: &EntitySet) -> Result<String, Stor
         parts.push(format!("{} {}", quote(&name), ty));
     }
 
-    let keys: Vec<String> = set
-        .key_columns()
-        .iter()
-        .map(|c| quote(&c.name))
-        .collect();
+    let keys: Vec<String> = set.key_columns().iter().map(|c| quote(&c.name)).collect();
     parts.push(format!("PRIMARY KEY ({})", keys.join(", ")));
 
     if let Some(parent) = set.composition_parent() {

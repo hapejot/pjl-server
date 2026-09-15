@@ -10,15 +10,15 @@ use data_store::schema::{
 use data_store::{DataRecord, DataStore, DraftDataStore, EntityKey, Navigation, StoreError};
 use odata::query::ODataQuery;
 use rusqlite::types::Value as SqlValue;
-use rusqlite::{Connection, params_from_iter};
-use serde_json::{Map, Value, json};
+use rusqlite::{params_from_iter, Connection};
+use serde_json::{json, Map, Value};
 use tracing::{debug, trace};
 use uuid::Uuid;
 
 use crate::ddl::{
-    self, DRAFT_ADMIN_COLUMN, DRAFT_ADMIN_TABLE, DRAFT_MESSAGES_COLUMN, quote, sql_err,
+    self, quote, sql_err, DRAFT_ADMIN_COLUMN, DRAFT_ADMIN_TABLE, DRAFT_MESSAGES_COLUMN,
 };
-use crate::sql::{Translator, order_by_clause, paging_clause, placeholders};
+use crate::sql::{order_by_clause, paging_clause, placeholders, Translator};
 use crate::value::{json_to_sql, sql_to_json};
 
 const ALIAS: &str = "t";
@@ -578,11 +578,8 @@ impl RelationalStore {
             Cardinality::ToMany => {
                 let fk = assoc.foreign_key.column();
                 let ids: Vec<String> = rows.iter().map(|r| r.id().to_string()).collect();
-                let mut where_clause = format!(
-                    "{ALIAS}.{} IN ({})",
-                    quote(fk),
-                    placeholders(ids.len(), 0)
-                );
+                let mut where_clause =
+                    format!("{ALIAS}.{} IN ({})", quote(fk), placeholders(ids.len(), 0));
                 if let Some(shadow) = Self::shadow_predicate(target) {
                     where_clause = format!("{where_clause} AND {shadow}");
                 }
@@ -591,7 +588,8 @@ impl RelationalStore {
 
                 let mut grouped: HashMap<String, Vec<Value>> = HashMap::new();
                 for record in found.iter() {
-                    if let Some(parent) = record.get(fk).and_then(|v| v.as_str().map(str::to_string))
+                    if let Some(parent) =
+                        record.get(fk).and_then(|v| v.as_str().map(str::to_string))
                     {
                         grouped.entry(parent).or_default().push(record.core_json());
                     }
@@ -693,8 +691,7 @@ impl DataStore for RelationalStore {
                 let known = set.has_column(field)
                     || matches!(
                         field.as_str(),
-                        "ID"
-                            | "IsActiveEntity"
+                        "ID" | "IsActiveEntity"
                             | "HasActiveEntity"
                             | "HasDraftEntity"
                             | "DraftAdministrativeData"
@@ -702,9 +699,7 @@ impl DataStore for RelationalStore {
                     )
                     || set.get_association(field).is_ok();
                 if !known {
-                    return Err(StoreError::PropertyNotFound(format!(
-                        "{set_name}.{field}"
-                    )));
+                    return Err(StoreError::PropertyNotFound(format!("{set_name}.{field}")));
                 }
             }
         }
@@ -753,7 +748,7 @@ impl DataStore for RelationalStore {
                 let column = set
                     .get_column(field)
                     .map_err(|e| StoreError::Metadata(e.to_string()))?;
-                if column.immutable {
+                if column.is_immutable_on_change() {
                     return Err(StoreError::Conflict(format!(
                         "{set_name}.{field} ist unveraenderlich"
                     )));

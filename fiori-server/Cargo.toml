@@ -17,6 +17,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 spec = { version = "0.1.0", path = "../spec" }
 spec-schema = { version = "0.1.0", path = "../spec-schema" }
+sqlite-relational-store = { version = "0.1.0", path = "../sqlite-relational-store" }
 thiserror = "2.0.20"
 tokio = { version = "1.52.3", features = ["full"] }
 tower = "0.5.3"

@@ -4,3 +4,5 @@ data
 tmp
 testdata
 odata-yaml-store/testdata
+Dockerfile.V1
+tmp.json

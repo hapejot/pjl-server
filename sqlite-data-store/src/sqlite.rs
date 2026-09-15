@@ -9,12 +9,12 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, RwLock};
 
-use data_store::nav::{NavLink, composition_parent, nav_links};
+use data_store::nav::{composition_parent, nav_links, NavLink};
 use data_store::query::{apply_query, count_query};
 use data_store::{DataRecord, DataStore, DraftDataStore, EntityKey, Navigation, StoreError};
 use odata::query::{Expr, ODataQuery};
-use rusqlite::{Connection, OptionalExtension, params};
-use serde_json::{Value, json};
+use rusqlite::{params, Connection, OptionalExtension};
+use serde_json::{json, Value};
 use tracing::{debug, trace};
 use uuid::Uuid;
 
@@ -36,7 +36,7 @@ pub struct SqliteStore {
 }
 
 fn sql_err(e: rusqlite::Error) -> StoreError {
-    StoreError::Conversion(e.to_string())
+    StoreError::Conversion(format!("sqlite: {e}"))
 }
 
 impl SqliteStore {
@@ -195,7 +195,10 @@ impl SqliteStore {
 
     fn nav_links(&self, entity_set: &str) -> HashMap<String, NavLink> {
         nav_links(
-            self.navigations.read().expect("navigations lock").as_slice(),
+            self.navigations
+                .read()
+                .expect("navigations lock")
+                .as_slice(),
             entity_set,
         )
     }
@@ -277,12 +280,11 @@ impl SqliteStore {
     ) -> Result<(), StoreError> {
         if !link.single {
             let q = ODataQuery::new().filter(Expr::equals_guid(row.id(), &link.to_field));
-            row[field] = json!(
-                self.get_collection(&link.to_set, &q)?
-                    .iter()
-                    .map(|x| x.core_json())
-                    .collect::<Vec<_>>()
-            );
+            row[field] = json!(self
+                .get_collection(&link.to_set, &q)?
+                .iter()
+                .map(|x| x.core_json())
+                .collect::<Vec<_>>());
             return Ok(());
         }
 

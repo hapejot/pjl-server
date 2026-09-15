@@ -7,9 +7,11 @@
 //! validiert, statt bei jeder Query neu interpretiert zu werden.
 
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
 use std::sync::Arc;
 
 use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -58,7 +60,7 @@ pub enum SchemaError {
 
 /// Spaltentyp. Bewusst ein geschlossenes Enum statt eines EDM-Strings, damit
 /// jedes Backend eine vollstaendige Abbildung erzwungen bekommt.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DataType {
     Guid,
     Bool,
@@ -82,7 +84,7 @@ impl DataType {
 }
 
 /// Rolle einer Spalte im Datenmodell.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ColumnRole {
     /// Normales Nutzdatenfeld.
     Data,
@@ -94,16 +96,25 @@ pub enum ColumnRole {
     Unit { for_column: String },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WritePolicy {
+    /// Client darf den Wert jederzeit setzen/ändern.
+    Writable,
+    /// Client setzt den Wert nur beim Anlegen, danach unveränderlich.
+    WriteOnCreate,
+    /// Server berechnet den Wert bei jeder Operation neu, Client schreibt nie.
+    Computed,
+    /// Server berechnet den Wert einmalig beim Anlegen, danach für niemanden mehr änderbar.
+    ComputedOnCreate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Column {
     pub name: String,
     pub data_type: DataType,
     pub nullable: bool,
     pub default: Option<Value>,
-    /// Serverseitig gesetzt - vom Client nicht schreibbar.
-    pub computed: bool,
-    /// Nach dem Anlegen nicht mehr aenderbar.
-    pub immutable: bool,
+    pub write_policy: WritePolicy,
     pub role: ColumnRole,
 }
 
@@ -114,8 +125,7 @@ impl Column {
             data_type,
             nullable: true,
             default: None,
-            computed: false,
-            immutable: false,
+            write_policy: WritePolicy::Writable,
             role: ColumnRole::Data,
         }
     }
@@ -143,12 +153,12 @@ impl Column {
     }
 
     pub fn computed(mut self) -> Self {
-        self.computed = true;
+        self.write_policy = WritePolicy::Computed;
         self
     }
 
     pub fn immutable(mut self) -> Self {
-        self.immutable = true;
+        self.write_policy = WritePolicy::WriteOnCreate;
         self
     }
 
@@ -160,23 +170,27 @@ impl Column {
     pub fn is_key(&self) -> bool {
         matches!(self.role, ColumnRole::Key)
     }
+
+    pub fn is_immutable_on_change(&self) -> bool {
+        !(self.write_policy == WritePolicy::Writable)
+    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Cardinality {
     ToOne,
     ToMany,
 }
 
 /// Komposition (Parent besitzt das Kind) vs. lose Assoziation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Ownership {
     Composition,
     Association,
 }
 
 /// Welche Seite die Fremdschluesselspalte traegt.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ForeignKeySide {
     /// Die Spalte liegt im eigenen Set (typisch fuer to-one).
     Here { column: String },
@@ -192,7 +206,7 @@ impl ForeignKeySide {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Association {
     /// Name der Navigationseigenschaft, z.B. `_Items`.
     pub name: String,
@@ -216,7 +230,7 @@ impl Association {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntitySet {
     /// Speichername, z.B. `OrderSet`.
     pub name: String,
@@ -272,10 +286,12 @@ impl EntitySet {
     }
 
     pub fn get_column(&self, name: &str) -> Result<&Column, SchemaError> {
-        self.columns.get(name).ok_or_else(|| SchemaError::UnknownColumn {
-            set: self.name.clone(),
-            column: name.to_string(),
-        })
+        self.columns
+            .get(name)
+            .ok_or_else(|| SchemaError::UnknownColumn {
+                set: self.name.clone(),
+                column: name.to_string(),
+            })
     }
 
     pub fn has_column(&self, name: &str) -> bool {
@@ -317,7 +333,7 @@ impl EntitySet {
 }
 
 /// Validiertes Gesamtschema.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Schema {
     sets: IndexMap<String, EntitySet>,
 }
@@ -428,6 +444,17 @@ impl Schema {
             }
         }
         navigations
+    }
+
+    pub fn save(&self, name: &str) -> anyhow::Result<()> {
+        let writer = File::create(name)?;
+        serde_json::to_writer(writer, &self)?;
+        Ok(())
+    }
+
+    pub fn load(name: &str) -> anyhow::Result<Schema> {
+        let reader = File::open(name)?;
+        Ok(serde_json::from_reader::<_, Schema>(reader)?)
     }
 }
 
@@ -573,7 +600,12 @@ mod tests {
             .set(
                 EntitySet::new("OrderSet", "Order")
                     .drafts()
-                    .column(Column::new("Status", DataType::String { max_length: Some(20) }))
+                    .column(Column::new(
+                        "Status",
+                        DataType::String {
+                            max_length: Some(20),
+                        },
+                    ))
                     .column(Column::foreign_key("Customer_ID", "CustomerSet"))
                     .association(Association {
                         name: "_Items".into(),
@@ -688,10 +720,7 @@ mod tests {
             )
             .set(EntitySet::new("ItemSet", "Item")) // ohne Order_ID
             .build();
-        assert!(matches!(
-            result,
-            Err(SchemaError::MissingForeignKey { .. })
-        ));
+        assert!(matches!(result, Err(SchemaError::MissingForeignKey { .. })));
     }
 
     #[test]

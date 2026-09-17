@@ -1,12 +1,16 @@
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{EntitySpec, FieldSpec, Relationship, app::App, package::Package};
 
+#[derive(Debug, Serialize, Deserialize)]
 pub struct DataDictionary {
     packages: Vec<Package>,
     entities: Vec<EntitySpec>,
     relationships: Vec<Relationship>,
     apps: Vec<App>,
+    #[serde(skip)]
     active: HashMap<String, EntitySpec>,
 }
 

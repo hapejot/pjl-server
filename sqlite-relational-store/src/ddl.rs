@@ -11,6 +11,8 @@ use data_store::schema::{
 };
 use data_store::StoreError;
 use rusqlite::Connection;
+
+use crate::dialect::Dialect;
 use tracing::{debug, info};
 
 /// Spalte mit den Draft-Verwaltungsdaten (FK auf [`DRAFT_ADMIN_TABLE`]).
@@ -43,38 +45,25 @@ pub fn quote(ident: &str) -> String {
     format!("\"{}\"", ident.replace('"', "\"\""))
 }
 
-/// Abbildung auf die SQLite-Speicherklasse.
-///
-/// `Decimal` wird bewusst als TEXT gehalten: SQLite kennt keinen exakten
-/// Dezimaltyp, und stilles Runden auf Betragsfeldern waere schlimmer als
-/// Arithmetik in Rust.
-pub fn sqlite_type(data_type: &DataType) -> &'static str {
-    match data_type {
-        DataType::Bool | DataType::Int32 | DataType::Int64 => "INTEGER",
-        DataType::Binary => "BLOB",
-        DataType::Guid
-        | DataType::String { .. }
-        | DataType::Date
-        | DataType::DateTimeOffset
-        | DataType::Decimal { .. } => "TEXT",
-    }
-}
-
-fn column_ddl(column: &Column) -> String {
-    let mut ddl = format!("{} {}", quote(&column.name), sqlite_type(&column.data_type));
+fn column_ddl(dialect: &dyn Dialect, column: &Column) -> String {
+    let mut ddl = format!(
+        "{} {}",
+        quote(&column.name),
+        dialect.column_type(&column.data_type)
+    );
     if !column.nullable {
         ddl.push_str(" NOT NULL");
     }
     if let Some(default) = &column.default {
-        ddl.push_str(&format!(" DEFAULT {}", literal(default)));
+        ddl.push_str(&format!(" DEFAULT {}", literal(dialect, default)));
     }
     ddl
 }
 
-fn literal(value: &serde_json::Value) -> String {
+fn literal(dialect: &dyn Dialect, value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::Null => "NULL".into(),
-        serde_json::Value::Bool(b) => (if *b { "1" } else { "0" }).into(),
+        serde_json::Value::Bool(b) => dialect.bool_literal(*b).into(),
         serde_json::Value::Number(n) => n.to_string(),
         other => format!(
             "'{}'",
@@ -84,11 +73,14 @@ fn literal(value: &serde_json::Value) -> String {
 }
 
 /// Interne Spalten, die jedes draft-faehige Set zusaetzlich braucht.
-pub fn internal_columns(set: &EntitySet) -> Vec<(String, &'static str)> {
+pub fn internal_columns(dialect: &dyn Dialect, set: &EntitySet) -> Vec<(String, String)> {
     if set.draft_enabled {
+        let text = dialect
+            .column_type(&DataType::String { max_length: None })
+            .to_string();
         vec![
-            (DRAFT_ADMIN_COLUMN.to_string(), "TEXT"),
-            (DRAFT_MESSAGES_COLUMN.to_string(), "TEXT"),
+            (DRAFT_ADMIN_COLUMN.to_string(), text.clone()),
+            (DRAFT_MESSAGES_COLUMN.to_string(), text),
         ]
     } else {
         vec![]
@@ -101,9 +93,13 @@ pub fn internal_columns(set: &EntitySet) -> Vec<(String, &'static str)> {
 /// inklusive `IsActiveEntity`: damit kann ein aktiver Parent strukturell kein
 /// Draft-Kind haben. Lose Assoziationen bekommen keinen Constraint - sonst
 /// muesste ein Draft-Auftrag auf einen Draft-Kunden zeigen.
-pub fn create_table_sql(schema: &Schema, set: &EntitySet) -> Result<String, StoreError> {
-    let mut parts: Vec<String> = set.columns().map(column_ddl).collect();
-    for (name, ty) in internal_columns(set) {
+pub fn create_table_sql(
+    dialect: &dyn Dialect,
+    schema: &Schema,
+    set: &EntitySet,
+) -> Result<String, StoreError> {
+    let mut parts: Vec<String> = set.columns().map(|c| column_ddl(dialect, c)).collect();
+    for (name, ty) in internal_columns(dialect, set) {
         parts.push(format!("{} {}", quote(&name), ty));
     }
 
@@ -156,13 +152,29 @@ pub fn index_statements(set: &EntitySet) -> Vec<String> {
         .collect()
 }
 
-const DRAFT_ADMIN_DDL: &str = "
-CREATE TABLE IF NOT EXISTS \"DraftAdministrativeData\" (
-  \"DraftUUID\"            TEXT NOT NULL PRIMARY KEY,
-  \"DraftIsCreatedByMe\"   INTEGER NOT NULL DEFAULT 1,
-  \"InProcessByUser\"      TEXT,
-  \"LastChangedByUser\"    TEXT
-)";
+/// DDL der Draft-Verwaltungstabelle.
+///
+/// Sie steht nicht im Schema, weil sie kein Entity-Set ist - der Typaufbau
+/// muss trotzdem ueber den Dialekt laufen: `DraftIsCreatedByMe` ist ein
+/// Wahrheitswert, und dessen Speicherung unterscheidet sich.
+fn draft_admin_ddl(dialect: &dyn Dialect) -> String {
+    let text = dialect.column_type(&DataType::String { max_length: None });
+    format!(
+        "CREATE TABLE IF NOT EXISTS {table} (\n  \
+           {uuid} {text} NOT NULL PRIMARY KEY,\n  \
+           {created} {flag} NOT NULL DEFAULT {yes},\n  \
+           {in_process} {text},\n  \
+           {changed} {text}\n)",
+        table = quote(DRAFT_ADMIN_TABLE),
+        uuid = quote("DraftUUID"),
+        created = quote("DraftIsCreatedByMe"),
+        in_process = quote("InProcessByUser"),
+        changed = quote("LastChangedByUser"),
+        flag = dialect.column_type(&DataType::Bool),
+        yes = dialect.bool_literal(true),
+        text = text,
+    )
+}
 
 /// Bereits vorhandene Spalten einer Tabelle.
 fn existing_columns(conn: &Connection, table: &str) -> Result<HashSet<String>, StoreError> {
@@ -197,12 +209,17 @@ fn table_exists(conn: &Connection, table: &str) -> Result<bool, StoreError> {
 /// immer NULL-bar, weil SQLite fuer NOT NULL einen Default verlangt.
 /// Typaenderungen und Spalten-Drops werden **nicht** automatisch ausgefuehrt -
 /// sie brauchen einen Tabellen-Rebuild und damit eine bewusste Entscheidung.
-pub fn ensure_schema(conn: &Connection, schema: &Schema) -> Result<(), StoreError> {
-    conn.execute_batch(DRAFT_ADMIN_DDL)
+pub fn ensure_schema(
+    conn: &Connection,
+    dialect: &dyn Dialect,
+    schema: &Schema,
+) -> Result<(), StoreError> {
+    conn.execute_batch(&draft_admin_ddl(dialect))
         .map_err(|e| ddl_err!(Conversion, e))?;
     conn.execute_batch(&format!(
-        "CREATE TABLE IF NOT EXISTS {} (revision INTEGER NOT NULL)",
-        quote(REVISION_TABLE)
+        "CREATE TABLE IF NOT EXISTS {} (revision {} NOT NULL)",
+        quote(REVISION_TABLE),
+        dialect.column_type(&DataType::Int64)
     ))
     .map_err(|e| ddl_err!(Conversion, e))?;
 
@@ -211,13 +228,9 @@ pub fn ensure_schema(conn: &Connection, schema: &Schema) -> Result<(), StoreErro
             let existing = existing_columns(conn, &set.name)?;
             let mut wanted: Vec<(String, String)> = set
                 .columns()
-                .map(|c| (c.name.clone(), sqlite_type(&c.data_type).to_string()))
+                .map(|c| (c.name.clone(), dialect.column_type(&c.data_type).to_string()))
                 .collect();
-            wanted.extend(
-                internal_columns(set)
-                    .into_iter()
-                    .map(|(n, t)| (n, t.to_string())),
-            );
+            wanted.extend(internal_columns(dialect, set));
             for (name, ty) in wanted {
                 if existing.contains(&name) {
                     continue;
@@ -232,7 +245,7 @@ pub fn ensure_schema(conn: &Connection, schema: &Schema) -> Result<(), StoreErro
                 .map_err(|e| ddl_err!(Conversion, e))?;
             }
         } else {
-            let ddl = create_table_sql(schema, set)?;
+            let ddl = create_table_sql(dialect, schema, set)?;
             debug!("DDL: {ddl}");
             conn.execute_batch(&ddl)
                 .map_err(|e| ddl_err!(Conversion, e))?;
@@ -249,6 +262,7 @@ pub fn ensure_schema(conn: &Connection, schema: &Schema) -> Result<(), StoreErro
 /// Meldet Abweichungen, die `ensure_schema` bewusst nicht selbst repariert.
 pub fn pending_destructive_changes(
     conn: &Connection,
+    dialect: &dyn Dialect,
     schema: &Schema,
 ) -> Result<Vec<String>, StoreError> {
     let mut findings = vec![];
@@ -258,7 +272,7 @@ pub fn pending_destructive_changes(
         }
         let existing = existing_columns(conn, &set.name)?;
         let mut wanted: HashSet<String> = set.columns().map(|c| c.name.clone()).collect();
-        wanted.extend(internal_columns(set).into_iter().map(|(n, _)| n));
+        wanted.extend(internal_columns(dialect, set).into_iter().map(|(n, _)| n));
         for column in existing.difference(&wanted) {
             findings.push(format!(
                 "{}.{} existiert in der Datenbank, aber nicht im Schema",

@@ -11,6 +11,8 @@
 use data_store::{json_to_param_loose, SqlParam, StoreError};
 use odata::query::ODataQuery;
 
+use crate::dialect::Dialect;
+
 /// Ergebnis einer Uebersetzung: SQL-Fragment plus zugehoerige Parameter.
 ///
 /// Die Parameter sind treiberunabhaengig; erst der Store rechnet sie per
@@ -26,20 +28,15 @@ fn unsupported(what: impl std::fmt::Display) -> StoreError {
     ))
 }
 
-/// `LIMIT`/`OFFSET`. SQLite verlangt ein LIMIT, wenn ein OFFSET gesetzt ist.
-pub fn paging_clause(query: &ODataQuery) -> String {
-    match (query.top, query.skip) {
-        (None, None) => String::new(),
-        (Some(top), None) => format!(" LIMIT {top}"),
-        (None, Some(skip)) => format!(" LIMIT -1 OFFSET {skip}"),
-        (Some(top), Some(skip)) => format!(" LIMIT {top} OFFSET {skip}"),
-    }
+/// `LIMIT`/`OFFSET` in der Schreibweise des Dialekts.
+pub fn paging_clause(dialect: &dyn Dialect, query: &ODataQuery) -> String {
+    dialect.paging(query.top, query.skip)
 }
 
 /// Hilfsfunktion fuer `IN (...)`-Listen.
-pub fn placeholders(count: usize, offset: usize) -> String {
+pub fn placeholders(dialect: &dyn Dialect, count: usize, offset: usize) -> String {
     (0..count)
-        .map(|i| format!("?{}", i + offset + 1))
+        .map(|i| dialect.placeholder(i + offset + 1))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -54,9 +51,10 @@ pub mod query {
     use super::Sql;
     use data_store::schema::{EntitySet, ID_COLUMN, IS_ACTIVE_COLUMN};
     use data_store::{SqlParam, StoreError};
-    use odata::query::{BinOp, Expr, ODataQuery, SortDirection};
+    use odata::query::{BinOp, Expr, ODataQuery};
 
     use crate::ddl::{quote, DRAFT_ADMIN_COLUMN};
+    use crate::dialect::Dialect;
 
     /// Spalte der Sicht, die den Aktivierungszustand des Zwillings traegt.
     pub const SIBLING_IS_ACTIVE: &str = "SiblingEntity/IsActiveEntity";
@@ -75,10 +73,10 @@ pub mod query {
     /// Nebeneffekt, auf den Verlass ist: Zeilen, die der `FULL OUTER JOIN` nur
     /// von der rechten Seite beisteuert, haben `IsActiveEntity IS NULL`. Fuer
     /// sie ist der erste Zweig NULL und der zweite falsch - sie fallen heraus.
-    fn shadow_predicate() -> String {
+    fn shadow_predicate(dialect: &dyn Dialect) -> String {
         format!(
-            "({is_active} = 0 OR {sibling} IS NULL)",
-            is_active = quote(IS_ACTIVE_COLUMN),
+            "({is_draft} OR {sibling} IS NULL)",
+            is_draft = dialect.bool_predicate(&quote(IS_ACTIVE_COLUMN), false),
             sibling = quote(SIBLING_IS_ACTIVE),
         )
     }
@@ -86,6 +84,7 @@ pub mod query {
     #[derive(Debug)]
     pub struct Translator<'a> {
         set: &'a EntitySet,
+        dialect: &'a dyn Dialect,
         params: Vec<SqlParam>,
         filter: Vec<Expr>,
         raw_filters: Vec<String>,
@@ -93,9 +92,10 @@ pub mod query {
     }
 
     impl<'a> Translator<'a> {
-        pub fn new(set: &'a EntitySet) -> Self {
+        pub fn new(set: &'a EntitySet, dialect: &'a dyn Dialect) -> Self {
             Self {
                 set,
+                dialect,
                 params: vec![],
                 filter: vec![],
                 raw_filters: vec![],
@@ -169,7 +169,7 @@ pub mod query {
         /// Fuer Sets ohne Draft-Unterstuetzung wirkungslos.
         pub fn shadow_drafts(mut self) -> Self {
             if self.set.draft_enabled {
-                self.raw_filters.push(shadow_predicate());
+                self.raw_filters.push(shadow_predicate(self.dialect));
             }
             self
         }
@@ -185,7 +185,7 @@ pub mod query {
 
         fn push(&mut self, value: SqlParam) -> String {
             self.params.push(value);
-            format!("?{}", self.params.len())
+            self.dialect.placeholder(self.params.len())
         }
 
         /// Skalarer Ausdruck (Spalte, Literal, Funktion).
@@ -234,7 +234,7 @@ pub mod query {
             Ok(match lower.as_str() {
                 "contains" => {
                     let (a, b) = (arg(self, 0)?, arg(self, 1)?);
-                    format!("instr({a}, {b}) > 0")
+                    format!("{} > 0", self.dialect.position(&a, &b))
                 }
                 // Ueber substr statt LIKE: kein Escaping von % und _ noetig.
                 "startswith" => {
@@ -243,12 +243,12 @@ pub mod query {
                 }
                 "endswith" => {
                     let (a, b) = (arg(self, 0)?, arg(self, 1)?);
-                    format!("substr({a}, -length({b})) = {b}")
+                    self.dialect.ends_with(&a, &b)
                 }
                 // OData V2: vertauschte Argumente
                 "substringof" => {
                     let (a, b) = (arg(self, 0)?, arg(self, 1)?);
-                    format!("instr({b}, {a}) > 0")
+                    format!("{} > 0", self.dialect.position(&b, &a))
                 }
                 "tolower" => format!("lower({})", arg(self, 0)?),
                 "toupper" => format!("upper({})", arg(self, 0)?),
@@ -256,7 +256,7 @@ pub mod query {
                 "length" => format!("length({})", arg(self, 0)?),
                 "indexof" => {
                     let (a, b) = (arg(self, 0)?, arg(self, 1)?);
-                    format!("(instr({a}, {b}) - 1)")
+                    format!("({} - 1)", self.dialect.position(&a, &b))
                 }
                 "concat" => {
                     let mut parts = vec![];
@@ -275,9 +275,9 @@ pub mod query {
                     }
                 }
                 "round" => format!("round({})", arg(self, 0)?),
-                // floor/ceiling kennt SQLite ohne Erweiterung nicht. Lieber ein
-                // klarer Fehler als eine Emulation, die am Dokumentenstore
-                // vorbeirundet.
+                // floor/ceiling bleibt aussen vor: SQLite kennt es ohne
+                // Erweiterung nicht, und ein Backend, das mehr kann als die
+                // anderen, macht die geteilte Verhaltenssuite wertlos.
                 other => return Err(unsupported(format!("Funktion {other}"))),
             })
         }
@@ -334,9 +334,11 @@ pub mod query {
                     }
                 },
                 Expr::UnaryNot(inner) => format!("(NOT {})", self.predicate(inner)?),
-                Expr::Bool(b) => (if *b { "1 = 1" } else { "1 = 0" }).to_string(),
+                Expr::Bool(b) => self.dialect.bool_constant(*b),
                 Expr::FunctionCall { name, args } => self.function(name, args)?,
-                Expr::Identifier(name) => format!("{} = 1", self.column(name)?),
+                Expr::Identifier(name) => {
+                    self.dialect.bool_predicate(&self.column(name)?, true)
+                }
                 other => return Err(unsupported(format!("{other:?}"))),
             })
         }
@@ -358,12 +360,16 @@ pub mod query {
             //   0     -> Zwilling ist Draft  (also bin ich aktiv)     -> HasDraftEntity
             // Wichtig: die vorherige Formel `1 - COALESCE(sibling, 0)` war falsch,
             // weil sie NULL (kein Zwilling) zu `HasDraftEntity=1` machte.
+            let sibling = quote(SIBLING_IS_ACTIVE);
             Ok(format!(
                 r#"SELECT *,
-                     CASE WHEN {sibling} = 0 THEN 1 ELSE 0 END AS {has_draft},
-                     CASE WHEN {sibling} = 1 THEN 1 ELSE 0 END AS {has_active}
+                     CASE WHEN {sibling_is_draft} THEN {yes} ELSE {no} END AS {has_draft},
+                     CASE WHEN {sibling_is_active} THEN {yes} ELSE {no} END AS {has_active}
                    FROM ( {base} )"#,
-                sibling = quote(SIBLING_IS_ACTIVE),
+                sibling_is_draft = self.dialect.bool_predicate(&sibling, false),
+                sibling_is_active = self.dialect.bool_predicate(&sibling, true),
+                yes = self.dialect.bool_literal(true),
+                no = self.dialect.bool_literal(false),
                 has_draft = quote("HasDraftEntity"),
                 has_active = quote("HasActiveEntity"),
                 base = base_sql,
@@ -437,6 +443,7 @@ pub mod query {
     /// keinen Alias.
     pub fn order_by_clause(
         set: &EntitySet,
+        dialect: &dyn Dialect,
         query: &ODataQuery,
     ) -> Result<Option<String>, StoreError> {
         if query.orderby.is_empty() {
@@ -449,13 +456,14 @@ pub mod query {
             }
             set.get_column(&item.property)
                 .map_err(|e| StoreError::Metadata(e.to_string()))?;
-            let direction = match item.direction {
-                SortDirection::Asc => "ASC",
-                SortDirection::Desc => "DESC",
-            };
-            // SQLite sortiert NULL aufsteigend zuerst - gleiche Ordnung wie
-            // `data_store::query::compare_json`.
-            parts.push(format!("{} {}", quote(&item.property), direction));
+            // Die NULL-Ordnung gehoert zur Richtung: sie muss zu
+            // `data_store::query::compare_json` passen, und die Datenbanken
+            // sind sich darin nicht einig.
+            parts.push(format!(
+                "{} {}",
+                quote(&item.property),
+                dialect.order_direction(item.direction)
+            ));
         }
         Ok(Some(parts.join(", ")))
     }
@@ -465,6 +473,7 @@ pub mod query {
         use data_store::{Column, DataType, EntitySet};
         use odata::query::Expr;
 
+        use crate::dialect::SQLITE;
         use crate::sql::query::Translator;
 
         fn order_set() -> EntitySet {
@@ -480,7 +489,7 @@ pub mod query {
         #[test]
         fn full_statement() -> anyhow::Result<()> {
             let set = order_set();
-            let s = Translator::new(&set)
+            let s = Translator::new(&set, &SQLITE)
                 .select("ID")
                 .select("IsActiveEntity")
                 .select("HasActiveEntity")
@@ -514,8 +523,8 @@ pub mod query {
         #[test]
         fn shadow_matches_the_fiori_draft_filter() -> anyhow::Result<()> {
             let set = order_set();
-            let implicit = Translator::new(&set).shadow_drafts().build()?;
-            let explicit = Translator::new(&set)
+            let implicit = Translator::new(&set, &SQLITE).shadow_drafts().build()?;
+            let explicit = Translator::new(&set, &SQLITE)
                 .filter(&Expr::parse(
                     "(IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null)",
                 ).expect("parst"))
@@ -537,7 +546,7 @@ pub mod query {
         fn sets_without_drafts_skip_the_sibling_join() -> anyhow::Result<()> {
             let set = EntitySet::new("ThingSet", "Thing")
                 .column(Column::new("name", DataType::String { max_length: None }));
-            let s = Translator::new(&set).build()?;
+            let s = Translator::new(&set, &SQLITE).build()?;
             assert_eq!(s.text, normalize(r#"SELECT * FROM (SELECT * FROM "ThingSet")"#));
             Ok(())
         }
@@ -552,7 +561,7 @@ pub mod query {
                 "Customer/Name eq 'x'",
             ] {
                 let expr = Expr::parse(filter).expect("parst");
-                let result = Translator::new(&set).filter(&expr).build();
+                let result = Translator::new(&set, &SQLITE).filter(&expr).build();
                 assert!(result.is_err(), "{filter} haette scheitern muessen");
             }
         }

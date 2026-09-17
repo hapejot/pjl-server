@@ -17,6 +17,7 @@
 //!   liefert einen Fehler statt stiller Abweichung.
 
 pub mod ddl;
+pub mod dialect;
 pub mod sql;
 pub mod store;
 pub mod value;

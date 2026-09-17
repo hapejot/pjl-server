@@ -19,6 +19,7 @@ use tracing::{debug, trace};
 use uuid::Uuid;
 
 use crate::ddl::{self, quote, DRAFT_ADMIN_COLUMN, DRAFT_ADMIN_TABLE, DRAFT_MESSAGES_COLUMN};
+use crate::dialect::{Dialect, SQLITE};
 use crate::sql::query::{order_by_clause, Translator};
 use crate::sql::{paging_clause, placeholders};
 use crate::value::{from_sqlite, to_sqlite};
@@ -74,7 +75,7 @@ impl RelationalStore {
         let schema = schema_source
             .schema()
             .map_err(|e| StoreError::Metadata(e.to_string()))?;
-        ddl::ensure_schema(&conn, &schema)?;
+        ddl::ensure_schema(&conn, &SQLITE, &schema)?;
         ddl::set_applied_revision(&conn, schema_source.revision().0)?;
 
         Ok(Self {
@@ -96,7 +97,7 @@ impl RelationalStore {
             .schema_source
             .schema()
             .map_err(|e| StoreError::Metadata(e.to_string()))?;
-        ddl::ensure_schema(&conn, &schema)?;
+        ddl::ensure_schema(&conn, &SQLITE, &schema)?;
         ddl::set_applied_revision(&conn, revision.0)?;
         *self.schema.lock().expect("schema lock") = schema;
         Ok(true)
@@ -105,7 +106,12 @@ impl RelationalStore {
     /// Spalten, die in der Datenbank stehen, aber nicht mehr im Schema.
     pub fn pending_destructive_changes(&self) -> Result<Vec<String>, StoreError> {
         let conn = self.conn.lock().expect("connection lock");
-        ddl::pending_destructive_changes(&conn, &self.schema())
+        ddl::pending_destructive_changes(&conn, &SQLITE, &self.schema())
+    }
+
+    /// Der SQL-Dialekt dieses Stores.
+    fn dialect(&self) -> &'static dyn Dialect {
+        &SQLITE
     }
 
     pub fn schema(&self) -> Arc<Schema> {
@@ -231,7 +237,7 @@ impl RelationalStore {
             });
         }
 
-        let placeholders_list = placeholders(columns.len(), 0);
+        let placeholders_list = placeholders(self.dialect(), columns.len(), 0);
         let assignments: Vec<String> = columns
             .iter()
             .filter(|c| c.as_str() != ID_COLUMN && c.as_str() != IS_ACTIVE_COLUMN)
@@ -271,7 +277,7 @@ impl RelationalStore {
 
     /// Einzelsatz ueber den Primaerschluessel.
     fn load_one(&self, set: &EntitySet, key: &EntityKey) -> Result<DataRecord, StoreError> {
-        let mut t = Translator::new(set).filter(&Expr::equals_guid(key.id.to_string(), "ID"));
+        let mut t = Translator::new(set, self.dialect()).filter(&Expr::equals_guid(key.id.to_string(), "ID"));
         if set.draft_enabled {
             t = t.filter(&Expr::equals_value(
                 &json!(key.is_active_entity),
@@ -548,9 +554,9 @@ impl RelationalStore {
                 // damit die Draft-Wrapper (Sibling-Join, HasActiveEntity, ...)
                 // konsistent zum Haupt-SELECT sind. Spalten werden ohne Alias
                 // referenziert -- das aeussere SELECT hat keinen `AS t`.
-                let raw = format!("{} IN ({})", quote(ID_COLUMN), placeholders(ids.len(), 0));
+                let raw = format!("{} IN ({})", quote(ID_COLUMN), placeholders(self.dialect(), ids.len(), 0));
                 let params: Vec<SqlParam> = ids.iter().cloned().map(SqlParam::Text).collect();
-                let sql = Translator::new(target)
+                let sql = Translator::new(target, self.dialect())
                     .filter_raw(raw, params)
                     .shadow_drafts()
                     .build()?;
@@ -571,9 +577,9 @@ impl RelationalStore {
             Cardinality::ToMany => {
                 let fk = assoc.foreign_key.column();
                 let ids: Vec<String> = rows.iter().map(|r| r.id().to_string()).collect();
-                let raw = format!("{} IN ({})", quote(fk), placeholders(ids.len(), 0));
+                let raw = format!("{} IN ({})", quote(fk), placeholders(self.dialect(), ids.len(), 0));
                 let params: Vec<SqlParam> = ids.iter().cloned().map(SqlParam::Text).collect();
-                let sql = Translator::new(target)
+                let sql = Translator::new(target, self.dialect())
                     .filter_raw(raw, params)
                     .shadow_drafts()
                     .build()?;
@@ -624,7 +630,7 @@ impl DataStore for RelationalStore {
         // Sibling-Join hat den Zustand des Zwillings bereits in der Zeile.
         // Sie ist wortgleich mit dem Draft-Filter, den Fiori Elements selbst
         // schickt, und damit idempotent.
-        let mut sql = Translator::new(set).shadow_drafts();
+        let mut sql = Translator::new(set, self.dialect()).shadow_drafts();
         for s in query.select.iter() {
             sql = sql.select(s);
         }
@@ -638,8 +644,8 @@ impl DataStore for RelationalStore {
             set,
             sql.text,
             sql.params,
-            order_by_clause(set, query)?,
-            &paging_clause(query),
+            order_by_clause(set, self.dialect(), query)?,
+            &paging_clause(self.dialect(), query),
         )?;
 
         for record in records.iter_mut() {

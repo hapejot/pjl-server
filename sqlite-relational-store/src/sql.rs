@@ -8,16 +8,16 @@
 //!    [`StoreError`] - ein Filter, der klammheimlich ignoriert wird, gibt
 //!    plausible falsche Daten zurueck, und das ist schlimmer als ein Fehler.
 
-use data_store::StoreError;
+use data_store::{json_to_param_loose, SqlParam, StoreError};
 use odata::query::ODataQuery;
-use rusqlite::types::Value as SqlValue;
-
-use crate::value::json_to_sql_loose;
 
 /// Ergebnis einer Uebersetzung: SQL-Fragment plus zugehoerige Parameter.
+///
+/// Die Parameter sind treiberunabhaengig; erst der Store rechnet sie per
+/// [`crate::value::to_sqlite`] an der rusqlite-Grenze um.
 pub struct Sql {
     pub text: String,
-    pub params: Vec<SqlValue>,
+    pub params: Vec<SqlParam>,
 }
 
 fn unsupported(what: impl std::fmt::Display) -> StoreError {
@@ -45,17 +45,16 @@ pub fn placeholders(count: usize, offset: usize) -> String {
 }
 
 /// JSON-Wert als Parameter, ohne Spaltenkontext.
-pub fn param(value: &serde_json::Value) -> SqlValue {
-    json_to_sql_loose(value)
+pub fn param(value: &serde_json::Value) -> SqlParam {
+    json_to_param_loose(value)
 }
 
 pub mod query {
     use super::unsupported;
     use super::Sql;
     use data_store::schema::{EntitySet, ID_COLUMN, IS_ACTIVE_COLUMN};
-    use data_store::StoreError;
+    use data_store::{SqlParam, StoreError};
     use odata::query::{BinOp, Expr, ODataQuery, SortDirection};
-    use rusqlite::types::Value as SqlValue;
 
     use crate::ddl::{quote, DRAFT_ADMIN_COLUMN};
 
@@ -87,7 +86,7 @@ pub mod query {
     #[derive(Debug)]
     pub struct Translator<'a> {
         set: &'a EntitySet,
-        params: Vec<SqlValue>,
+        params: Vec<SqlParam>,
         filter: Vec<Expr>,
         raw_filters: Vec<String>,
         select: Vec<String>,
@@ -154,7 +153,7 @@ pub mod query {
         /// hinzu. Die Platzhalter im Fragment muessen die Form `?N` mit
         /// bereits konsistenter Nummerierung haben -- typischerweise wird der
         /// Aufrufer sie beim Zusammenbau mit [`super::placeholders`] erzeugen.
-        pub fn filter_raw(mut self, sql: impl Into<String>, params: Vec<SqlValue>) -> Self {
+        pub fn filter_raw(mut self, sql: impl Into<String>, params: Vec<SqlParam>) -> Self {
             let sql = sql.into();
             // Platzhalter im Fragment relativ zur laufenden Parameterliste
             // umnummerieren, damit mehrere raw-Filter kombinierbar sind.
@@ -184,7 +183,7 @@ pub mod query {
             Ok(quote(name))
         }
 
-        fn push(&mut self, value: SqlValue) -> String {
+        fn push(&mut self, value: SqlParam) -> String {
             self.params.push(value);
             format!("?{}", self.params.len())
         }
@@ -194,16 +193,16 @@ pub mod query {
             Ok(match expr {
                 Expr::Identifier(name) => self.column(name)?,
                 Expr::Path(parts) => self.sibling_column(parts)?,
-                Expr::String(s) => self.push(SqlValue::Text(s.clone())),
-                Expr::Guid(g) => self.push(SqlValue::Text(g.clone())),
+                Expr::String(s) => self.push(SqlParam::Text(s.clone())),
+                Expr::Guid(g) => self.push(SqlParam::Text(g.clone())),
                 Expr::Number(n) => {
                     if n.fract() == 0.0 && n.abs() < i64::MAX as f64 {
-                        self.push(SqlValue::Integer(*n as i64))
+                        self.push(SqlParam::Int(*n as i64))
                     } else {
-                        self.push(SqlValue::Real(*n))
+                        self.push(SqlParam::Real(*n))
                     }
                 }
-                Expr::Bool(b) => self.push(SqlValue::Integer(i64::from(*b))),
+                Expr::Bool(b) => self.push(SqlParam::Bool(*b)),
                 Expr::Null => "NULL".to_string(),
                 Expr::FunctionCall { name, args } => self.function(name, args)?,
                 Expr::UnaryNot(_) | Expr::BinaryOp { .. } => self.predicate(expr)?,

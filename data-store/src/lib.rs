@@ -5,6 +5,7 @@ pub mod key;
 pub mod nav;
 pub mod query;
 pub mod schema;
+pub mod sql_value;
 
 #[cfg(any(test, feature = "conformance"))]
 pub mod conformance;
@@ -20,6 +21,7 @@ pub use schema::{
 #[cfg(any(test, feature = "debug-tools"))]
 pub use datastore::DataStoreDebugExt;
 pub use error::StoreError;
+pub use sql_value::{json_to_param, json_to_param_loose, param_to_json, SqlParam};
 pub use key::EntityKey;
 
 pub trait DraftDataStore: DataStore {

@@ -7,9 +7,11 @@ use std::sync::{Arc, Mutex};
 use data_store::schema::{
     Association, Cardinality, EntitySet, Schema, SchemaSource, ID_COLUMN, IS_ACTIVE_COLUMN,
 };
-use data_store::{DataRecord, DataStore, DraftDataStore, EntityKey, Navigation, StoreError};
+use data_store::{
+    json_to_param, param_to_json, DataRecord, DataStore, DraftDataStore, EntityKey, Navigation,
+    SqlParam, StoreError,
+};
 use odata::query::{Expr, ODataQuery};
-use rusqlite::types::Value as SqlValue;
 use rusqlite::{params_from_iter, Connection};
 use serde_json::{json, Map, Value};
 use std::backtrace::Backtrace;
@@ -19,7 +21,7 @@ use uuid::Uuid;
 use crate::ddl::{self, quote, DRAFT_ADMIN_COLUMN, DRAFT_ADMIN_TABLE, DRAFT_MESSAGES_COLUMN};
 use crate::sql::query::{order_by_clause, Translator};
 use crate::sql::{paging_clause, placeholders};
-use crate::value::{json_to_sql, sql_to_json};
+use crate::value::{from_sqlite, to_sqlite};
 
 macro_rules! sql_err {
     ($variant:ident, $e:expr) => {{
@@ -205,7 +207,7 @@ impl RelationalStore {
         let admin_id = self.store_draft_admin(record)?;
 
         let mut columns: Vec<String> = vec![];
-        let mut values: Vec<SqlValue> = vec![];
+        let mut values: Vec<SqlParam> = vec![];
         for column in set.columns() {
             let value = match column.name.as_str() {
                 ID_COLUMN => json!(record.id()),
@@ -213,19 +215,19 @@ impl RelationalStore {
                 other => record.get(other).unwrap_or(Value::Null),
             };
             columns.push(column.name.clone());
-            values.push(json_to_sql(&value, &column.data_type, &column.name)?);
+            values.push(json_to_param(&value, &column.data_type, &column.name)?);
         }
         if set.draft_enabled {
             columns.push(DRAFT_ADMIN_COLUMN.to_string());
             values.push(match admin_id {
-                Some(id) => SqlValue::Text(id),
-                None => SqlValue::Null,
+                Some(id) => SqlParam::Text(id),
+                None => SqlParam::Null,
             });
             columns.push(DRAFT_MESSAGES_COLUMN.to_string());
             values.push(if record.draft_messages().is_empty() {
-                SqlValue::Null
+                SqlParam::Null
             } else {
-                SqlValue::Text(json!(record.draft_messages()).to_string())
+                SqlParam::Text(json!(record.draft_messages()).to_string())
             });
         }
 
@@ -254,15 +256,15 @@ impl RelationalStore {
         self.conn
             .lock()
             .expect("connection lock")
-            .execute(&sql, params_from_iter(values))
+            .execute(&sql, params_from_iter(values.iter().map(to_sqlite)))
             .map_err(|e| sql_err!(Metadata, e))?;
         Ok(())
     }
 
-    fn key_params(set: &EntitySet, key: &EntityKey) -> Vec<SqlValue> {
-        let mut params = vec![SqlValue::Text(key.storage_id())];
+    fn key_params(set: &EntitySet, key: &EntityKey) -> Vec<SqlParam> {
+        let mut params = vec![SqlParam::Text(key.storage_id())];
         if set.draft_enabled {
-            params.push(SqlValue::Integer(i64::from(key.is_active_entity)));
+            params.push(SqlParam::Bool(key.is_active_entity));
         }
         params
     }
@@ -316,7 +318,7 @@ impl RelationalStore {
         &self,
         set: &EntitySet,
         query_text: String,
-        params: Vec<SqlValue>,
+        params: Vec<SqlParam>,
         order_by: Option<String>,
         paging: &str,
     ) -> Result<Vec<DataRecord>, StoreError> {
@@ -351,7 +353,7 @@ impl RelationalStore {
                 })
                 .collect();
             let mut rows = stmt
-                .query(params_from_iter(params))
+                .query(params_from_iter(params.iter().map(to_sqlite)))
                 .map_err(|e| sql_err!(Metadata, e))?;
             while let Some(row) = rows.next().map_err(|e| sql_err!(Metadata, e))? {
                 let mut map = Map::new();
@@ -361,7 +363,7 @@ impl RelationalStore {
                     let value = row
                         .get_ref(name.as_str())
                         .map_err(|e| sql_err!(Metadata, e))?;
-                    map.insert(name.clone(), sql_to_json(value, dt));
+                    map.insert(name.clone(), param_to_json(&from_sqlite(value), dt));
                 }
                 let mut admin_id = None;
                 let mut messages = None;
@@ -428,15 +430,15 @@ impl RelationalStore {
                 quote(&child.name),
                 quote(fk)
             );
-            let mut params = vec![SqlValue::Text(key.storage_id())];
+            let mut params = vec![SqlParam::Text(key.storage_id())];
             if child.draft_enabled {
                 sql.push_str(&format!(" AND {} = ?2", quote(IS_ACTIVE_COLUMN)));
-                params.push(SqlValue::Integer(i64::from(key.is_active_entity)));
+                params.push(SqlParam::Bool(key.is_active_entity));
             }
             let conn = self.conn.lock().expect("connection lock");
             let mut stmt = conn.prepare(&sql).map_err(|e| sql_err!(Metadata, e))?;
             let ids = stmt
-                .query_map(params_from_iter(params), |row| row.get::<_, String>(0))
+                .query_map(params_from_iter(params.iter().map(to_sqlite)), |row| row.get::<_, String>(0))
                 .map_err(|e| sql_err!(Metadata, e))?
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(|e| sql_err!(Metadata, e))?;
@@ -467,7 +469,7 @@ impl RelationalStore {
         self.conn
             .lock()
             .expect("connection lock")
-            .execute(&sql, params_from_iter(Self::key_params(set, key)))
+            .execute(&sql, params_from_iter(Self::key_params(set, key).iter().map(to_sqlite)))
             .map_err(|e| sql_err!(Metadata, e))?;
         Ok(())
     }
@@ -547,7 +549,7 @@ impl RelationalStore {
                 // konsistent zum Haupt-SELECT sind. Spalten werden ohne Alias
                 // referenziert -- das aeussere SELECT hat keinen `AS t`.
                 let raw = format!("{} IN ({})", quote(ID_COLUMN), placeholders(ids.len(), 0));
-                let params: Vec<SqlValue> = ids.iter().cloned().map(SqlValue::Text).collect();
+                let params: Vec<SqlParam> = ids.iter().cloned().map(SqlParam::Text).collect();
                 let sql = Translator::new(target)
                     .filter_raw(raw, params)
                     .shadow_drafts()
@@ -570,7 +572,7 @@ impl RelationalStore {
                 let fk = assoc.foreign_key.column();
                 let ids: Vec<String> = rows.iter().map(|r| r.id().to_string()).collect();
                 let raw = format!("{} IN ({})", quote(fk), placeholders(ids.len(), 0));
-                let params: Vec<SqlValue> = ids.iter().cloned().map(SqlValue::Text).collect();
+                let params: Vec<SqlParam> = ids.iter().cloned().map(SqlParam::Text).collect();
                 let sql = Translator::new(target)
                     .filter_raw(raw, params)
                     .shadow_drafts()

@@ -16,6 +16,7 @@
 //! * `$filter`/`$orderby` werden nach SQL uebersetzt; nicht Uebersetzbares
 //!   liefert einen Fehler statt stiller Abweichung.
 
+pub mod catalog;
 pub mod ddl;
 pub mod dialect;
 pub mod sql;

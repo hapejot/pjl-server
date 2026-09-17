@@ -18,6 +18,7 @@ use std::backtrace::Backtrace;
 use tracing::{debug, trace};
 use uuid::Uuid;
 
+use crate::catalog::SqliteCatalog;
 use crate::ddl::{self, quote, DRAFT_ADMIN_COLUMN, DRAFT_ADMIN_TABLE, DRAFT_MESSAGES_COLUMN};
 use crate::dialect::{Dialect, SQLITE};
 use crate::sql::query::{order_by_clause, Translator};
@@ -34,6 +35,38 @@ macro_rules! sql_err {
             $e
         ))
     }};
+}
+
+/// Setzt die von [`ddl::migration_plan`] geplanten Anweisungen ab.
+///
+/// Die Planung kennt keine Verbindung; hier wird sie ausgefuehrt.
+fn apply_schema(conn: &Connection, dialect: &dyn Dialect, schema: &Schema) -> Result<(), StoreError> {
+    let plan = ddl::migration_plan(&SqliteCatalog::new(conn), dialect, schema)?;
+    for statement in plan {
+        debug!("DDL: {statement}");
+        conn.execute_batch(&statement)
+            .map_err(|e| sql_err!(Conversion, e))?;
+    }
+    Ok(())
+}
+
+/// Liest die zuletzt angewandte Revision.
+fn applied_revision(conn: &Connection) -> Option<u64> {
+    conn.query_row(&ddl::revision_select_sql(), [], |row| row.get::<_, i64>(0))
+        .ok()
+        .map(|v| v as u64)
+}
+
+fn set_applied_revision(
+    conn: &Connection,
+    dialect: &dyn Dialect,
+    revision: u64,
+) -> Result<(), StoreError> {
+    conn.execute(&ddl::revision_delete_sql(), [])
+        .map_err(|e| sql_err!(Conversion, e))?;
+    conn.execute(&ddl::revision_insert_sql(dialect), [revision as i64])
+        .map_err(|e| sql_err!(Conversion, e))?;
+    Ok(())
 }
 
 pub struct RelationalStore {
@@ -75,8 +108,8 @@ impl RelationalStore {
         let schema = schema_source
             .schema()
             .map_err(|e| StoreError::Metadata(e.to_string()))?;
-        ddl::ensure_schema(&conn, &SQLITE, &schema)?;
-        ddl::set_applied_revision(&conn, schema_source.revision().0)?;
+        apply_schema(&conn, &SQLITE, &schema)?;
+        set_applied_revision(&conn, &SQLITE, schema_source.revision().0)?;
 
         Ok(Self {
             conn: Mutex::new(conn),
@@ -90,15 +123,15 @@ impl RelationalStore {
     pub fn refresh_schema(&self) -> Result<bool, StoreError> {
         let revision = self.schema_source.revision();
         let conn = self.conn.lock().expect("connection lock");
-        if ddl::applied_revision(&conn) == Some(revision.0) {
+        if applied_revision(&conn) == Some(revision.0) {
             return Ok(false);
         }
         let schema = self
             .schema_source
             .schema()
             .map_err(|e| StoreError::Metadata(e.to_string()))?;
-        ddl::ensure_schema(&conn, &SQLITE, &schema)?;
-        ddl::set_applied_revision(&conn, revision.0)?;
+        apply_schema(&conn, &SQLITE, &schema)?;
+        set_applied_revision(&conn, &SQLITE, revision.0)?;
         *self.schema.lock().expect("schema lock") = schema;
         Ok(true)
     }
@@ -106,7 +139,7 @@ impl RelationalStore {
     /// Spalten, die in der Datenbank stehen, aber nicht mehr im Schema.
     pub fn pending_destructive_changes(&self) -> Result<Vec<String>, StoreError> {
         let conn = self.conn.lock().expect("connection lock");
-        ddl::pending_destructive_changes(&conn, &SQLITE, &self.schema())
+        ddl::pending_destructive_changes(&SqliteCatalog::new(&conn), &SQLITE, &self.schema())
     }
 
     /// Der SQL-Dialekt dieses Stores.

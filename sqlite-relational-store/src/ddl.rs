@@ -1,8 +1,15 @@
-//! DDL-Erzeugung und Migration.
+//! DDL-Erzeugung und Migrationsplanung.
 //!
 //! Das Schema ist die Wahrheit; die Datenbank wird darauf gebracht. Additive
 //! Aenderungen laufen automatisch, destruktive brauchen einen expliziten
 //! Aufruf - ein Serverstart soll keine Spalten verlieren.
+//!
+//! Das Modul fuehrt nichts aus. Es erzeugt Anweisungen und ueberlaesst das
+//! Absetzen dem Store. Der Zustand der Datenbank kommt ueber
+//! [`crate::catalog::Catalog`] herein, die Schreibweise ueber
+//! [`crate::dialect::Dialect`]. Damit ist die Migration ohne laufende
+//! Datenbank pruefbar - und der Teil, der zwischen Backends gleich bleibt,
+//! ist der weitaus groessere.
 
 use std::collections::HashSet;
 
@@ -10,10 +17,10 @@ use data_store::schema::{
     Column, ColumnRole, DataType, EntitySet, Schema, ID_COLUMN, IS_ACTIVE_COLUMN,
 };
 use data_store::StoreError;
-use rusqlite::Connection;
+use tracing::info;
 
+use crate::catalog::Catalog;
 use crate::dialect::Dialect;
-use tracing::{debug, info};
 
 /// Spalte mit den Draft-Verwaltungsdaten (FK auf [`DRAFT_ADMIN_TABLE`]).
 pub const DRAFT_ADMIN_COLUMN: &str = "DraftAdministrativeData_ID";
@@ -23,22 +30,6 @@ pub const DRAFT_MESSAGES_COLUMN: &str = "DraftMessages";
 pub const DRAFT_ADMIN_TABLE: &str = "DraftAdministrativeData";
 /// Ablage der angewandten Schema-Revision.
 pub const REVISION_TABLE: &str = "_schema_revision";
-
-// pub fn sql_err(e: rusqlite::Error) -> StoreError {
-//     StoreError::Conversion(format!("DDL: {e}"))
-// }
-
-/// Erzeugt einen `StoreError`, der Modul und Zeilennummer der Fehlerstelle
-/// enthaelt.
-///
-/// Die Funktion `sql_err` kann das nicht - sie ortet sich immer an ihrer
-/// eigenen Definition, nicht am Aufruf. Der Makro bindet `module_path!()` und
-/// `line!()` an der Aufrufstelle ein. `store.rs` nutzt weiterhin `sql_err`.
-macro_rules! ddl_err {
-    ($variant:ident, $e:expr) => {
-        StoreError::$variant(format!("DDL ({}:{}): {}", module_path!(), line!(), $e))
-    };
-}
 
 /// Bezeichner sicher quoten.
 pub fn quote(ident: &str) -> String {
@@ -109,7 +100,7 @@ pub fn create_table_sql(
     if let Some(parent) = set.composition_parent() {
         let target = schema
             .set(&parent.target_set)
-            .map_err(|e| ddl_err!(Metadata, e))?;
+            .map_err(|e| StoreError::Metadata(format!("DDL: {e}")))?;
         let fk_column = parent.foreign_key.column();
         if set.draft_enabled && target.draft_enabled {
             parts.push(format!(
@@ -152,12 +143,24 @@ pub fn index_statements(set: &EntitySet) -> Vec<String> {
         .collect()
 }
 
+/// Nachtraeglich ergaenzte Spalten sind immer NULL-bar: fuer NOT NULL
+/// braeuchte es einen Default, und den kann das Schema nicht nachliefern,
+/// ohne ueber die bestehenden Zeilen zu entscheiden.
+pub fn add_column_sql(table: &str, column: &str, column_type: &str) -> String {
+    format!(
+        "ALTER TABLE {} ADD COLUMN {} {}",
+        quote(table),
+        quote(column),
+        column_type
+    )
+}
+
 /// DDL der Draft-Verwaltungstabelle.
 ///
 /// Sie steht nicht im Schema, weil sie kein Entity-Set ist - der Typaufbau
 /// muss trotzdem ueber den Dialekt laufen: `DraftIsCreatedByMe` ist ein
 /// Wahrheitswert, und dessen Speicherung unterscheidet sich.
-fn draft_admin_ddl(dialect: &dyn Dialect) -> String {
+pub fn draft_admin_ddl(dialect: &dyn Dialect) -> String {
     let text = dialect.column_type(&DataType::String { max_length: None });
     format!(
         "CREATE TABLE IF NOT EXISTS {table} (\n  \
@@ -176,56 +179,37 @@ fn draft_admin_ddl(dialect: &dyn Dialect) -> String {
     )
 }
 
-/// Bereits vorhandene Spalten einer Tabelle.
-fn existing_columns(conn: &Connection, table: &str) -> Result<HashSet<String>, StoreError> {
-    let mut stmt = conn
-        .prepare(&format!("PRAGMA table_info({})", quote(table)))
-        .map_err(|e| ddl_err!(Conversion, e))?;
-    let rows = stmt
-        .query_map([], |row| row.get::<_, String>(1))
-        .map_err(|e| ddl_err!(Conversion, e))?;
-    let mut columns = HashSet::new();
-    for row in rows {
-        columns.insert(row.map_err(|e| ddl_err!(Conversion, e))?);
-    }
-    Ok(columns)
-}
-
-fn table_exists(conn: &Connection, table: &str) -> Result<bool, StoreError> {
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-            [table],
-            |row| row.get(0),
-        )
-        .map_err(|e| ddl_err!(Conversion, e))?;
-    Ok(count > 0)
-}
-
-/// Bringt die Datenbank auf den Stand des Schemas.
-///
-/// Additiv: fehlende Tabellen anlegen, fehlende Spalten per
-/// `ALTER TABLE ADD COLUMN` ergaenzen. Nachtraeglich ergaenzte Spalten sind
-/// immer NULL-bar, weil SQLite fuer NOT NULL einen Default verlangt.
-/// Typaenderungen und Spalten-Drops werden **nicht** automatisch ausgefuehrt -
-/// sie brauchen einen Tabellen-Rebuild und damit eine bewusste Entscheidung.
-pub fn ensure_schema(
-    conn: &Connection,
-    dialect: &dyn Dialect,
-    schema: &Schema,
-) -> Result<(), StoreError> {
-    conn.execute_batch(&draft_admin_ddl(dialect))
-        .map_err(|e| ddl_err!(Conversion, e))?;
-    conn.execute_batch(&format!(
+/// DDL der Revisionstabelle.
+pub fn revision_table_ddl(dialect: &dyn Dialect) -> String {
+    format!(
         "CREATE TABLE IF NOT EXISTS {} (revision {} NOT NULL)",
         quote(REVISION_TABLE),
         dialect.column_type(&DataType::Int64)
-    ))
-    .map_err(|e| ddl_err!(Conversion, e))?;
+    )
+}
 
-    for set in schema.creation_order().map_err(|e| ddl_err!(Metadata, e))? {
-        if table_exists(conn, &set.name)? {
-            let existing = existing_columns(conn, &set.name)?;
+/// Anweisungen, die die Datenbank auf den Stand des Schemas bringen.
+///
+/// Additiv: fehlende Tabellen anlegen, fehlende Spalten ergaenzen.
+/// Typaenderungen und Spalten-Drops sind **nicht** enthalten - sie brauchen
+/// einen Tabellen-Rebuild und damit eine bewusste Entscheidung. Was dabei
+/// uebrig bleibt, meldet [`pending_destructive_changes`].
+///
+/// Die Reihenfolge ist bindend: Kompositionen sind Fremdschluessel, also muss
+/// der Parent vor dem Kind stehen.
+pub fn migration_plan(
+    catalog: &dyn Catalog,
+    dialect: &dyn Dialect,
+    schema: &Schema,
+) -> Result<Vec<String>, StoreError> {
+    let mut plan = vec![draft_admin_ddl(dialect), revision_table_ddl(dialect)];
+
+    for set in schema
+        .creation_order()
+        .map_err(|e| StoreError::Metadata(format!("DDL: {e}")))?
+    {
+        if catalog.table_exists(&set.name)? {
+            let existing = catalog.existing_columns(&set.name)?;
             let mut wanted: Vec<(String, String)> = set
                 .columns()
                 .map(|c| (c.name.clone(), dialect.column_type(&c.data_type).to_string()))
@@ -236,41 +220,29 @@ pub fn ensure_schema(
                     continue;
                 }
                 info!("Migration: {}.{} wird ergaenzt", set.name, name);
-                conn.execute_batch(&format!(
-                    "ALTER TABLE {} ADD COLUMN {} {}",
-                    quote(&set.name),
-                    quote(&name),
-                    ty
-                ))
-                .map_err(|e| ddl_err!(Conversion, e))?;
+                plan.push(add_column_sql(&set.name, &name, &ty));
             }
         } else {
-            let ddl = create_table_sql(dialect, schema, set)?;
-            debug!("DDL: {ddl}");
-            conn.execute_batch(&ddl)
-                .map_err(|e| ddl_err!(Conversion, e))?;
+            plan.push(create_table_sql(dialect, schema, set)?);
         }
 
-        for stmt in index_statements(set) {
-            conn.execute_batch(&stmt)
-                .map_err(|e| ddl_err!(Conversion, e))?;
-        }
+        plan.extend(index_statements(set));
     }
-    Ok(())
+    Ok(plan)
 }
 
-/// Meldet Abweichungen, die `ensure_schema` bewusst nicht selbst repariert.
+/// Meldet Abweichungen, die [`migration_plan`] bewusst nicht behebt.
 pub fn pending_destructive_changes(
-    conn: &Connection,
+    catalog: &dyn Catalog,
     dialect: &dyn Dialect,
     schema: &Schema,
 ) -> Result<Vec<String>, StoreError> {
     let mut findings = vec![];
     for set in schema.sets() {
-        if !table_exists(conn, &set.name)? {
+        if !catalog.table_exists(&set.name)? {
             continue;
         }
-        let existing = existing_columns(conn, &set.name)?;
+        let existing = catalog.existing_columns(&set.name)?;
         let mut wanted: HashSet<String> = set.columns().map(|c| c.name.clone()).collect();
         wanted.extend(internal_columns(dialect, set).into_iter().map(|(n, _)| n));
         for column in existing.difference(&wanted) {
@@ -284,27 +256,97 @@ pub fn pending_destructive_changes(
     Ok(findings)
 }
 
-/// Liest die zuletzt angewandte Revision.
-pub fn applied_revision(conn: &Connection) -> Option<u64> {
-    conn.query_row(
-        &format!("SELECT revision FROM {} LIMIT 1", quote(REVISION_TABLE)),
-        [],
-        |row| row.get::<_, i64>(0),
-    )
-    .ok()
-    .map(|v| v as u64)
+// -- Anweisungen rund um die Revision ----------------------------------------
+
+pub fn revision_select_sql() -> String {
+    format!("SELECT revision FROM {} LIMIT 1", quote(REVISION_TABLE))
 }
 
-pub fn set_applied_revision(conn: &Connection, revision: u64) -> Result<(), StoreError> {
-    conn.execute(&format!("DELETE FROM {}", quote(REVISION_TABLE)), [])
-        .map_err(|e| ddl_err!(Conversion, e))?;
-    conn.execute(
-        &format!(
-            "INSERT INTO {} (revision) VALUES (?1)",
-            quote(REVISION_TABLE)
-        ),
-        [revision as i64],
+pub fn revision_delete_sql() -> String {
+    format!("DELETE FROM {}", quote(REVISION_TABLE))
+}
+
+pub fn revision_insert_sql(dialect: &dyn Dialect) -> String {
+    format!(
+        "INSERT INTO {} (revision) VALUES ({})",
+        quote(REVISION_TABLE),
+        dialect.placeholder(1)
     )
-    .map_err(|e| ddl_err!(Conversion, e))?;
-    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalog::tests::FakeCatalog;
+    use crate::dialect::SQLITE;
+
+    fn schema() -> Schema {
+        data_store::conformance::schema()
+    }
+
+    /// Auf einer leeren Datenbank entsteht fuer jedes Set ein CREATE TABLE -
+    /// und kein einziges ALTER.
+    #[test]
+    fn empty_database_is_created_from_scratch() {
+        let plan = migration_plan(&FakeCatalog::default(), &SQLITE, &schema()).unwrap();
+        assert!(plan.iter().any(|s| s.contains(r#"CREATE TABLE IF NOT EXISTS "OrderSet""#)));
+        assert!(!plan.iter().any(|s| s.starts_with("ALTER TABLE")));
+    }
+
+    /// Der Parent muss vor dem Kind stehen, sonst greift der Fremdschluessel
+    /// ins Leere.
+    #[test]
+    fn parents_are_created_before_their_children() {
+        let plan = migration_plan(&FakeCatalog::default(), &SQLITE, &schema()).unwrap();
+        let position = |needle: &str| {
+            plan.iter()
+                .position(|s| s.contains(&format!("CREATE TABLE IF NOT EXISTS \"{needle}\"")))
+                .unwrap_or_else(|| panic!("{needle} fehlt im Plan"))
+        };
+        assert!(position("OrderSet") < position("ItemSet"));
+    }
+
+    /// Eine bestehende Tabelle wird ergaenzt, nicht neu angelegt.
+    #[test]
+    fn missing_columns_are_added_to_an_existing_table() {
+        let catalog = FakeCatalog::default().with_table("OrderSet", &["ID", "IsActiveEntity"]);
+        let plan = migration_plan(&catalog, &SQLITE, &schema()).unwrap();
+        assert!(!plan
+            .iter()
+            .any(|s| s.contains(r#"CREATE TABLE IF NOT EXISTS "OrderSet""#)));
+        assert!(plan
+            .iter()
+            .any(|s| s == r#"ALTER TABLE "OrderSet" ADD COLUMN "Amount" INTEGER"#));
+        // Vorhandene Spalten bleiben unangetastet.
+        assert!(!plan.iter().any(|s| s.contains(r#"ADD COLUMN "ID""#)));
+    }
+
+    /// Spalten, die nur noch in der Datenbank stehen, werden gemeldet - aber
+    /// nicht angefasst.
+    #[test]
+    fn dropped_columns_are_reported_not_removed() {
+        let catalog = FakeCatalog::default().with_table("OrderSet", &["ID", "Vergessen"]);
+        let plan = migration_plan(&catalog, &SQLITE, &schema()).unwrap();
+        assert!(!plan.iter().any(|s| s.contains("DROP")));
+
+        let findings = pending_destructive_changes(&catalog, &SQLITE, &schema()).unwrap();
+        assert_eq!(
+            findings,
+            vec!["OrderSet.Vergessen existiert in der Datenbank, aber nicht im Schema"]
+        );
+    }
+
+    /// Kompositionen bekommen einen Fremdschluessel inklusive
+    /// IsActiveEntity; lose Assoziationen bekommen keinen.
+    #[test]
+    fn only_compositions_get_a_foreign_key() {
+        let schema = schema();
+        let items = create_table_sql(&SQLITE, &schema, schema.set("ItemSet").unwrap()).unwrap();
+        assert!(
+            items.contains(r#"FOREIGN KEY ("Order_ID", "IsActiveEntity")"#),
+            "{items}"
+        );
+        let orders = create_table_sql(&SQLITE, &schema, schema.set("OrderSet").unwrap()).unwrap();
+        assert!(!orders.contains("Customer_ID\") REFERENCES"), "{orders}");
+    }
 }

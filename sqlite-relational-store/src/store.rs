@@ -17,10 +17,9 @@ use tracing::{debug, trace};
 use uuid::Uuid;
 
 use crate::ddl::{self, quote, DRAFT_ADMIN_COLUMN, DRAFT_ADMIN_TABLE, DRAFT_MESSAGES_COLUMN};
-use crate::sql::{order_by_clause, paging_clause, placeholders, query::Translator};
+use crate::sql::query::{order_by_clause, Translator};
+use crate::sql::{paging_clause, placeholders};
 use crate::value::{json_to_sql, sql_to_json};
-
-const ALIAS: &str = "t";
 
 macro_rules! sql_err {
     ($variant:ident, $e:expr) => {{
@@ -151,59 +150,6 @@ impl RelationalStore {
 
     // -- SELECT-Bausteine ----------------------------------------------------
 
-    /// Projektionsliste inklusive der abgeleiteten Draft-Flags.
-    ///
-    /// `HasActiveEntity`/`HasDraftEntity` werden **berechnet**, nicht
-    /// gespeichert: im relationalen Modell sind sie reine Ableitungen aus der
-    /// Existenz des Zwillings und koennen so nicht veralten.
-    fn projection(&self, set: &EntitySet) -> String {
-        let mut parts: Vec<String> = set
-            .columns()
-            .map(|c| format!("{ALIAS}.{}", quote(&c.name)))
-            .collect();
-
-        if set.draft_enabled {
-            let table = quote(&set.name);
-            parts.push(format!(
-                "({ALIAS}.{is_active} = 0 AND EXISTS (SELECT 1 FROM {table} s \
-                 WHERE s.{id} = {ALIAS}.{id} AND s.{is_active} = 1)) AS {has_active}",
-                is_active = quote(IS_ACTIVE_COLUMN),
-                id = quote(ID_COLUMN),
-                has_active = quote("HasActiveEntity"),
-            ));
-            parts.push(format!(
-                "({ALIAS}.{is_active} = 1 AND EXISTS (SELECT 1 FROM {table} s \
-                 WHERE s.{id} = {ALIAS}.{id} AND s.{is_active} = 0)) AS {has_draft}",
-                is_active = quote(IS_ACTIVE_COLUMN),
-                id = quote(ID_COLUMN),
-                has_draft = quote("HasDraftEntity"),
-            ));
-            parts.push(format!("{ALIAS}.{}", quote(DRAFT_ADMIN_COLUMN)));
-            parts.push(format!("{ALIAS}.{}", quote(DRAFT_MESSAGES_COLUMN)));
-        }
-        parts.join(", ")
-    }
-
-    /// Drafts verdecken ihren aktiven Zwilling.
-    ///
-    /// Bezugsspalten der aeusseren Zeile werden bare, ohne Tabellenalias,
-    /// referenziert. Damit greift die Klausel sowohl in der Basisabfrage als
-    /// auch als `WHERE`-Fragment am Translator-Envelope
-    /// (`SELECT * FROM (...)`, ohne `AS t`). Die innere Sub-Abfrage nutzt
-    /// den expliziten Alias `d`, damit die Korrelation eindeutig bleibt.
-    fn shadow_predicate(set: &EntitySet) -> Option<String> {
-        if !set.draft_enabled {
-            return None;
-        }
-        Some(format!(
-            "({is_active} = 0 OR NOT EXISTS (SELECT 1 FROM {table} d \
-             WHERE d.{id} = {id} AND d.{is_active} = 0))",
-            table = quote(&set.name),
-            id = quote(ID_COLUMN),
-            is_active = quote(IS_ACTIVE_COLUMN),
-        ))
-    }
-
     fn load_draft_admin(&self, draft_uuid: &str) -> Result<Option<Value>, StoreError> {
         let conn = self.conn.lock().expect("connection lock");
         let mut stmt = conn
@@ -313,18 +259,6 @@ impl RelationalStore {
         Ok(())
     }
 
-    fn key_predicate(set: &EntitySet, alias: &str) -> String {
-        if set.draft_enabled {
-            format!(
-                "{alias}.{} = ?1 AND {alias}.{} = ?2",
-                quote(ID_COLUMN),
-                quote(IS_ACTIVE_COLUMN)
-            )
-        } else {
-            format!("{alias}.{} = ?1", quote(ID_COLUMN))
-        }
-    }
-
     fn key_params(set: &EntitySet, key: &EntityKey) -> Vec<SqlValue> {
         let mut params = vec![SqlValue::Text(key.storage_id())];
         if set.draft_enabled {
@@ -335,15 +269,15 @@ impl RelationalStore {
 
     /// Einzelsatz ueber den Primaerschluessel.
     fn load_one(&self, set: &EntitySet, key: &EntityKey) -> Result<DataRecord, StoreError> {
-        let mut t = Translator::new(set, ALIAS);
-        t = t
-            .filter(&Expr::equals_guid(key.id.to_string(), "ID"))
-            .filter(&Expr::equals_value(
+        let mut t = Translator::new(set).filter(&Expr::equals_guid(key.id.to_string(), "ID"));
+        if set.draft_enabled {
+            t = t.filter(&Expr::equals_value(
                 &json!(key.is_active_entity),
                 "IsActiveEntity",
             ));
+        }
         let q = t.build()?;
-        let records = self.query_records(set, Some(q.text), q.params, None, "")?;
+        let records = self.query_records(set, q.text, q.params, None, "")?;
         records.into_iter().next().ok_or_else(|| {
             StoreError::not_found(format!(
                 "{}/{}/{}",
@@ -381,12 +315,12 @@ impl RelationalStore {
     fn query_records(
         &self,
         set: &EntitySet,
-        query_text: Option<String>,
+        query_text: String,
         params: Vec<SqlValue>,
         order_by: Option<String>,
         paging: &str,
     ) -> Result<Vec<DataRecord>, StoreError> {
-        let mut sql = query_text.unwrap();
+        let mut sql = query_text;
         if let Some(order_by) = order_by {
             sql.push_str(&format!(" ORDER BY {order_by}"));
         }
@@ -612,19 +546,13 @@ impl RelationalStore {
                 // damit die Draft-Wrapper (Sibling-Join, HasActiveEntity, ...)
                 // konsistent zum Haupt-SELECT sind. Spalten werden ohne Alias
                 // referenziert -- das aeussere SELECT hat keinen `AS t`.
-                let mut raw = format!(
-                    "{} IN ({})",
-                    quote(ID_COLUMN),
-                    placeholders(ids.len(), 0)
-                );
-                if let Some(shadow) = Self::shadow_predicate(target) {
-                    raw = format!("{raw} AND {shadow}");
-                }
+                let raw = format!("{} IN ({})", quote(ID_COLUMN), placeholders(ids.len(), 0));
                 let params: Vec<SqlValue> = ids.iter().cloned().map(SqlValue::Text).collect();
-                let sql = Translator::new(target, ALIAS)
+                let sql = Translator::new(target)
                     .filter_raw(raw, params)
+                    .shadow_drafts()
                     .build()?;
-                let found = self.query_records(target, Some(sql.text), sql.params, None, "")?;
+                let found = self.query_records(target, sql.text, sql.params, None, "")?;
                 let by_id: HashMap<String, Value> = found
                     .iter()
                     .map(|r| (r.id().to_string(), r.core_json()))
@@ -641,16 +569,13 @@ impl RelationalStore {
             Cardinality::ToMany => {
                 let fk = assoc.foreign_key.column();
                 let ids: Vec<String> = rows.iter().map(|r| r.id().to_string()).collect();
-                let mut raw =
-                    format!("{} IN ({})", quote(fk), placeholders(ids.len(), 0));
-                if let Some(shadow) = Self::shadow_predicate(target) {
-                    raw = format!("{raw} AND {shadow}");
-                }
+                let raw = format!("{} IN ({})", quote(fk), placeholders(ids.len(), 0));
                 let params: Vec<SqlValue> = ids.iter().cloned().map(SqlValue::Text).collect();
-                let sql = Translator::new(target, ALIAS)
+                let sql = Translator::new(target)
                     .filter_raw(raw, params)
+                    .shadow_drafts()
                     .build()?;
-                let found = self.query_records(target, Some(sql.text), sql.params, None, "")?;
+                let found = self.query_records(target, sql.text, sql.params, None, "")?;
 
                 let mut grouped: HashMap<String, Vec<Value>> = HashMap::new();
                 for record in found.iter() {
@@ -692,27 +617,26 @@ impl DataStore for RelationalStore {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
 
-        // let mut clauses: Vec<String> = Self::shadow_predicate(set).into_iter().collect();
-        let mut params: Vec<SqlValue> = vec![];
-        let mut sql = Translator::new(set, ALIAS);
+        // Ein Draft verdeckt seinen aktiven Zwilling. Die Regel haengt am
+        // Translator, nicht mehr an einer korrelierten Unterabfrage: der
+        // Sibling-Join hat den Zustand des Zwillings bereits in der Zeile.
+        // Sie ist wortgleich mit dem Draft-Filter, den Fiori Elements selbst
+        // schickt, und damit idempotent.
+        let mut sql = Translator::new(set).shadow_drafts();
         for s in query.select.iter() {
             sql = sql.select(s);
         }
         if let Some(filter) = &query.filter {
             sql = sql.filter(filter);
-            // let sql = Translator::new(set, ALIAS).filter(filter).build()?;
-            // Filterparameter kommen nach den (parameterlosen) Shadow-Klauseln.
         }
         let sql = sql.build()?;
         debug!("build returns: {}", &sql.text);
-        // clauses.push(sql.text);
-        params.extend(sql.params);
 
         let mut records = self.query_records(
             set,
-            Some(sql.text),
-            params,
-            order_by_clause(set, ALIAS, query)?,
+            sql.text,
+            sql.params,
+            order_by_clause(set, query)?,
             &paging_clause(query),
         )?;
 

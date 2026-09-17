@@ -5,6 +5,7 @@ edition = "2021"
 description = "Relationale SQLite-Implementierung des DataStore-Interfaces: eine Tabelle je Entity-Set, echte Spalten, Fremdschluessel und SQL-Uebersetzung von $filter/$orderby."
 
 [dependencies]
+async-trait = "0.1"
 anyhow = "1.0.104"
 data-store = { version = "0.1.0", path = "../data-store" }
 relational-core = { version = "0.1.0", path = "../relational-core" }
@@ -16,6 +17,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 uuid = { version = "1.24.0", features = ["serde", "v4"] }
 
 [dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 anyhow = "1.0.104"
 data-store = { version = "0.1.0", path = "../data-store", features = ["conformance"] }
 tempfile = "=3.10.1"

@@ -89,9 +89,9 @@ impl AppState {
     /// Objekte. Bewusst getrennt von [`AppState::reload`] - der Designer soll
     /// in seiner eigenen Oberflaeche nur das Metamodell zeigen, nicht die
     /// Objekte, die er gerade modelliert.
-    pub fn designed_dictionary(&self) -> DataDictionary {
+    pub async fn designed_dictionary(&self) -> DataDictionary {
         let mut ddic = DataDictionary::new();
-        ddic_loader::load_ddic_from_store(&mut ddic, self.store.as_ref());
+        ddic_loader::load_ddic_from_store(&mut ddic, self.store.as_ref()).await;
         ddic
     }
 }

@@ -20,14 +20,14 @@ struct LoadedEntity {
     package: String,
 }
 
-pub fn load_ddic_from_store(ddic: &mut DataDictionary, store: &dyn DataStore) {
-    let packages = load_packages(ddic, store);
-    let entities = load_entities(ddic, store, &packages);
+pub async fn load_ddic_from_store(ddic: &mut DataDictionary, store: &dyn DataStore) {
+    let packages = load_packages(ddic, store).await;
+    let entities = load_entities(ddic, store, &packages).await;
     let known: HashSet<String> = ddic.entity_names().map(str::to_string).collect();
 
-    load_fields(ddic, store, &entities);
-    load_relationships(ddic, store, &entities, &known);
-    load_apps(ddic, store, &entities, &packages, &known);
+    load_fields(ddic, store, &entities).await;
+    load_relationships(ddic, store, &entities, &known).await;
+    load_apps(ddic, store, &entities, &packages, &known).await;
 }
 
 /// Alle Navigationen, die der Store braucht um die Abhängigkeiten zwischen den Records zu kennen.
@@ -47,9 +47,9 @@ pub fn navigations_from_ddic(ddic: &DataDictionary) -> Vec<Navigation> {
     }
 }
 
-fn load_packages(ddic: &mut DataDictionary, store: &dyn DataStore) -> HashMap<String, String> {
+async fn load_packages(ddic: &mut DataDictionary, store: &dyn DataStore) -> HashMap<String, String> {
     let mut by_id = HashMap::new();
-    for record in read_set(store, "PackageSet") {
+    for record in read_set(store, "PackageSet").await {
         let Some(name) = text(&record, "name") else {
             warn!("package record {} without name - skipped", record.id());
             continue;
@@ -60,13 +60,13 @@ fn load_packages(ddic: &mut DataDictionary, store: &dyn DataStore) -> HashMap<St
     by_id
 }
 
-fn load_entities(
+async fn load_entities(
     ddic: &mut DataDictionary,
     store: &dyn DataStore,
     packages: &HashMap<String, String>,
 ) -> HashMap<String, LoadedEntity> {
     let mut by_id = HashMap::new();
-    for record in read_set(store, "EntitySet") {
+    for record in read_set(store, "EntitySet").await {
         let Some(name) = text(&record, "name") else {
             warn!("entity record {} without name - skipped", record.id());
             continue;
@@ -82,12 +82,12 @@ fn load_entities(
     by_id
 }
 
-fn load_fields(
+async fn load_fields(
     ddic: &mut DataDictionary,
     store: &dyn DataStore,
     entities: &HashMap<String, LoadedEntity>,
 ) {
-    for record in read_set(store, "FieldSet") {
+    for record in read_set(store, "FieldSet").await {
         let Some(entity) = text(&record, "entity_ID").and_then(|id| entities.get(&id)) else {
             warn!(
                 "field record {} without known entity - skipped",
@@ -104,13 +104,13 @@ fn load_fields(
     }
 }
 
-fn load_relationships(
+async fn load_relationships(
     ddic: &mut DataDictionary,
     store: &dyn DataStore,
     entities: &HashMap<String, LoadedEntity>,
     known: &HashSet<String>,
 ) {
-    for record in read_set(store, "RelationSet") {
+    for record in read_set(store, "RelationSet").await {
         let source = entity_side(&record, "one_ID", "source", entities, known);
         let target = entity_side(&record, "many_ID", "target", entities, known);
         let (Some(source), Some(target)) = (source, target) else {
@@ -161,14 +161,14 @@ fn load_relationships(
     }
 }
 
-fn load_apps(
+async fn load_apps(
     ddic: &mut DataDictionary,
     store: &dyn DataStore,
     entities: &HashMap<String, LoadedEntity>,
     packages: &HashMap<String, String>,
     known: &HashSet<String>,
 ) {
-    for record in read_set(store, "AppSet") {
+    for record in read_set(store, "AppSet").await {
         let Some(name) = text(&record, "name") else {
             warn!("app record {} without name - skipped", record.id());
             continue;
@@ -195,8 +195,8 @@ fn load_apps(
     }
 }
 
-fn read_set(store: &dyn DataStore, set: &str) -> Vec<DataRecord> {
-    match store.get_collection(set, &ODataQuery::new()) {
+async fn read_set(store: &dyn DataStore, set: &str) -> Vec<DataRecord> {
+    match store.get_collection(set, &ODataQuery::new()).await {
         Ok(records) => {
             info!("loaded {} records from {set}", records.len());
             records
@@ -298,28 +298,28 @@ mod tests {
     const ORDER_ID: &str = "00000000-0000-0000-0000-000000000001";
     const ITEM_ID: &str = "00000000-0000-0000-0000-000000000002";
 
-    fn store_with_metadata() -> (TempDir, YamlStore) {
+    async fn store_with_metadata() -> (TempDir, YamlStore) {
         let dir = TempDir::new().unwrap();
         let store = YamlStore::open(dir.path()).unwrap();
         store
             .create_entity(
                 "PackageSet",
                 &json!({ "ID": PACKAGE_ID, "IsActiveEntity": true, "name": "sales" }),
-            )
+            ).await
             .unwrap();
         store
             .create_entity(
                 "EntitySet",
                 &json!({ "ID": ORDER_ID, "IsActiveEntity": true,
                          "name": "Order", "plural": "Orders", "package_ID": PACKAGE_ID }),
-            )
+            ).await
             .unwrap();
         store
             .create_entity(
                 "EntitySet",
                 &json!({ "ID": ITEM_ID, "IsActiveEntity": true,
                          "name": "Item", "plural": "Items", "package_ID": PACKAGE_ID }),
-            )
+            ).await
             .unwrap();
         store
             .create_entity(
@@ -327,22 +327,22 @@ mod tests {
                 &json!({ "IsActiveEntity": true, "entity_ID": ORDER_ID,
                          "name": "status", "label": "Status", "type": "Edm.String",
                          "max_length": 20, "immutable": true }),
-            )
+            ).await
             .unwrap();
         (dir, store)
     }
 
-    fn loaded(store: &YamlStore) -> DataDictionary {
+    async fn loaded(store: &YamlStore) -> DataDictionary {
         let mut ddic = DataDictionary::new();
-        load_ddic_from_store(&mut ddic, store);
+        load_ddic_from_store(&mut ddic, store).await;
         ddic.activate();
         ddic
     }
 
-    #[test]
-    fn loads_packages_entities_and_fields() {
-        let (_dir, store) = store_with_metadata();
-        let ddic = loaded(&store);
+    #[tokio::test]
+    async fn loads_packages_entities_and_fields() {
+        let (_dir, store) = store_with_metadata().await;
+        let ddic = loaded(&store).await;
 
         let order = ddic.active_entity_by_setname("OrderSet").unwrap();
         assert_eq!(order.name(), "Order");
@@ -357,18 +357,18 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn derives_lookups_from_a_stored_relation() {
-        let (_dir, store) = store_with_metadata();
+    #[tokio::test]
+    async fn derives_lookups_from_a_stored_relation() {
+        let (_dir, store) = store_with_metadata().await;
         store
             .create_entity(
                 "RelationSet",
                 &json!({ "IsActiveEntity": true, "name": "order_items",
                          "one_ID": ORDER_ID, "source_field": "_Items",
                          "many_ID": ITEM_ID, "target_field": "order" }),
-            )
+            ).await
             .unwrap();
-        let ddic = loaded(&store);
+        let ddic = loaded(&store).await;
 
         let order = ddic.active_entity_by_setname("OrderSet").unwrap();
         let items = order.fields().find(|f| f.name() == "_Items").unwrap();
@@ -395,48 +395,48 @@ mod tests {
         assert!(!navigation.single);
     }
 
-    #[test]
-    fn resolves_relation_sides_by_entity_name() {
-        let (_dir, store) = store_with_metadata();
+    #[tokio::test]
+    async fn resolves_relation_sides_by_entity_name() {
+        let (_dir, store) = store_with_metadata().await;
         store
             .create_entity(
                 "RelationSet",
                 &json!({ "IsActiveEntity": true, "name": "by_name",
                          "source": "Order", "source_field": "_Positions",
                          "target": "Item", "target_field": "head" }),
-            )
+            ).await
             .unwrap();
         store
             .create_entity(
                 "RelationSet",
                 &json!({ "IsActiveEntity": true, "name": "junk",
                          "source": "S", "target": "T" }),
-            )
+            ).await
             .unwrap();
-        let ddic = loaded(&store);
+        let ddic = loaded(&store).await;
 
         assert!(ddic.relationships().any(|r| r.name() == "by_name"));
         assert!(!ddic.relationships().any(|r| r.name() == "junk"));
     }
 
-    #[test]
-    fn loads_apps_and_skips_unknown_main_entity() {
-        let (_dir, store) = store_with_metadata();
+    #[tokio::test]
+    async fn loads_apps_and_skips_unknown_main_entity() {
+        let (_dir, store) = store_with_metadata().await;
         store
             .create_entity(
                 "AppSet",
                 &json!({ "IsActiveEntity": true, "name": "orders", "title": "Orders",
                          "subtitle": "Sales orders", "icon": "sap-icon://cart",
                          "main_entity_ID": ORDER_ID, "package_ID": PACKAGE_ID }),
-            )
+            ).await
             .unwrap();
         store
             .create_entity(
                 "AppSet",
                 &json!({ "IsActiveEntity": true, "name": "broken", "main_entity": "Nope" }),
-            )
+            ).await
             .unwrap();
-        let ddic = loaded(&store);
+        let ddic = loaded(&store).await;
 
         let app = ddic.apps().find(|a| a.name() == "orders").unwrap();
         assert_eq!(app.main_entity(&ddic).name(), "Order");

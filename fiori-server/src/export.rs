@@ -54,8 +54,8 @@ pub struct ExportReport {
 }
 
 /// Modell aus dem Store lesen, filtern und als Dateipaar ablegen.
-pub fn export_dictionary(state: &AppState) -> Result<ExportReport, ExportError> {
-    let designed = state.designed_dictionary();
+pub async fn export_dictionary(state: &AppState) -> Result<ExportReport, ExportError> {
+    let designed = state.designed_dictionary().await;
     let (exported, skipped) = if state.config.export_metamodel {
         (designed, 0)
     } else {

@@ -5,6 +5,7 @@ edition = "2021"
 description = "Prototyp eines OData-DataStore-Backends, das jeden Record als einzelne YAML-Datei ablegt (Vorstufe zu einer Postgres-Implementierung)."
 
 [dependencies]
+async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = {git = "https://github.com/hapejot/serde-yaml.git"}
@@ -19,6 +20,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 thiserror = "2.0.20"
 
 [dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 data-store = { version = "0.1.0", path = "../data-store", features = ["conformance"] }
 tempfile = "=3.10.1"
 

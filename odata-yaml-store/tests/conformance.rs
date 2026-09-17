@@ -12,26 +12,28 @@ struct YamlHarness {
     store: YamlStore,
 }
 
-fn open(path: &std::path::Path) -> YamlStore {
+async fn open(path: &std::path::Path) -> YamlStore {
     let store = YamlStore::open(path).expect("store");
     store.set_navigations(conformance::schema().to_navigations());
     store
 }
 
+#[async_trait::async_trait]
+#[async_trait::async_trait]
 impl Harness for YamlHarness {
     type Store = YamlStore;
 
-    fn create() -> Self {
+    async fn create() -> Self {
         let dir = TempDir::new().expect("tempdir");
-        let store = open(dir.path());
+        let store = open(dir.path()).await;
         Self { dir, store }
     }
 
-    fn store(&self) -> &Self::Store {
+    async fn store(&self) -> &Self::Store {
         &self.store
     }
 
-    fn count_state(&self, set_name: &str, is_active: bool) -> usize {
+    async fn count_state(&self, set_name: &str, is_active: bool) -> usize {
         let path = self
             .dir
             .path()
@@ -47,8 +49,8 @@ impl Harness for YamlHarness {
             .unwrap_or(0)
     }
 
-    fn reopen(&self) -> Option<Self::Store> {
-        Some(open(self.dir.path()))
+    async fn reopen(&self) -> Option<Self::Store> {
+        Some(open(self.dir.path()).await)
     }
 }
 

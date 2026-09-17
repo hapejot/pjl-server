@@ -8,7 +8,8 @@ use tracing::info;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use uuid::Uuid;
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
         .with(fmt::layer().with_ansi(false).with_line_number(true))
         .with(EnvFilter::from_default_env())
@@ -21,46 +22,46 @@ fn main() -> anyhow::Result<()> {
         }
     };
     s.save("schema.json")?;
-    let store = RelationalStore::open("rel-data", Arc::new(StaticSchema::new(s)))?;
+    let store = RelationalStore::open("rel-data", Arc::new(StaticSchema::new(s))).await?;
     let cust_mueller = to_uuid(100);
     let cust_schmidt = to_uuid(101);
 
     store.create_entity(
         CUSTOMERS,
         &json!({"ID": cust_mueller, "Name": "Müller GmbH"}),
-    )?;
-    store.draft_activate(CUSTOMERS, &EntityKey::new(cust_mueller, false))?;
+    ).await?;
+    store.draft_activate(CUSTOMERS, &EntityKey::new(cust_mueller, false)).await?;
 
     store.create_entity(
         CUSTOMERS,
         &json!({"ID": cust_schmidt, "Name": "Schmidt AG"}),
-    )?;
-    store.draft_activate(CUSTOMERS, &EntityKey::new(cust_schmidt, false))?;
+    ).await?;
+    store.draft_activate(CUSTOMERS, &EntityKey::new(cust_schmidt, false)).await?;
 
     store.create_entity(
         ORDERS,
         &json!({ "ID": to_uuid(1), "Customer_ID": cust_mueller, "Amount": 150, "Status": "New" }),
-    )?;
+    ).await?;
     store.create_entity(
         ORDERS,
         &json!({ "ID": to_uuid(2), "Customer_ID": cust_schmidt, "Amount": 480, "Status": "Released" }),
-    )?;
+    ).await?;
     store.create_entity(
         ORDERS,
         &json!({ "ID": to_uuid(3), "Customer_ID": cust_schmidt, "Amount": 4200, "Status": "In Process" }),
-    )?;
+    ).await?;
     store.create_entity(
         ITEMS,
         &json!({ "ID": to_uuid(10), "Order_ID": to_uuid(1), "Material": "M-100", "Qty": 5 }),
-    )?;
+    ).await?;
     store.create_entity(
         ITEMS,
         &json!({ "ID": to_uuid(11), "Order_ID": to_uuid(1), "Material": "M-200", "Qty": 2 }),
-    )?;
+    ).await?;
     let _ = store.create_entity(
         ITEMS,
         &json!({ "ID": to_uuid(12), "Order_ID": to_uuid(2), "Material": "M-200", "Qty": 2 }),
-    );
+    ).await;
 
     // ------------------------------------------------------------------------------------------------
     // Tests on Data
@@ -71,28 +72,28 @@ fn main() -> anyhow::Result<()> {
         ORDERS,
         &key,
         &ODataQuery::new().expand("_Items").expand("Customer"),
-    )?;
+    ).await?;
     info!("Gelesene Order: {}", serde_json::to_string_pretty(&order)?);
 
     info!("PATCH Auftrag {key:?}");
-    store.patch_entity(ORDERS, &key, &json!({ "Status": "Released" }))?;
+    store.patch_entity(ORDERS, &key, &json!({ "Status": "Released" })).await?;
 
     let key2 = EntityKey::new(to_uuid(2), false);
     info!("DRAFT ACTIVATE {key2:?}");
-    store.draft_activate(ORDERS, &key2)?;
+    store.draft_activate(ORDERS, &key2).await?;
     info!("EDIT DRAFT {key2:?}");
-    store.draft_edit(ORDERS, &key2.sibling())?;
+    store.draft_edit(ORDERS, &key2.sibling()).await?;
     info!("PATCH {key2:?}");
-    store.patch_entity(ORDERS, &key2, &json!({"Status": "In Progress"}))?;
+    store.patch_entity(ORDERS, &key2, &json!({"Status": "In Progress"})).await?;
 
     info!("DRAFT ACTIVATE {key:?}");
-    store.draft_activate(ORDERS, &key)?;
+    store.draft_activate(ORDERS, &key).await?;
 
     let query = ODataQuery::new()
         .filter(Expr::equals_value(&true.into(), "IsActiveEntity"))
         .order_by("Amount", SortDirection::Desc)
         .expand("_Items");
-    let released = store.get_collection(ORDERS, &query)?;
+    let released = store.get_collection(ORDERS, &query).await?;
     info!(
         "\nReleased Orders (sortiert nach Amount desc): {}",
         serde_json::to_string_pretty(&released)?

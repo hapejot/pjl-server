@@ -105,20 +105,21 @@ pub fn schema() -> Schema {
 }
 
 /// Anbindung eines Backends an die Suite.
-pub trait Harness {
+#[async_trait::async_trait]
+pub trait Harness: Send + Sync {
     type Store: DraftDataStore;
 
     /// Frischer, leerer Store mit [`schema()`] als Metadaten.
-    fn create() -> Self;
+    async fn create() -> Self;
 
-    fn store(&self) -> &Self::Store;
+    async fn store(&self) -> &Self::Store;
 
     /// Anzahl physisch gespeicherter Saetze je Aktivierungszustand.
-    fn count_state(&self, set_name: &str, is_active: bool) -> usize;
+    async fn count_state(&self, set_name: &str, is_active: bool) -> usize;
 
     /// Store schliessen und erneut oeffnen. `None` = fluechtiges Backend,
     /// der Persistenztest wird dann uebersprungen.
-    fn reopen(&self) -> Option<Self::Store> {
+    async fn reopen(&self) -> Option<Self::Store> {
         None
     }
 }
@@ -136,27 +137,27 @@ fn bin(op: BinOp, left: Expr, right: Expr) -> Expr {
 }
 
 /// Grunddaten: 2 Kunden, 2 Auftraege, 3 Positionen - alles aktiv.
-pub fn seed<H: Harness>(h: &H) {
-    let s = h.store();
+pub async fn seed<H: Harness>(h: &H) {
+    let s = h.store().await;
     s.create_entity(
         CUSTOMERS,
         &json!({"ID": uuid(100), "IsActiveEntity": true, "Name": "Mueller GmbH"}),
-    )
+    ).await
     .expect("customer 100");
     s.create_entity(
         CUSTOMERS,
         &json!({"ID": uuid(101), "IsActiveEntity": true, "Name": "Schmidt AG"}),
-    )
+    ).await
     .expect("customer 101");
     s.create_entity(
         ORDERS,
         &json!({"ID": uuid(1), "IsActiveEntity": true, "Customer_ID": uuid(100), "Amount": 150, "Status": "New"}),
-    )
+    ).await
     .expect("order 1");
     s.create_entity(
         ORDERS,
         &json!({"ID": uuid(2), "IsActiveEntity": true, "Customer_ID": uuid(101), "Amount": 480, "Status": "Released"}),
-    )
+    ).await
     .expect("order 2");
     for (id, order, material, qty) in [
         (10, 1, "M-100", 5),
@@ -167,19 +168,19 @@ pub fn seed<H: Harness>(h: &H) {
             ITEMS,
             &json!({"ID": uuid(id), "IsActiveEntity": true, "Order_ID": uuid(order),
                     "Material": material, "Qty": qty}),
-        )
+        ).await
         .unwrap_or_else(|e| panic!("item {id}: {e}"));
     }
 }
 
-pub fn assert_counts<H: Harness>(h: &H, set: &str, expected_active: usize, expected_draft: usize) {
+pub async fn assert_counts<H: Harness>(h: &H, set: &str, expected_active: usize, expected_draft: usize) {
     assert_eq!(
-        h.count_state(set, true),
+        h.count_state(set, true).await,
         expected_active,
         "{set}: aktive Saetze"
     );
     assert_eq!(
-        h.count_state(set, false),
+        h.count_state(set, false).await,
         expected_draft,
         "{set}: Draft-Saetze"
     );
@@ -189,68 +190,68 @@ pub fn assert_counts<H: Harness>(h: &H, set: &str, expected_active: usize, expec
 // CRUD
 // ---------------------------------------------------------------------------
 
-pub fn create_defaults_to_draft<H: Harness>() {
-    let h = H::create();
+pub async fn create_defaults_to_draft<H: Harness>() {
+    let h = H::create().await;
     let rec = h
-        .store()
-        .create_entity(ORDERS, &json!({"ID": uuid(1), "Status": "New"}))
+        .store().await
+        .create_entity(ORDERS, &json!({"ID": uuid(1), "Status": "New"})).await
         .expect("create");
     assert!(
         !rec.is_active_entity(),
         "ohne IsActiveEntity entsteht ein Draft"
     );
-    assert_counts(&h, ORDERS, 0, 1);
-    let read = h.store().read_entity(ORDERS, &draft(1), &q()).expect("read");
+    assert_counts(&h, ORDERS, 0, 1).await;
+    let read = h.store().await.read_entity(ORDERS, &draft(1), &q()).await.expect("read");
     assert_eq!(read["Status"], json!("New"));
 }
 
-pub fn create_active_bypasses_draft_flow<H: Harness>() {
-    let h = H::create();
+pub async fn create_active_bypasses_draft_flow<H: Harness>() {
+    let h = H::create().await;
     let rec = h
-        .store()
+        .store().await
         .create_entity(
             ORDERS,
             &json!({"ID": uuid(1), "IsActiveEntity": true, "Status": "New"}),
-        )
+        ).await
         .expect("create");
     assert!(rec.is_active_entity());
-    assert_counts(&h, ORDERS, 1, 0);
+    assert_counts(&h, ORDERS, 1, 0).await;
 }
 
-pub fn patch_merges_only_given_fields<H: Harness>() {
-    let h = H::create();
-    h.store()
+pub async fn patch_merges_only_given_fields<H: Harness>() {
+    let h = H::create().await;
+    h.store().await
         .create_entity(
             ORDERS,
             &json!({"ID": uuid(1), "Status": "New", "Amount": 100}),
-        )
+        ).await
         .unwrap();
-    h.store()
-        .patch_entity(ORDERS, &draft(1), &json!({"Status": "Released"}))
+    h.store().await
+        .patch_entity(ORDERS, &draft(1), &json!({"Status": "Released"})).await
         .expect("patch");
-    let read = h.store().read_entity(ORDERS, &draft(1), &q()).unwrap();
+    let read = h.store().await.read_entity(ORDERS, &draft(1), &q()).await.unwrap();
     assert_eq!(read["Status"], json!("Released"));
     assert_eq!(read["Amount"], json!(100), "nicht gepatchte Felder bleiben");
 }
 
-pub fn read_missing_entity_is_an_error<H: Harness>() {
-    let h = H::create();
+pub async fn read_missing_entity_is_an_error<H: Harness>() {
+    let h = H::create().await;
     assert!(
-        h.store().read_entity(ORDERS, &active(999), &q()).is_err(),
+        h.store().await.read_entity(ORDERS, &active(999), &q()).await.is_err(),
         "fehlender Satz muss Err liefern, nicht panicken"
     );
 }
 
-pub fn get_property_returns_single_value<H: Harness>() {
-    let h = H::create();
-    seed(&h);
+pub async fn get_property_returns_single_value<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
     let v = h
-        .store()
-        .get_property(ORDERS, &active(1), "Status")
+        .store().await
+        .get_property(ORDERS, &active(1), "Status").await
         .expect("property");
     assert_eq!(v, json!("New"));
     assert!(
-        h.store().get_property(ORDERS, &active(1), "Nope").is_err(),
+        h.store().await.get_property(ORDERS, &active(1), "Nope").await.is_err(),
         "unbekannte Property muss Err liefern"
     );
 }
@@ -259,20 +260,20 @@ pub fn get_property_returns_single_value<H: Harness>() {
 // Query
 // ---------------------------------------------------------------------------
 
-pub fn orderby_sorts_ascending_and_descending<H: Harness>() {
-    let h = H::create();
-    seed(&h);
+pub async fn orderby_sorts_ascending_and_descending<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
     let asc = h
-        .store()
-        .get_collection(ORDERS, &q().order_by("Amount", SortDirection::Asc))
+        .store().await
+        .get_collection(ORDERS, &q().order_by("Amount", SortDirection::Asc)).await
         .unwrap();
     assert_eq!(
         asc.iter().map(|r| r.get("Amount")).collect::<Vec<_>>(),
         vec![Some(json!(150)), Some(json!(480))]
     );
     let desc = h
-        .store()
-        .get_collection(ORDERS, &q().order_by("Amount", SortDirection::Desc))
+        .store().await
+        .get_collection(ORDERS, &q().order_by("Amount", SortDirection::Desc)).await
         .unwrap();
     assert_eq!(
         desc.iter().map(|r| r.get("Amount")).collect::<Vec<_>>(),
@@ -280,35 +281,35 @@ pub fn orderby_sorts_ascending_and_descending<H: Harness>() {
     );
 }
 
-pub fn filter_by_equality<H: Harness>() {
-    let h = H::create();
-    seed(&h);
+pub async fn filter_by_equality<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
     let query = q().filter(bin(
         BinOp::Eq,
         Expr::Identifier("Status".into()),
         Expr::String("Released".into()),
     ));
-    let result = h.store().get_collection(ORDERS, &query).unwrap();
+    let result = h.store().await.get_collection(ORDERS, &query).await.unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].id(), uuid(2));
 }
 
-pub fn filter_by_comparison<H: Harness>() {
-    let h = H::create();
-    seed(&h);
+pub async fn filter_by_comparison<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
     let query = q().filter(bin(
         BinOp::Gt,
         Expr::Identifier("Amount".into()),
         Expr::Number(200.0),
     ));
-    let result = h.store().get_collection(ORDERS, &query).unwrap();
+    let result = h.store().await.get_collection(ORDERS, &query).await.unwrap();
     assert_eq!(result.len(), 1, "nur Amount 480 ist groesser als 200");
     assert_eq!(result[0].id(), uuid(2));
 }
 
-pub fn filter_combines_with_and<H: Harness>() {
-    let h = H::create();
-    seed(&h);
+pub async fn filter_combines_with_and<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
     let query = q().filter(bin(
         BinOp::And,
         bin(
@@ -322,40 +323,40 @@ pub fn filter_combines_with_and<H: Harness>() {
             Expr::String("New".into()),
         ),
     ));
-    let result = h.store().get_collection(ORDERS, &query).unwrap();
+    let result = h.store().await.get_collection(ORDERS, &query).await.unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].id(), uuid(1));
 }
 
-pub fn skip_and_top_paginate<H: Harness>() {
-    let h = H::create();
-    seed(&h);
+pub async fn skip_and_top_paginate<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
     let mut query = q().order_by("Amount", SortDirection::Asc);
     query.skip = Some(1);
     query.top = Some(1);
-    let result = h.store().get_collection(ORDERS, &query).unwrap();
+    let result = h.store().await.get_collection(ORDERS, &query).await.unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].get("Amount"), Some(json!(480)));
 }
 
-pub fn count_ignores_pagination<H: Harness>() {
-    let h = H::create();
-    seed(&h);
+pub async fn count_ignores_pagination<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
     let mut query = q();
     query.skip = Some(1);
     query.top = Some(1);
-    assert_eq!(h.store().count(ORDERS, &query), 2);
+    assert_eq!(h.store().await.count(ORDERS, &query).await, 2);
 }
 
-pub fn drafts_shadow_active_records_in_collections<H: Harness>() {
-    let h = H::create();
-    seed(&h);
-    h.store().draft_edit(ORDERS, &active(1)).expect("draft_edit");
-    h.store()
-        .patch_entity(ORDERS, &draft(1), &json!({"Status": "InProgress"}))
+pub async fn drafts_shadow_active_records_in_collections<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
+    h.store().await.draft_edit(ORDERS, &active(1)).await.expect("draft_edit");
+    h.store().await
+        .patch_entity(ORDERS, &draft(1), &json!({"Status": "InProgress"})).await
         .unwrap();
 
-    let all = h.store().get_collection(ORDERS, &q()).unwrap();
+    let all = h.store().await.get_collection(ORDERS, &q()).await.unwrap();
     assert_eq!(all.len(), 2, "der Draft verdeckt den aktiven Satz");
     let shadowed = all.iter().find(|r| r.id() == uuid(1)).expect("order 1");
     assert!(!shadowed.is_active_entity());
@@ -366,38 +367,38 @@ pub fn drafts_shadow_active_records_in_collections<H: Harness>() {
 // $expand
 // ---------------------------------------------------------------------------
 
-pub fn expand_to_many_returns_children<H: Harness>() {
-    let h = H::create();
-    seed(&h);
+pub async fn expand_to_many_returns_children<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
     let r = h
-        .store()
-        .read_entity(ORDERS, &active(1), &q().expand("_Items"))
+        .store().await
+        .read_entity(ORDERS, &active(1), &q().expand("_Items")).await
         .expect("read");
     let items = r.get("_Items").expect("_Items");
     assert_eq!(items.as_array().map(|a| a.len()), Some(2));
 }
 
-pub fn expand_to_one_returns_parent<H: Harness>() {
-    let h = H::create();
-    seed(&h);
+pub async fn expand_to_one_returns_parent<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
     let r = h
-        .store()
-        .read_entity(ORDERS, &active(1), &q().expand("Customer"))
+        .store().await
+        .read_entity(ORDERS, &active(1), &q().expand("Customer")).await
         .expect("read");
     assert_eq!(r.get("Customer").expect("Customer")["Name"], json!("Mueller GmbH"));
 }
 
-pub fn expand_in_collection<H: Harness>() {
-    let h = H::create();
-    seed(&h);
+pub async fn expand_in_collection<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
     let rows = h
-        .store()
+        .store().await
         .get_collection(
             ORDERS,
             &q().expand("_Items")
                 .expand("Customer")
                 .order_by("Amount", SortDirection::Asc),
-        )
+        ).await
         .expect("collection");
     assert_eq!(rows.len(), 2);
     assert_eq!(
@@ -407,24 +408,24 @@ pub fn expand_in_collection<H: Harness>() {
     assert_eq!(rows[0].get("Customer").unwrap()["Name"], json!("Mueller GmbH"));
 }
 
-pub fn expand_unknown_navigation_is_an_error<H: Harness>() {
-    let h = H::create();
-    seed(&h);
+pub async fn expand_unknown_navigation_is_an_error<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
     assert!(
-        h.store()
-            .read_entity(ORDERS, &active(1), &q().expand("_Nope"))
+        h.store().await
+            .read_entity(ORDERS, &active(1), &q().expand("_Nope")).await
             .is_err(),
         "unbekannte Navigation muss Err liefern"
     );
 }
 
-pub fn expand_draft_administrative_data<H: Harness>() {
-    let h = H::create();
-    seed(&h);
-    h.store().draft_edit(ORDERS, &active(1)).unwrap();
+pub async fn expand_draft_administrative_data<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
+    h.store().await.draft_edit(ORDERS, &active(1)).await.unwrap();
     let r = h
-        .store()
-        .read_entity(ORDERS, &draft(1), &q().expand("DraftAdministrativeData"))
+        .store().await
+        .read_entity(ORDERS, &draft(1), &q().expand("DraftAdministrativeData")).await
         .expect("read draft");
     assert!(r.draft_admin_data().is_some());
 }
@@ -433,90 +434,90 @@ pub fn expand_draft_administrative_data<H: Harness>() {
 // Draft-Flow
 // ---------------------------------------------------------------------------
 
-pub fn draft_edit_activate_roundtrip<H: Harness>() {
-    let h = H::create();
-    seed(&h);
-    let d = h.store().draft_edit(ORDERS, &active(1)).expect("edit");
+pub async fn draft_edit_activate_roundtrip<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
+    let d = h.store().await.draft_edit(ORDERS, &active(1)).await.expect("edit");
     assert_eq!(d["IsActiveEntity"], json!(false));
 
-    h.store()
-        .patch_entity(ORDERS, &draft(1), &json!({"Status": "InProgress"}))
+    h.store().await
+        .patch_entity(ORDERS, &draft(1), &json!({"Status": "InProgress"})).await
         .unwrap();
-    let activated = h.store().draft_activate(ORDERS, &draft(1)).expect("activate");
+    let activated = h.store().await.draft_activate(ORDERS, &draft(1)).await.expect("activate");
     assert_eq!(activated["Status"], json!("InProgress"));
     assert_eq!(activated["IsActiveEntity"], json!(true));
-    assert_counts(&h, ORDERS, 2, 0);
+    assert_counts(&h, ORDERS, 2, 0).await;
 }
 
-pub fn draft_edit_cascades_to_children<H: Harness>() {
-    let h = H::create();
-    seed(&h);
-    h.store().draft_edit(ORDERS, &active(1)).unwrap();
-    assert_counts(&h, ORDERS, 2, 1);
-    assert_counts(&h, ITEMS, 3, 2);
+pub async fn draft_edit_cascades_to_children<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
+    h.store().await.draft_edit(ORDERS, &active(1)).await.unwrap();
+    assert_counts(&h, ORDERS, 2, 1).await;
+    assert_counts(&h, ITEMS, 3, 2).await;
 }
 
-pub fn draft_edit_rejects_draft_key<H: Harness>() {
-    let h = H::create();
-    seed(&h);
-    assert!(h.store().draft_edit(ORDERS, &draft(1)).is_err());
+pub async fn draft_edit_rejects_draft_key<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
+    assert!(h.store().await.draft_edit(ORDERS, &draft(1)).await.is_err());
 }
 
-pub fn draft_edit_child_without_parent_draft_fails<H: Harness>() {
-    let h = H::create();
-    seed(&h);
+pub async fn draft_edit_child_without_parent_draft_fails<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
     assert!(
-        h.store().draft_edit(ITEMS, &active(10)).is_err(),
+        h.store().await.draft_edit(ITEMS, &active(10)).await.is_err(),
         "ein Kind allein darf nicht in den Draft"
     );
 }
 
-pub fn draft_activate_rejects_active_key<H: Harness>() {
-    let h = H::create();
-    seed(&h);
-    assert!(h.store().draft_activate(ORDERS, &active(1)).is_err());
+pub async fn draft_activate_rejects_active_key<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
+    assert!(h.store().await.draft_activate(ORDERS, &active(1)).await.is_err());
 }
 
-pub fn draft_activate_cascades_to_children<H: Harness>() {
-    let h = H::create();
-    seed(&h);
-    h.store().draft_edit(ORDERS, &active(2)).unwrap();
-    h.store()
+pub async fn draft_activate_cascades_to_children<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
+    h.store().await.draft_edit(ORDERS, &active(2)).await.unwrap();
+    h.store().await
         .create_entity(
             ITEMS,
             &json!({"ID": uuid(13), "IsActiveEntity": false, "Order_ID": uuid(2),
                     "Material": "M-300", "Qty": 42}),
-        )
+        ).await
         .expect("neues Kind im Draft");
-    assert_counts(&h, ITEMS, 3, 2);
+    assert_counts(&h, ITEMS, 3, 2).await;
 
-    h.store().draft_activate(ORDERS, &draft(2)).unwrap();
-    assert_counts(&h, ORDERS, 2, 0);
-    assert_counts(&h, ITEMS, 4, 0);
+    h.store().await.draft_activate(ORDERS, &draft(2)).await.unwrap();
+    assert_counts(&h, ORDERS, 2, 0).await;
+    assert_counts(&h, ITEMS, 4, 0).await;
 
     let r = h
-        .store()
-        .read_entity(ORDERS, &active(2), &q().expand("_Items"))
+        .store().await
+        .read_entity(ORDERS, &active(2), &q().expand("_Items")).await
         .unwrap();
     assert_eq!(r.get("_Items").unwrap().as_array().map(|a| a.len()), Some(2));
 }
 
-pub fn draft_prepare_returns_the_draft<H: Harness>() {
-    let h = H::create();
-    seed(&h);
-    h.store().draft_edit(ORDERS, &active(1)).unwrap();
-    let p = h.store().draft_prepare(ORDERS, &draft(1)).expect("prepare");
+pub async fn draft_prepare_returns_the_draft<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
+    h.store().await.draft_edit(ORDERS, &active(1)).await.unwrap();
+    let p = h.store().await.draft_prepare(ORDERS, &draft(1)).await.expect("prepare");
     assert_eq!(p["ID"], json!(uuid(1)));
     assert_eq!(p["IsActiveEntity"], json!(false));
 }
 
-pub fn read_sibling_entity_crosses_activation_state<H: Harness>() {
-    let h = H::create();
-    seed(&h);
-    h.store().draft_edit(ORDERS, &active(1)).unwrap();
+pub async fn read_sibling_entity_crosses_activation_state<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
+    h.store().await.draft_edit(ORDERS, &active(1)).await.unwrap();
     let sibling = h
-        .store()
-        .read_sibling_entity(ORDERS, &draft(1))
+        .store().await
+        .read_sibling_entity(ORDERS, &draft(1)).await
         .expect("sibling");
     assert!(sibling.is_active_entity());
     assert_eq!(sibling.id(), uuid(1));
@@ -526,82 +527,82 @@ pub fn read_sibling_entity_crosses_activation_state<H: Harness>() {
 // Loeschen / Kaskaden
 // ---------------------------------------------------------------------------
 
-pub fn delete_active_parent_cascades<H: Harness>() {
-    let h = H::create();
-    seed(&h);
-    h.store().delete_entity(ORDERS, &active(2)).expect("delete");
-    assert_counts(&h, ORDERS, 1, 0);
-    assert_counts(&h, ITEMS, 2, 0);
-    assert_counts(&h, CUSTOMERS, 2, 0);
+pub async fn delete_active_parent_cascades<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
+    h.store().await.delete_entity(ORDERS, &active(2)).await.expect("delete");
+    assert_counts(&h, ORDERS, 1, 0).await;
+    assert_counts(&h, ITEMS, 2, 0).await;
+    assert_counts(&h, CUSTOMERS, 2, 0).await;
 }
 
-pub fn delete_child_leaves_parent<H: Harness>() {
-    let h = H::create();
-    seed(&h);
-    h.store().delete_entity(ITEMS, &active(12)).expect("delete");
-    assert_counts(&h, ORDERS, 2, 0);
-    assert_counts(&h, ITEMS, 2, 0);
+pub async fn delete_child_leaves_parent<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
+    h.store().await.delete_entity(ITEMS, &active(12)).await.expect("delete");
+    assert_counts(&h, ORDERS, 2, 0).await;
+    assert_counts(&h, ITEMS, 2, 0).await;
 }
 
-pub fn delete_draft_removes_both_trees<H: Harness>() {
-    let h = H::create();
-    seed(&h);
-    h.store().draft_edit(ORDERS, &active(2)).unwrap();
-    h.store()
+pub async fn delete_draft_removes_both_trees<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
+    h.store().await.draft_edit(ORDERS, &active(2)).await.unwrap();
+    h.store().await
         .create_entity(
             ITEMS,
             &json!({"ID": uuid(13), "IsActiveEntity": false, "Order_ID": uuid(2),
                     "Material": "M-300", "Qty": 1}),
-        )
+        ).await
         .unwrap();
-    h.store().delete_entity(ORDERS, &draft(2)).expect("delete draft");
-    assert_counts(&h, ORDERS, 1, 0);
-    assert_counts(&h, ITEMS, 2, 0);
+    h.store().await.delete_entity(ORDERS, &draft(2)).await.expect("delete draft");
+    assert_counts(&h, ORDERS, 1, 0).await;
+    assert_counts(&h, ITEMS, 2, 0).await;
 }
 
-pub fn delete_entity_tree_only_keeps_sibling<H: Harness>() {
-    let h = H::create();
-    seed(&h);
-    h.store().draft_edit(ORDERS, &active(2)).unwrap();
-    assert_counts(&h, ITEMS, 3, 1);
-    h.store()
-        .delete_entity_tree_only(ITEMS, &draft(12))
+pub async fn delete_entity_tree_only_keeps_sibling<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
+    h.store().await.draft_edit(ORDERS, &active(2)).await.unwrap();
+    assert_counts(&h, ITEMS, 3, 1).await;
+    h.store().await
+        .delete_entity_tree_only(ITEMS, &draft(12)).await
         .expect("tree only");
-    assert_counts(&h, ITEMS, 3, 0);
+    assert_counts(&h, ITEMS, 3, 0).await;
 }
 
 /// Regression: beim Aktivieren darf ein nur aktiv vorhandenes Kind nicht
 /// angefasst werden (Draft-Ueberdeckung bei der Kindsuche).
-pub fn draft_activate_keeps_active_only_child<H: Harness>() {
-    let h = H::create();
-    seed(&h);
-    h.store().draft_edit(ORDERS, &active(2)).unwrap();
-    h.store()
+pub async fn draft_activate_keeps_active_only_child<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
+    h.store().await.draft_edit(ORDERS, &active(2)).await.unwrap();
+    h.store().await
         .create_entity(
             ITEMS,
             &json!({"ID": uuid(20), "IsActiveEntity": true, "Order_ID": uuid(2),
                     "Material": "M-900", "Qty": 1}),
-        )
+        ).await
         .expect("aktives Kind ohne Draft-Zwilling");
-    assert_counts(&h, ITEMS, 4, 1);
+    assert_counts(&h, ITEMS, 4, 1).await;
 
-    h.store().draft_activate(ORDERS, &draft(2)).unwrap();
-    assert_counts(&h, ITEMS, 4, 0);
-    let survivor = h.store().read_entity(ITEMS, &active(20), &q()).expect("Kind 20");
+    h.store().await.draft_activate(ORDERS, &draft(2)).await.unwrap();
+    assert_counts(&h, ITEMS, 4, 0).await;
+    let survivor = h.store().await.read_entity(ITEMS, &active(20), &q()).await.expect("Kind 20");
     assert_eq!(survivor["Material"], json!("M-900"));
 }
 
 /// Regression: das Loeschen eines aktiven Baums muss den aktiven Kindsatz
 /// treffen, nicht den Draft, der ihn in Collections verdeckt.
-pub fn delete_active_parent_removes_active_children<H: Harness>() {
-    let h = H::create();
-    seed(&h);
-    h.store().draft_edit(ORDERS, &active(2)).unwrap();
-    assert_counts(&h, ITEMS, 3, 1);
-    h.store().delete_entity(ORDERS, &active(2)).unwrap();
-    assert_counts(&h, ITEMS, 2, 1);
+pub async fn delete_active_parent_removes_active_children<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
+    h.store().await.draft_edit(ORDERS, &active(2)).await.unwrap();
+    assert_counts(&h, ITEMS, 3, 1).await;
+    h.store().await.delete_entity(ORDERS, &active(2)).await.unwrap();
+    assert_counts(&h, ITEMS, 2, 1).await;
     assert!(
-        h.store().read_entity(ITEMS, &active(12), &q()).is_err(),
+        h.store().await.read_entity(ITEMS, &active(12), &q()).await.is_err(),
         "aktives Kind darf nicht als Waise zurueckbleiben"
     );
 }
@@ -610,19 +611,19 @@ pub fn delete_active_parent_removes_active_children<H: Harness>() {
 // Persistenz
 // ---------------------------------------------------------------------------
 
-pub fn data_survives_reopen<H: Harness>() {
-    let h = H::create();
-    seed(&h);
-    let Some(reopened) = h.reopen() else {
+pub async fn data_survives_reopen<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
+    let Some(reopened) = h.reopen().await else {
         return; // fluechtiges Backend
     };
     let read = reopened
-        .read_entity(ORDERS, &active(1), &ODataQuery::new())
+        .read_entity(ORDERS, &active(1), &ODataQuery::new()).await
         .expect("nach reopen lesbar");
     assert_eq!(read["Amount"], json!(150));
 }
 
-/// Erzeugt fuer jede Konformitaetsfunktion einen eigenen `#[test]`.
+/// Erzeugt fuer jede Konformitaetsfunktion einen eigenen `#[tokio::test]`.
 #[macro_export]
 macro_rules! conformance_tests {
     ($harness:ty) => {
@@ -664,9 +665,9 @@ macro_rules! conformance_tests {
     };
     ($harness:ty => $($name:ident),+ $(,)?) => {
         $(
-            #[test]
-            fn $name() {
-                $crate::conformance::$name::<$harness>();
+            #[tokio::test]
+            async fn $name() {
+                $crate::conformance::$name::<$harness>().await;
             }
         )+
     };

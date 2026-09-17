@@ -45,8 +45,10 @@ impl From<HookError> for StoreError {
     }
 }
 
+#[async_trait::async_trait]
+#[async_trait::async_trait]
 pub trait Hook: Send + Sync {
-    fn before(
+    async fn before(
         &self,
         store: &Extender,
         set_name: &str,
@@ -57,7 +59,7 @@ pub trait Hook: Send + Sync {
         debug!(set_name, ?op, ?value);
         Ok(())
     }
-    fn after(
+    async fn after(
         &self,
         store: &Extender,
         set_name: &str,
@@ -118,86 +120,88 @@ impl Extender {
     }
 }
 
+#[async_trait::async_trait]
 impl DraftDataStore for Extender {
-    fn draft_edit(
+    async fn draft_edit(
         &self,
         set_name: &str,
         key: &EntityKey,
     ) -> Result<serde_json::Value, StoreError> {
         let mut value = Self::key_value(key);
         self.hook
-            .before(self, set_name, Operation::DraftEdit, &mut value)?;
-        let result = self.inner.draft_edit(set_name, key)?;
+            .before(self, set_name, Operation::DraftEdit, &mut value).await?;
+        let result = self.inner.draft_edit(set_name, key).await?;
         let mut record = DataRecord::from_json(&result)?;
-        self.hook.after(self, set_name, Operation::DraftEdit, &mut record)?;
+        self.hook.after(self, set_name, Operation::DraftEdit, &mut record).await?;
         Ok(result)
     }
 
-    fn draft_activate(
+    async fn draft_activate(
         &self,
         set_name: &str,
         key: &EntityKey,
     ) -> Result<serde_json::Value, StoreError> {
         let mut value = Self::key_value(key);
         self.hook
-            .before(self, set_name, Operation::DraftActivate, &mut value)?;
-        let result = self.inner.draft_activate(set_name, key)?;
+            .before(self, set_name, Operation::DraftActivate, &mut value).await?;
+        let result = self.inner.draft_activate(set_name, key).await?;
         let mut record = DataRecord::from_json(&result)?;
-        self.hook.after(self, set_name, Operation::DraftActivate, &mut record)?;
+        self.hook.after(self, set_name, Operation::DraftActivate, &mut record).await?;
         Ok(result)
     }
 
-    fn draft_prepare(
+    async fn draft_prepare(
         &self,
         set_name: &str,
         key: &EntityKey,
     ) -> Result<serde_json::Value, StoreError> {
         let mut value = Self::key_value(key);
         self.hook
-            .before(self, set_name, Operation::DraftPrepare, &mut value)?;
-        let result = self.inner.draft_prepare(set_name, key)?;
+            .before(self, set_name, Operation::DraftPrepare, &mut value).await?;
+        let result = self.inner.draft_prepare(set_name, key).await?;
         let mut record = DataRecord::from_json(&result)?;
-        self.hook.after(self, set_name, Operation::DraftPrepare, &mut record)?;
+        self.hook.after(self, set_name, Operation::DraftPrepare, &mut record).await?;
         Ok(result)
     }
 }
 
+#[async_trait::async_trait]
 impl DataStore for Extender {
-    fn get_collection(
+    async fn get_collection(
         &self,
         set_name: &str,
         query: &odata::query::ODataQuery,
     ) -> Result<Vec<DataRecord>, StoreError> {
-        self.inner.get_collection(set_name, query)
+        self.inner.get_collection(set_name, query).await
     }
 
-    fn count(&self, set_name: &str, query: &odata::query::ODataQuery) -> usize {
-        self.inner.count(set_name, query)
+    async fn count(&self, set_name: &str, query: &odata::query::ODataQuery) -> usize {
+        self.inner.count(set_name, query).await
     }
 
-    fn read_entity(
+    async fn read_entity(
         &self,
         set_name: &str,
         key: &EntityKey,
         query: &odata::query::ODataQuery,
     ) -> Result<DataRecord, StoreError> {
-        self.inner.read_entity(set_name, key, query)
+        self.inner.read_entity(set_name, key, query).await
     }
 
-    fn create_entity(
+    async fn create_entity(
         &self,
         set_name: &str,
         data: &Value,
     ) -> Result<DataRecord, StoreError> {
         let mut value = data.clone();
         self.hook
-            .before(self, set_name, Operation::Create, &mut value)?;
-        let mut r = self.inner.create_entity(set_name, data)?;
-        self.hook.after(self, set_name, Operation::Create, &mut r)?;
+            .before(self, set_name, Operation::Create, &mut value).await?;
+        let mut r = self.inner.create_entity(set_name, data).await?;
+        self.hook.after(self, set_name, Operation::Create, &mut r).await?;
         Ok(r)
     }
 
-    fn patch_entity(
+    async fn patch_entity(
         &self,
         set_name: &str,
         key: &EntityKey,
@@ -205,60 +209,60 @@ impl DataStore for Extender {
     ) -> Result<Value, StoreError> {
         let mut value = patch.clone();
         self.hook
-            .before(self, set_name, Operation::Patch, &mut value)?;
-        let result = self.inner.patch_entity(set_name, key, patch)?;
+            .before(self, set_name, Operation::Patch, &mut value).await?;
+        let result = self.inner.patch_entity(set_name, key, patch).await?;
         let mut record = self
             .inner
-            .read_entity(set_name, key, &odata::query::ODataQuery::new())?;
-        self.hook.after(self, set_name, Operation::Patch, &mut record)?;
+            .read_entity(set_name, key, &odata::query::ODataQuery::new()).await?;
+        self.hook.after(self, set_name, Operation::Patch, &mut record).await?;
         Ok(result)
     }
 
-    fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
+    async fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
         let mut value = Self::key_value(key);
         self.hook
-            .before(self, set_name, Operation::Delete, &mut value)?;
-        let result = self.inner.delete_entity(set_name, key);
+            .before(self, set_name, Operation::Delete, &mut value).await?;
+        let result = self.inner.delete_entity(set_name, key).await;
         result?;
         let mut record = Self::key_record(key);
-        self.hook.after(self, set_name, Operation::Delete, &mut record)?;
+        self.hook.after(self, set_name, Operation::Delete, &mut record).await?;
         Ok(())
     }
 
-    fn delete_entity_tree_only(
+    async fn delete_entity_tree_only(
         &self,
         set_name: &str,
         key: &EntityKey,
     ) -> Result<(), StoreError> {
         let mut value = Self::key_value(key);
         self.hook
-            .before(self, set_name, Operation::Delete, &mut value)?;
-        let result = self.inner.delete_entity_tree_only(set_name, key);
+            .before(self, set_name, Operation::Delete, &mut value).await?;
+        let result = self.inner.delete_entity_tree_only(set_name, key).await;
         result?;
         let mut record = Self::key_record(key);
-        self.hook.after(self, set_name, Operation::Delete, &mut record)?;
+        self.hook.after(self, set_name, Operation::Delete, &mut record).await?;
         Ok(())
     }
 
-    fn read_sibling_entity(
+    async fn read_sibling_entity(
         &self,
         set_name: &str,
         key: &EntityKey,
     ) -> Result<DataRecord, StoreError> {
-        self.inner.read_sibling_entity(set_name, key)
+        self.inner.read_sibling_entity(set_name, key).await
     }
 
-    fn get_property(
+    async fn get_property(
         &self,
         set_name: &str,
         key: &EntityKey,
         property: &str,
     ) -> Result<Value, StoreError> {
-        self.inner.get_property(set_name, key, property)
+        self.inner.get_property(set_name, key, property).await
     }
 
-    fn commit(&self) {
-        self.inner.commit();
+    async fn commit(&self) {
+        self.inner.commit().await;
     }
 
     fn navigation(&mut self, single: bool) -> &mut Navigation {
@@ -277,8 +281,9 @@ impl DataStore for Extender {
 #[derive(Default)]
 pub struct DefaultHook;
 
+#[async_trait::async_trait]
 impl Hook for DefaultHook {
-    fn before(
+    async fn before(
         &self,
         store: &Extender,
         set_name: &str,
@@ -290,7 +295,7 @@ impl Hook for DefaultHook {
         Ok(())
     }
 
-    fn after(
+    async fn after(
         &self,
         store: &Extender,
         set_name: &str,
@@ -328,8 +333,9 @@ impl EntityDefaultsHook {
     const DEFAULT_FIELDS: &'static [&'static str] = &["name", "title"];
 }
 
+#[async_trait::async_trait]
 impl Hook for EntityDefaultsHook {
-    fn after(
+    async fn after(
         &self,
         store: &Extender,
         set_name: &str,
@@ -353,7 +359,7 @@ impl Hook for EntityDefaultsHook {
                     Self::CHILD_FK: parent_id,
                     "IsActiveEntity": is_active,
                 }),
-            )?;
+            ).await?;
         }
         Ok(())
     }
@@ -386,8 +392,9 @@ mod test {
         }
     }
 
+    #[async_trait::async_trait]
     impl Hook for ExampleHook {
-        fn after(
+        async fn after(
             &self,
             store: &Extender,
             set_name: &str,
@@ -423,22 +430,22 @@ mod test {
                 store.create_entity(
                     "OrderItemSet",
                     &json!({"Pos": "10", "Order_ID": value.id()}),
-                )?;
+                ).await?;
             }
             
             Ok(())
         }
     }
 
-    #[test]
-    fn example_hook() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn example_hook() -> anyhow::Result<()> {
         tracing_subscriber::fmt()
             .with_max_level(Level::TRACE)
             .init();
         let ystore = Arc::new(YamlStore::open("testdata")?);
         let hook = Arc::new(ExampleHook::default());
         let store = Extender::new(ystore, hook.clone())?;
-        store.create_entity("OrderSet", &json!({"SoldTo": "Peter"}))?;
+        store.create_entity("OrderSet", &json!({"SoldTo": "Peter"})).await?;
         assert_eq!(hook.create_count(), 1);
         Ok(())
     }

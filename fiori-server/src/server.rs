@@ -33,7 +33,7 @@ pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
 
     let base = load_dictionary(&config)?;
     let schema_source = schema_source(&config, &base)?;
-    let store = open_store(&config, schema_source)?;
+    let store = open_store(&config, schema_source).await?;
 
     let state = AppState::new(store, config.clone(), base);
     state.reload();
@@ -105,7 +105,7 @@ fn schema_source(
     Ok(Arc::new(source))
 }
 
-fn open_store(
+async fn open_store(
     config: &ServerConfig,
     schema: Arc<dyn SchemaSource>,
 ) -> anyhow::Result<Arc<dyn DraftDataStore>> {
@@ -113,6 +113,7 @@ fn open_store(
         .with_context(|| format!("cannot create data dir '{}'", config.data_dir.display()))?;
     let store = Arc::new(
         RelationalStore::open(config.data_dir.clone(), schema)
+            .await
             .with_context(|| format!("cannot open store '{}'", config.data_dir.display()))?,
     );
     info!("store at '{}'", config.data_dir.display());

@@ -15,27 +15,29 @@ struct ExtenderHarness {
     store: Extender,
 }
 
-fn open(path: &std::path::Path) -> YamlStore {
+async fn open(path: &std::path::Path) -> YamlStore {
     let store = YamlStore::open(path).expect("store");
     store.set_navigations(conformance::schema().to_navigations());
     store
 }
 
+#[async_trait::async_trait]
+#[async_trait::async_trait]
 impl Harness for ExtenderHarness {
     type Store = Extender;
 
-    fn create() -> Self {
+    async fn create() -> Self {
         let dir = TempDir::new().expect("tempdir");
-        let ystore = Arc::new(open(dir.path()));
+        let ystore = Arc::new(open(dir.path()).await);
         let store = Extender::build(ystore, Arc::new(DefaultHook));
         Self { dir, store }
     }
 
-    fn store(&self) -> &Self::Store {
+    async fn store(&self) -> &Self::Store {
         &self.store
     }
 
-    fn count_state(&self, set_name: &str, is_active: bool) -> usize {
+    async fn count_state(&self, set_name: &str, is_active: bool) -> usize {
         let path = self
             .dir
             .path()
@@ -51,8 +53,8 @@ impl Harness for ExtenderHarness {
             .unwrap_or(0)
     }
 
-    fn reopen(&self) -> Option<Self::Store> {
-        let ystore = Arc::new(open(self.dir.path()));
+    async fn reopen(&self) -> Option<Self::Store> {
+        let ystore = Arc::new(open(self.dir.path()).await);
         Some(Extender::build(ystore, Arc::new(DefaultHook)))
     }
 }

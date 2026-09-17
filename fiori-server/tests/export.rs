@@ -17,44 +17,50 @@ const ORDER_ID: &str = "00000000-0000-0000-0000-000000000001";
 const ITEM_ID: &str = "00000000-0000-0000-0000-000000000002";
 
 /// Ein Designer, der ein kleines Modell (Order 1:n OrderItem) im Store hat.
-fn designer_with_model() -> (TempDir, TempDir, AppState) {
+async fn designer_with_model() -> (TempDir, TempDir, AppState) {
     let data = TempDir::new().unwrap();
     let export = TempDir::new().unwrap();
     let store = Arc::new(YamlStore::open(data.path()).unwrap());
 
-    let create = |set: &str, body: serde_json::Value| {
-        store.create_entity(set, &body).unwrap();
-    };
+    async fn create(store: &YamlStore, set: &str, body: serde_json::Value) {
+        store.create_entity(set, &body).await.unwrap();
+    }
     create(
+        &store,
         "PackageSet",
         json!({ "ID": PACKAGE_ID, "IsActiveEntity": true, "name": "sales" }),
-    );
+    ).await;
     create(
+        &store,
         "EntitySet",
         json!({ "ID": ORDER_ID, "IsActiveEntity": true, "name": "Order",
                 "plural": "Orders", "package_ID": PACKAGE_ID }),
-    );
+    ).await;
     create(
+        &store,
         "EntitySet",
         json!({ "ID": ITEM_ID, "IsActiveEntity": true, "name": "OrderItem",
                 "plural": "OrderItems", "package_ID": PACKAGE_ID }),
-    );
+    ).await;
     create(
+        &store,
         "FieldSet",
         json!({ "IsActiveEntity": true, "entity_ID": ORDER_ID, "name": "amount",
                 "label": "Amount", "type": "Edm.Decimal", "precision": 15, "scale": 2 }),
-    );
+    ).await;
     create(
+        &store,
         "RelationSet",
         json!({ "IsActiveEntity": true, "name": "order_items", "owned": true,
                 "one_ID": ORDER_ID, "source_field": "_Items",
                 "many_ID": ITEM_ID, "target_field": "order" }),
-    );
+    ).await;
     create(
+        &store,
         "AppSet",
         json!({ "IsActiveEntity": true, "name": "orders", "title": "Orders",
                 "main_entity_ID": ORDER_ID, "package_ID": PACKAGE_ID }),
-    );
+    ).await;
 
     let mut config = ServerConfig::defaults(ServerMode::Designer);
     config.export_dir = export.path().to_path_buf();
@@ -63,11 +69,11 @@ fn designer_with_model() -> (TempDir, TempDir, AppState) {
     (data, export, state)
 }
 
-#[test]
-fn export_writes_a_dictionary_the_runtime_can_load() {
-    let (_data, export, state) = designer_with_model();
+#[tokio::test]
+async fn export_writes_a_dictionary_the_runtime_can_load() {
+    let (_data, export, state) = designer_with_model().await;
 
-    let report = export_dictionary(&state).expect("export");
+    let report = export_dictionary(&state).await.expect("export");
     assert_eq!(report.entities, 2);
     assert_eq!(report.apps, 1);
     assert_eq!(report.relationships, 1);
@@ -95,10 +101,10 @@ fn export_writes_a_dictionary_the_runtime_can_load() {
     assert_eq!(written_sets, vec!["OrderItemSet", "OrderSet"]);
 }
 
-#[test]
-fn the_metamodel_stays_in_the_designer() {
-    let (_data, export, state) = designer_with_model();
-    export_dictionary(&state).expect("export");
+#[tokio::test]
+async fn the_metamodel_stays_in_the_designer() {
+    let (_data, export, state) = designer_with_model().await;
+    export_dictionary(&state).await.expect("export");
 
     let raw = std::fs::read(export.path().join("ddic.json")).unwrap();
     let loaded: DataDictionary = serde_json::from_slice(&raw).unwrap();
@@ -114,10 +120,10 @@ fn the_metamodel_stays_in_the_designer() {
     assert!(!loaded.apps().any(|a| a.name() == "entities"));
 }
 
-#[test]
-fn compositions_survive_the_round_trip() {
-    let (_data, export, state) = designer_with_model();
-    export_dictionary(&state).expect("export");
+#[tokio::test]
+async fn compositions_survive_the_round_trip() {
+    let (_data, export, state) = designer_with_model().await;
+    export_dictionary(&state).await.expect("export");
 
     let schema = Schema::load(export.path().join("schema.json")).unwrap();
     let order = schema.set("OrderSet").expect("OrderSet");

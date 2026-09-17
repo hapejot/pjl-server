@@ -15,30 +15,32 @@ struct RelationalHarness {
     store: RelationalStore,
 }
 
-fn open(path: &std::path::Path) -> RelationalStore {
+async fn open(path: &std::path::Path) -> RelationalStore {
     let source = Arc::new(StaticSchema::new(conformance::schema()));
-    RelationalStore::open(path, source).expect("store")
+    RelationalStore::open(path, source).await.expect("store")
 }
 
+#[async_trait::async_trait]
+#[async_trait::async_trait]
 impl Harness for RelationalHarness {
     type Store = RelationalStore;
 
-    fn create() -> Self {
+    async fn create() -> Self {
         let dir = TempDir::new().expect("tempdir");
-        let store = open(dir.path());
+        let store = open(dir.path()).await;
         Self { dir, store }
     }
 
-    fn store(&self) -> &Self::Store {
+    async fn store(&self) -> &Self::Store {
         &self.store
     }
 
-    fn count_state(&self, set_name: &str, is_active: bool) -> usize {
+    async fn count_state(&self, set_name: &str, is_active: bool) -> usize {
         self.store.count_state(set_name, is_active)
     }
 
-    fn reopen(&self) -> Option<Self::Store> {
-        Some(open(self.dir.path()))
+    async fn reopen(&self) -> Option<Self::Store> {
+        Some(open(self.dir.path()).await)
     }
 }
 

@@ -11,11 +11,12 @@ use std::collections::{HashMap, HashSet};
 
 use data_store::StoreError;
 
-pub trait Catalog {
-    fn table_exists(&self, table: &str) -> Result<bool, StoreError>;
+#[async_trait::async_trait]
+pub trait Catalog: Sync {
+    async fn table_exists(&self, table: &str) -> Result<bool, StoreError>;
 
     /// Namen der vorhandenen Spalten. Fuer eine unbekannte Tabelle leer.
-    fn existing_columns(&self, table: &str) -> Result<HashSet<String>, StoreError>;
+    async fn existing_columns(&self, table: &str) -> Result<HashSet<String>, StoreError>;
 }
 
 /// Katalog ohne Datenbank.
@@ -37,12 +38,13 @@ impl FakeCatalog {
     }
 }
 
+#[async_trait::async_trait]
 impl Catalog for FakeCatalog {
-    fn table_exists(&self, table: &str) -> Result<bool, StoreError> {
+    async fn table_exists(&self, table: &str) -> Result<bool, StoreError> {
         Ok(self.tables.contains_key(table))
     }
 
-    fn existing_columns(&self, table: &str) -> Result<HashSet<String>, StoreError> {
+    async fn existing_columns(&self, table: &str) -> Result<HashSet<String>, StoreError> {
         Ok(self.tables.get(table).cloned().unwrap_or_default())
     }
 }

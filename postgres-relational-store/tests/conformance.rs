@@ -15,8 +15,9 @@ use std::sync::Arc;
 
 use data_store::conformance::{self, Harness};
 use data_store::StaticSchema;
-use postgres::{Client, NoTls};
+use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
 use postgres_relational_store::PostgresStore;
+use tokio_postgres::NoTls;
 
 /// Verbindungszeichenfolge; `PJL_TEST_POSTGRES` sticht die Vorgabe aus
 /// `compose.yaml`.
@@ -36,62 +37,90 @@ struct PostgresHarness {
     store: PostgresStore,
 }
 
-fn connect_to(schema_name: &str) -> Client {
-    let mut client = Client::connect(&url(), NoTls).unwrap_or_else(|e| {
+/// Pool, dessen Verbindungen alle auf demselben Testschema stehen.
+///
+/// Der `search_path` gehoert zur Verbindung, nicht zur Sitzung des Aufrufers -
+/// bei einem Pool muss er deshalb in die Konfiguration, sonst landet die
+/// zweite Verbindung wieder in `public`.
+fn pool_for(schema_name: &str) -> Pool {
+    let mut config: tokio_postgres::Config = url().parse().expect("Verbindungszeichenfolge");
+    config.options(&format!("-c search_path=\"{schema_name}\""));
+    let manager = Manager::from_config(
+        config,
+        NoTls,
+        ManagerConfig {
+            recycling_method: RecyclingMethod::Fast,
+        },
+    );
+    Pool::builder(manager).max_size(8).build().expect("pool")
+}
+
+async fn create_schema(schema_name: &str) {
+    let mut base: tokio_postgres::Config = url().parse().expect("Verbindungszeichenfolge");
+    let (client, connection) = base.connect(NoTls).await.unwrap_or_else(|e| {
         panic!(
             "keine Verbindung zu {}: {e}\n\
              Laeuft die Datenbank? docker compose --profile dev up -d postgres",
             url()
         )
     });
+    tokio::spawn(connection);
     client
-        .batch_execute(&format!(
-            "CREATE SCHEMA IF NOT EXISTS \"{schema_name}\"; \
-             SET search_path TO \"{schema_name}\""
-        ))
+        .batch_execute(&format!("CREATE SCHEMA IF NOT EXISTS \"{schema_name}\""))
+        .await
         .expect("Testschema anlegen");
-    client
 }
 
-fn open(schema_name: &str) -> PostgresStore {
+async fn open(schema_name: &str) -> PostgresStore {
     let source = Arc::new(StaticSchema::new(conformance::schema()));
-    PostgresStore::from_client(connect_to(schema_name), source).expect("store")
+    PostgresStore::from_pool(pool_for(schema_name), source)
+        .await
+        .expect("store")
 }
 
+#[async_trait::async_trait]
+#[async_trait::async_trait]
 impl Harness for PostgresHarness {
     type Store = PostgresStore;
 
-    fn create() -> Self {
+    async fn create() -> Self {
         let schema_name = format!("test_{}", uuid::Uuid::new_v4().simple());
-        let store = open(&schema_name);
+        create_schema(&schema_name).await;
+        let store = open(&schema_name).await;
         Self { schema_name, store }
     }
 
-    fn store(&self) -> &Self::Store {
+    async fn store(&self) -> &Self::Store {
         &self.store
     }
 
-    fn count_state(&self, set_name: &str, is_active: bool) -> usize {
-        self.store.count_state(set_name, is_active)
+    async fn count_state(&self, set_name: &str, is_active: bool) -> usize {
+        self.store.count_state(set_name, is_active).await
     }
 
     /// Eine neue Verbindung auf dasselbe Schema - damit wird geprueft, dass
     /// die Daten in der Datenbank stehen und nicht im Prozess.
-    fn reopen(&self) -> Option<Self::Store> {
-        Some(open(&self.schema_name))
+    async fn reopen(&self) -> Option<Self::Store> {
+        Some(open(&self.schema_name).await)
     }
 }
 
 impl Drop for PostgresHarness {
+    /// Aufraeumen ueber eine eigene Verbindung. `Drop` ist synchron, deshalb
+    /// laeuft das Loeschen in einem abgesetzten Task - der Testlauf muss
+    /// nicht darauf warten.
     fn drop(&mut self) {
-        // Aufraeumen ueber eine eigene Verbindung: die des Stores ist noch
-        // belegt, und ein DROP auf dem eigenen search_path scheitert daran.
-        if let Ok(mut client) = Client::connect(&url(), NoTls) {
-            let _ = client.batch_execute(&format!(
-                "DROP SCHEMA IF EXISTS \"{}\" CASCADE",
-                self.schema_name
-            ));
-        }
+        let schema_name = self.schema_name.clone();
+        let url = url();
+        tokio::spawn(async move {
+            let Ok((client, connection)) = tokio_postgres::connect(&url, NoTls).await else {
+                return;
+            };
+            tokio::spawn(connection);
+            let _ = client
+                .batch_execute(&format!("DROP SCHEMA IF EXISTS \"{schema_name}\" CASCADE"))
+                .await;
+        });
     }
 }
 

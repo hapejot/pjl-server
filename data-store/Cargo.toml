@@ -12,6 +12,10 @@ tracing = "0.1.44"
 uuid = { version = "1.26.1", features = ["v4", "serde"] }
 indexmap = { version = "2", features = ["serde"] }
 anyhow = "1.0.104"
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [features]
 debug-tools = []

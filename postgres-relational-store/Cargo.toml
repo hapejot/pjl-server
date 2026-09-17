@@ -4,12 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+async-trait = "0.1"
 data-store = { version = "0.1.0", path = "../data-store" }
 relational-core = { version = "0.1.0", path = "../relational-core" }
 odata = { version = "0.1.0", path = "../odata" }
-postgres = { version = "0.19", features = ["with-uuid-1", "with-serde_json-1"] }
-r2d2 = "0.8"
-r2d2_postgres = "0.18"
+tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-serde_json-1"] }
+deadpool-postgres = "0.14"
+tokio = { version = "1", features = ["rt", "macros"] }
 serde_json = "1.0.151"
 tracing = "0.1.44"
 uuid = { version = "1.26.1", features = ["v4", "serde"] }
@@ -24,6 +25,7 @@ uuid = { version = "1.26.1", features = ["v4", "serde"] }
 docker-tests = []
 
 [dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 uuid = { version = "1.26.1", features = ["v4"] }
 anyhow = "1.0.104"
 data-store = { version = "0.1.0", path = "../data-store", features = ["conformance"] }

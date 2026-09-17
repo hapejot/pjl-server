@@ -1093,7 +1093,7 @@ async fn export(State(state): State<AppState>) -> Response {
         ))
         .into_response();
     }
-    match crate::export::export_dictionary(&state) {
+    match crate::export::export_dictionary(&state).await {
         Ok(report) => {
             info!("dictionary exported to {}", report.ddic_path);
             let mut body = json!(report);
@@ -1377,18 +1377,18 @@ async fn get_handler(
                 .into_response();
         }
     };
-    match resolve_get_path(&state, &query, &path_struct.segments) {
+    match resolve_get_path(&state, &query, &path_struct.segments).await {
         Ok(result) => result.into_response(),
         Err(e) => e.into_response(),
     }
 }
 
-fn resolve_get_path(
+async fn resolve_get_path(
     state: &AppState,
     query: &ODataQuery,
     segments: &[PathSegment],
 ) -> Result<GetResult, ODataError> {
-    let resolved = resolve_path(state, query, segments)?;
+    let resolved = resolve_path(state, query, segments).await?;
     materialize(
         resolved.cursor,
         resolved.suffix,
@@ -1405,7 +1405,7 @@ struct ResolvedPath<'a> {
     context: String,
 }
 
-fn resolve_path<'a>(
+async fn resolve_path<'a>(
     state: &AppState,
     query: &ODataQuery,
     segments: &'a [PathSegment],
@@ -1445,9 +1445,9 @@ fn resolve_path<'a>(
         &intermediate_query
     };
     let mut cursor = if root.keys.is_empty() {
-        read_collection(state, &root.name, root_query)?
+        read_collection(state, &root.name, root_query).await?
     } else {
-        let record = read_single(state, &root.name, &entity_key(root)?, root_query)?;
+        let record = read_single(state, &root.name, &entity_key(root)?, root_query).await?;
         Cursor::Entity {
             spec,
             set: root.name.clone(),
@@ -1462,7 +1462,7 @@ fn resolve_path<'a>(
         } else {
             &intermediate_query
         };
-        cursor = follow_segment(state, cursor, segment, navigation_query, &mut context)?;
+        cursor = follow_segment(state, cursor, segment, navigation_query, &mut context).await?;
     }
 
     Ok(ResolvedPath {
@@ -1512,7 +1512,7 @@ fn materialize(
 }
 
 /// Ein Navigations-, Property- oder Draft-Segment ausgehend vom aktuellen Cursor aufloesen.
-fn follow_segment(
+async fn follow_segment(
     state: &AppState,
     cursor: Cursor,
     segment: &PathSegment,
@@ -1536,7 +1536,7 @@ fn follow_segment(
         // Beide Draft-Navigationen sind nullable: fehlt das Ziel, ist die Antwort leer.
         "SiblingEntity" => {
             let key = EntityKey::new(record.id(), record.is_active_entity()).sibling();
-            match state.store.read_entity(&set, &key, query) {
+            match state.store.read_entity(&set, &key, query).await {
                 Ok(record) => Ok(Cursor::Entity {
                     spec,
                     set,
@@ -1559,9 +1559,9 @@ fn follow_segment(
                         ODataError::not_found(format!("Unknown entity '{entity}'"))
                     })?;
                     if *collection {
-                        follow_to_many(state, &spec, &field, target, &record, segment, query)
+                        follow_to_many(state, &spec, &field, target, &record, segment, query).await
                     } else {
-                        follow_to_one(state, name, target, &record, query)
+                        follow_to_one(state, name, target, &record, query).await
                     }
                 }
                 _ => Ok(Cursor::Property {
@@ -1576,7 +1576,7 @@ fn follow_segment(
     }
 }
 
-fn follow_to_one(
+async fn follow_to_one(
     state: &AppState,
     name: &str,
     target: EntitySpec,
@@ -1600,7 +1600,7 @@ fn follow_to_one(
     };
     let record = state
         .store
-        .get_collection(&set, &lookup)
+        .get_collection(&set, &lookup).await
         .map_err(ODataError::from_store)?
         .into_iter()
         .next();
@@ -1614,7 +1614,7 @@ fn follow_to_one(
     }
 }
 
-fn follow_to_many(
+async fn follow_to_many(
     state: &AppState,
     spec: &EntitySpec,
     field: &FieldSpec,
@@ -1640,10 +1640,10 @@ fn follow_to_many(
     if segment.keys.is_empty() {
         let mut child_query = query.clone();
         child_query.filter = Some(and_filter(child_query.filter, parent_filter));
-        return read_collection(state, &set, &child_query);
+        return read_collection(state, &set, &child_query).await;
     }
 
-    let record = read_single(state, &set, &entity_key(segment)?, query)?;
+    let record = read_single(state, &set, &entity_key(segment)?, query).await?;
     if record
         .get(&foreign_key)
         .and_then(|v| v.as_str().map(str::to_string))
@@ -1718,7 +1718,7 @@ fn touch_selected_fields(value: &mut Value, query: &ODataQuery) {
 //     value.as_str().and_then(|value| Uuid::parse_str(value).ok())
 // }
 
-fn read_single(
+async fn read_single(
     state: &AppState,
     set: &str,
     key: &EntityKey,
@@ -1726,16 +1726,20 @@ fn read_single(
 ) -> Result<DataRecord, ODataError> {
     state
         .store
-        .read_entity(set, key, query)
+        .read_entity(set, key, query).await
         .map_err(ODataError::from_store)
 }
 
-fn read_collection(state: &AppState, set: &str, query: &ODataQuery) -> Result<Cursor, ODataError> {
+async fn read_collection(state: &AppState, set: &str, query: &ODataQuery) -> Result<Cursor, ODataError> {
     let records = state
         .store
-        .get_collection(set, query)
+        .get_collection(set, query).await
         .map_err(ODataError::from_store)?;
-    let count = query.count.then(|| state.store.count(set, query));
+    let count = if query.count {
+        Some(state.store.count(set, query).await)
+    } else {
+        None
+    };
     Ok(Cursor::Collection { records, count })
 }
 
@@ -1759,7 +1763,7 @@ async fn post_handler(
     let body = payload.map(|Json(v)| v).unwrap_or_else(|| json!({}));
 
     match path_struct.segments.as_slice() {
-        [entity] => match state.store.create_entity(&entity.name, &body) {
+        [entity] => match state.store.create_entity(&entity.name, &body).await {
             Ok(r) => created_response(json!(r)),
             Err(e) => ODataError::from_store(e).into_response(),
         },
@@ -1768,12 +1772,12 @@ async fn post_handler(
         {
             let action_name = action.name.rsplit('.').next().unwrap_or_default();
             let key: EntityKey = entity.into();
-            match draft_action(&state, &entity.name, &key, action_name) {
+            match draft_action(&state, &entity.name, &key, action_name).await {
                 Ok(r) => to_json_response(r).into_response(),
                 Err(e) => e.into_response(),
             }
         }
-        segments if segments.len() > 1 => match create_in_navigation(&state, segments, body) {
+        segments if segments.len() > 1 => match create_in_navigation(&state, segments, body).await {
             Ok(r) => created_response(r),
             Err(e) => e.into_response(),
         },
@@ -1790,7 +1794,7 @@ fn created_response(body: Value) -> Response {
         .into_response()
 }
 
-fn draft_action(
+async fn draft_action(
     state: &AppState,
     set: &str,
     key: &EntityKey,
@@ -1800,14 +1804,14 @@ fn draft_action(
         "draftEdit" => {
             let r = state
                 .store
-                .draft_edit(set, key)
+                .draft_edit(set, key).await
                 .map_err(ODataError::from_store)?;
             for (child_set, foreign_key) in owned_children_of(state, set) {
-                for child in children_of(state, &child_set, &foreign_key, key.id)? {
+                for child in children_of(state, &child_set, &foreign_key, key.id).await? {
                     if child.is_active_entity() {
                         state
                             .store
-                            .draft_edit(&child_set, &EntityKey::from(&child))
+                            .draft_edit(&child_set, &EntityKey::from(&child)).await
                             .map_err(ODataError::from_store)?;
                     }
                 }
@@ -1821,19 +1825,19 @@ fn draft_action(
             // Kinder vorab aktiviert, was gegen die FK-Reihenfolge lief.
             state
                 .store
-                .draft_activate(set, key)
+                .draft_activate(set, key).await
                 .map_err(ODataError::from_store)
         }
         "draftPrepare" => state
             .store
-            .draft_prepare(set, key)
+            .draft_prepare(set, key).await
             .map_err(ODataError::from_store),
         other => Err(ODataError::not_found(format!("Unknown action '{other}'"))),
     }
 }
 
 /// Ein neues Kind in einer To-Many-Navigation anlegen.
-fn create_in_navigation(
+async fn create_in_navigation(
     state: &AppState,
     segments: &[PathSegment],
     mut body: Value,
@@ -1846,7 +1850,7 @@ fn create_in_navigation(
         ));
     }
 
-    let resolved = resolve_path(state, &ODataQuery::default(), parent_segments)?;
+    let resolved = resolve_path(state, &ODataQuery::default(), parent_segments).await?;
     let Cursor::Entity { spec, record, .. } = resolved.cursor else {
         return Err(ODataError::bad_request(
             "Navigation requires a single parent entity",
@@ -1894,7 +1898,7 @@ fn create_in_navigation(
     body["IsActiveEntity"] = json!(record.is_active_entity());
     let created = state
         .store
-        .create_entity(&target.setname(), &body)
+        .create_entity(&target.setname(), &body).await
         .map_err(ODataError::from_store)?;
     Ok(json!(created))
 }
@@ -1916,7 +1920,7 @@ fn owned_children_of(state: &AppState, set: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-fn children_of(
+async fn children_of(
     state: &AppState,
     set: &str,
     foreign_key: &str,
@@ -1925,7 +1929,7 @@ fn children_of(
     let query = ODataQuery::new().filter(Expr::equals_guid(parent.to_string(), foreign_key));
     state
         .store
-        .get_collection(set, &query)
+        .get_collection(set, &query).await
         .map_err(ODataError::from_store)
 }
 
@@ -1940,7 +1944,7 @@ async fn patch_handler(
     let _body = payload.map(|Json(v)| v).unwrap_or_else(|| json!({}));
     let key = _path_struct.segments.first().unwrap();
     let ekey = EntityKey::new(key.id().unwrap(), key.is_active_entity());
-    _state.store.patch_entity(&key.name, &ekey, &_body).unwrap();
+    _state.store.patch_entity(&key.name, &ekey, &_body).await.unwrap();
     (
         [content_type_json(), odata_version()],
         json!([]).to_string(),
@@ -1955,14 +1959,14 @@ async fn delete_handler(path: Path<String>, state: State<AppState>) -> Response 
                 .into_response();
         }
     };
-    match delete_entity(&state, &path_struct.segments) {
+    match delete_entity(&state, &path_struct.segments).await {
         Ok(()) => (StatusCode::NO_CONTENT, [odata_version()]).into_response(),
         Err(e) => e.into_response(),
     }
 }
 
-fn delete_entity(state: &AppState, segments: &[PathSegment]) -> Result<(), ODataError> {
-    let resolved = resolve_path(state, &ODataQuery::default(), segments)?;
+async fn delete_entity(state: &AppState, segments: &[PathSegment]) -> Result<(), ODataError> {
+    let resolved = resolve_path(state, &ODataQuery::default(), segments).await?;
     if let Some(suffix) = resolved.suffix {
         return Err(ODataError::bad_request(format!(
             "'{suffix}' cannot be deleted"
@@ -1975,26 +1979,26 @@ fn delete_entity(state: &AppState, segments: &[PathSegment]) -> Result<(), OData
     };
 
     let key = EntityKey::from(&*record);
-    delete_owned_children(state, &set, &key)?;
+    delete_owned_children(state, &set, &key).await?;
 
     // If deleting a draft, don't also delete active sibling (discard only the draft)
     // If deleting an active, also delete its draft sibling (cleanup both versions)
     if !key.is_active_entity {
         state
             .store
-            .delete_entity_tree_only(&set, &key)
+            .delete_entity_tree_only(&set, &key).await
             .map_err(ODataError::from_store)?;
     } else {
         state
             .store
-            .delete_entity(&set, &key)
+            .delete_entity(&set, &key).await
             .map_err(ODataError::from_store)?;
         // Mit dem aktiven Satz verschwindet auch ein noch offener Draft.
         // The store doesn't automatically delete the draft when deleting an active,
         // so we need to do it explicitly in fiori-server.
         state
             .store
-            .delete_entity_tree_only(&set, &key.sibling())
+            .delete_entity_tree_only(&set, &key.sibling()).await
             .map_err(ODataError::from_store)?;
     }
     Ok(())
@@ -2009,24 +2013,24 @@ fn delete_entity(state: &AppState, segments: &[PathSegment]) -> Result<(), OData
 ///
 /// When deleting an active parent:
 /// - Delete both draft and active children
-fn delete_owned_children(
+async fn delete_owned_children(
     state: &AppState,
     set: &str,
     parent: &EntityKey,
 ) -> Result<(), ODataError> {
     for (child_set, foreign_key) in owned_children_of(state, set) {
-        for child in children_of(state, &child_set, &foreign_key, parent.id)? {
+        for child in children_of(state, &child_set, &foreign_key, parent.id).await? {
             if !parent.is_active_entity && !child.is_active_entity() {
                 // Parent is draft, child is also draft: delete it WITHOUT deleting active sibling
                 state
                     .store
-                    .delete_entity_tree_only(&child_set, &EntityKey::from(&child))
+                    .delete_entity_tree_only(&child_set, &EntityKey::from(&child)).await
                     .map_err(ODataError::from_store)?;
             } else if parent.is_active_entity {
                 // Parent is active: delete all children (will also delete active siblings if draft)
                 state
                     .store
-                    .delete_entity(&child_set, &EntityKey::from(&child))
+                    .delete_entity(&child_set, &EntityKey::from(&child)).await
                     .map_err(ODataError::from_store)?;
             }
             // else: parent is draft and child is active - skip deletion (keep active children)

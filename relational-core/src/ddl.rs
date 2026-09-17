@@ -197,7 +197,7 @@ pub fn revision_table_ddl(dialect: &dyn Dialect) -> String {
 ///
 /// Die Reihenfolge ist bindend: Kompositionen sind Fremdschluessel, also muss
 /// der Parent vor dem Kind stehen.
-pub fn migration_plan(
+pub async fn migration_plan(
     catalog: &dyn Catalog,
     dialect: &dyn Dialect,
     schema: &Schema,
@@ -208,8 +208,8 @@ pub fn migration_plan(
         .creation_order()
         .map_err(|e| StoreError::Metadata(format!("DDL: {e}")))?
     {
-        if catalog.table_exists(&set.name)? {
-            let existing = catalog.existing_columns(&set.name)?;
+        if catalog.table_exists(&set.name).await? {
+            let existing = catalog.existing_columns(&set.name).await?;
             let mut wanted: Vec<(String, String)> = set
                 .columns()
                 .map(|c| (c.name.clone(), dialect.column_type(&c.data_type).to_string()))
@@ -232,17 +232,17 @@ pub fn migration_plan(
 }
 
 /// Meldet Abweichungen, die [`migration_plan`] bewusst nicht behebt.
-pub fn pending_destructive_changes(
+pub async fn pending_destructive_changes(
     catalog: &dyn Catalog,
     dialect: &dyn Dialect,
     schema: &Schema,
 ) -> Result<Vec<String>, StoreError> {
     let mut findings = vec![];
     for set in schema.sets() {
-        if !catalog.table_exists(&set.name)? {
+        if !catalog.table_exists(&set.name).await? {
             continue;
         }
-        let existing = catalog.existing_columns(&set.name)?;
+        let existing = catalog.existing_columns(&set.name).await?;
         let mut wanted: HashSet<String> = set.columns().map(|c| c.name.clone()).collect();
         wanted.extend(internal_columns(dialect, set).into_iter().map(|(n, _)| n));
         for column in existing.difference(&wanted) {
@@ -286,18 +286,18 @@ mod tests {
 
     /// Auf einer leeren Datenbank entsteht fuer jedes Set ein CREATE TABLE -
     /// und kein einziges ALTER.
-    #[test]
-    fn empty_database_is_created_from_scratch() {
-        let plan = migration_plan(&FakeCatalog::default(), &SQLITE, &schema()).unwrap();
+    #[tokio::test]
+    async fn empty_database_is_created_from_scratch() {
+        let plan = migration_plan(&FakeCatalog::default(), &SQLITE, &schema()).await.unwrap();
         assert!(plan.iter().any(|s| s.contains(r#"CREATE TABLE IF NOT EXISTS "OrderSet""#)));
         assert!(!plan.iter().any(|s| s.starts_with("ALTER TABLE")));
     }
 
     /// Der Parent muss vor dem Kind stehen, sonst greift der Fremdschluessel
     /// ins Leere.
-    #[test]
-    fn parents_are_created_before_their_children() {
-        let plan = migration_plan(&FakeCatalog::default(), &SQLITE, &schema()).unwrap();
+    #[tokio::test]
+    async fn parents_are_created_before_their_children() {
+        let plan = migration_plan(&FakeCatalog::default(), &SQLITE, &schema()).await.unwrap();
         let position = |needle: &str| {
             plan.iter()
                 .position(|s| s.contains(&format!("CREATE TABLE IF NOT EXISTS \"{needle}\"")))
@@ -307,10 +307,10 @@ mod tests {
     }
 
     /// Eine bestehende Tabelle wird ergaenzt, nicht neu angelegt.
-    #[test]
-    fn missing_columns_are_added_to_an_existing_table() {
+    #[tokio::test]
+    async fn missing_columns_are_added_to_an_existing_table() {
         let catalog = FakeCatalog::default().with_table("OrderSet", &["ID", "IsActiveEntity"]);
-        let plan = migration_plan(&catalog, &SQLITE, &schema()).unwrap();
+        let plan = migration_plan(&catalog, &SQLITE, &schema()).await.unwrap();
         assert!(!plan
             .iter()
             .any(|s| s.contains(r#"CREATE TABLE IF NOT EXISTS "OrderSet""#)));
@@ -323,13 +323,13 @@ mod tests {
 
     /// Spalten, die nur noch in der Datenbank stehen, werden gemeldet - aber
     /// nicht angefasst.
-    #[test]
-    fn dropped_columns_are_reported_not_removed() {
+    #[tokio::test]
+    async fn dropped_columns_are_reported_not_removed() {
         let catalog = FakeCatalog::default().with_table("OrderSet", &["ID", "Vergessen"]);
-        let plan = migration_plan(&catalog, &SQLITE, &schema()).unwrap();
+        let plan = migration_plan(&catalog, &SQLITE, &schema()).await.unwrap();
         assert!(!plan.iter().any(|s| s.contains("DROP")));
 
-        let findings = pending_destructive_changes(&catalog, &SQLITE, &schema()).unwrap();
+        let findings = pending_destructive_changes(&catalog, &SQLITE, &schema()).await.unwrap();
         assert_eq!(
             findings,
             vec!["OrderSet.Vergessen existiert in der Datenbank, aber nicht im Schema"]

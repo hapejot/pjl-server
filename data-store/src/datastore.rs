@@ -298,57 +298,58 @@ impl Navigation {
     }
 }
 
+#[async_trait::async_trait]
 pub trait DataStore: Send + Sync {
     // -- Collections --
-    fn get_collection(
+    async fn get_collection(
         &self,
         set_name: &str,
         query: &ODataQuery,
     ) -> Result<Vec<DataRecord>, StoreError>;
 
-    fn count(&self, set_name: &str, query: &ODataQuery) -> usize;
+    async fn count(&self, set_name: &str, query: &ODataQuery) -> usize;
 
     // -- Single Entity CRUD --
-    fn read_entity(
+    async fn read_entity(
         &self,
         set_name: &str,
         key: &EntityKey,
         query: &ODataQuery,
     ) -> Result<DataRecord, StoreError>;
 
-    fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError>;
+    async fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError>;
 
-    fn patch_entity(
+    async fn patch_entity(
         &self,
         set_name: &str,
         key: &EntityKey,
         patch: &Value,
     ) -> Result<Value, StoreError>;
 
-    fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError>;
+    async fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError>;
 
     /// Delete an entity tree without also deleting the sibling (used for composition children).
     /// When deleting a child as part of discarding a draft parent, we don't want to also
     /// delete the active sibling.
-    fn delete_entity_tree_only(
+    async fn delete_entity_tree_only(
         &self,
         set_name: &str,
         key: &EntityKey,
     ) -> Result<(), StoreError> {
         // Default implementation: just call delete_entity
         // Implementations should override to not delete sibling
-        self.delete_entity(set_name, key)
+        self.delete_entity(set_name, key).await
     }
 
     // -- Sibling Entity (draft <-> active) --
-    fn read_sibling_entity(
+    async fn read_sibling_entity(
         &self,
         set_name: &str,
         key: &EntityKey,
     ) -> Result<DataRecord, StoreError>;
 
     // -- Property --
-    fn get_property(
+    async fn get_property(
         &self,
         set_name: &str,
         key: &EntityKey,
@@ -356,23 +357,23 @@ pub trait DataStore: Send + Sync {
     ) -> Result<Value, StoreError>;
 
     // -- Persistence --
-    fn commit(&self);
+    async fn commit(&self);
 
     // -- Default-Methoden (kein Implementierungszwang) --
-    fn update_entities(
+    async fn update_entities(
         &self,
         set_name: &str,
         updates: &[(EntityKey, Value)],
     ) -> Result<(), StoreError> {
         for (key, patch) in updates {
-            self.patch_entity(set_name, key, patch)?;
+            self.patch_entity(set_name, key, patch).await?;
         }
         Ok(())
     }
 
-    fn seed_records(&self, set_name: &str, records: Vec<Value>) {
+    async fn seed_records(&self, set_name: &str, records: Vec<Value>) {
         for record in records {
-            let _ = self.create_entity(set_name, &record);
+            let _ = self.create_entity(set_name, &record).await;
         }
     }
 
@@ -386,6 +387,7 @@ pub trait DataStore: Send + Sync {
 /// eine spaetere Postgres-Implementierung nicht gezwungen ist, einen
 /// ungefilterten Full-Table-Scan anzubieten.
 #[cfg(any(test, feature = "debug-tools"))]
+#[async_trait::async_trait]
 pub trait DataStoreDebugExt: DataStore {
-    fn get_records(&self, set_name: &str) -> Vec<Value>;
+    async fn get_records(&self, set_name: &str) -> Vec<Value>;
 }

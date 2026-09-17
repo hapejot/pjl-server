@@ -24,14 +24,19 @@ pub use error::StoreError;
 pub use sql_value::{json_to_param, json_to_param_loose, param_to_json, SqlParam};
 pub use key::EntityKey;
 
+#[async_trait::async_trait]
 pub trait DraftDataStore: DataStore {
-    fn draft_edit(&self, set_name: &str, key: &EntityKey) -> Result<serde_json::Value, StoreError>;
-    fn draft_activate(
+    async fn draft_edit(
         &self,
         set_name: &str,
         key: &EntityKey,
     ) -> Result<serde_json::Value, StoreError>;
-    fn draft_prepare(
+    async fn draft_activate(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+    ) -> Result<serde_json::Value, StoreError>;
+    async fn draft_prepare(
         &self,
         set_name: &str,
         key: &EntityKey,

@@ -1,7 +1,8 @@
 use odata_yaml_store::{DataStore, YamlStore};
 use serde_json::json;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let entity_configs = "EntityConfigs";
     let app = "FioriApp";
 
@@ -11,29 +12,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = store.create_entity(
         entity_configs,
         &json!({ "ID": "entity-1", "Name": "Entity" }),
-    );
+    ).await;
     let _ = store.create_entity(
         entity_configs,
         &json!({ "ID": "entity-2", "Name": "FioriApp" }),
-    );
+    ).await;
     let _ = store.create_entity(
         entity_configs,
         &json!({ "ID": "entity-3", "Name": "Relation" }),
-    );
+    ).await;
     let _ = store.create_entity(
         entity_configs,
         &json!({ "ID": "entity-4", "Name": "Field" } ),
-    );
+    ).await;
     let _ = store.create_entity(
         entity_configs,
         &json!({ "ID": "entity-3", "Name": "Relation" }),
-    );
+    ).await;
 
     let _ = store.create_entity(
         app,
         &json!({
             "ID": "app-1", "Name": "entity.app", "Title": "Entities", "Subtitle":"Maintain Entities", "Entity": "Entity", "Action":"maintain"
         }),
-    );
+    ).await;
     Ok(())
 }

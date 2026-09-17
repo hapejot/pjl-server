@@ -15,8 +15,10 @@ use data_store::{
     SqlParam, StoreError,
 };
 use odata::query::{Expr, ODataQuery};
-use postgres::types::ToSql;
-use postgres::{Client, GenericClient, NoTls};
+use deadpool_postgres::{Object, Pool};
+use tokio_postgres::types::ToSql;
+use deadpool_postgres::GenericClient;
+use tokio_postgres::NoTls;
 use relational_core::ddl::{
     self, quote, DRAFT_ADMIN_COLUMN, DRAFT_ADMIN_TABLE, DRAFT_MESSAGES_COLUMN,
 };
@@ -36,6 +38,21 @@ macro_rules! sql_err {
     };
 }
 
+/// Eine Verbindung aus dem Pool.
+///
+/// Anders als bei SQLite gibt es keinen Mutex auf einer einzelnen Verbindung:
+/// nebenlaeufige Anfragen bekommen jeweils eine eigene und laufen wirklich
+/// parallel.
+macro_rules! conn {
+    ($self:expr) => {
+        $self
+            .pool
+            .get()
+            .await
+            .map_err(|e| sql_err!(Conversion, e))?
+    };
+}
+
 /// Fuehrt `body` in einer Transaktion aus.
 ///
 /// Anders als bei SQLite, wo ein Mutex die Zugriffe ohnehin serialisiert,
@@ -43,10 +60,13 @@ macro_rules! sql_err {
 /// Schreibvorgang darf keinen halben Zustand hinterlassen.
 macro_rules! in_transaction {
     ($self:expr, |$tx:ident| $body:block) => {{
-        let mut guard = $self.client.lock().expect("client lock");
-        let mut $tx = guard.transaction().map_err(|e| sql_err!(Conversion, e))?;
-        let result = (|| $body)()?;
-        $tx.commit().map_err(|e| sql_err!(Conversion, e))?;
+        let mut connection = conn!($self);
+        let $tx = connection
+            .transaction()
+            .await
+            .map_err(|e| sql_err!(Conversion, e))?;
+        let result = async { $body }.await?;
+        $tx.commit().await.map_err(|e| sql_err!(Conversion, e))?;
         result
     }};
 }
@@ -61,61 +81,74 @@ fn as_refs<'a>(params: &'a [PgParam<'a>]) -> Vec<&'a (dyn ToSql + Sync)> {
 }
 
 pub struct PostgresStore {
-    client: Mutex<Client>,
+    pool: Pool,
     schema_source: Arc<dyn SchemaSource>,
     schema: Mutex<Arc<Schema>>,
 }
 
 impl PostgresStore {
     /// Verbindet sich und bringt die Datenbank auf den Stand des Schemas.
-    pub fn connect(url: &str, schema_source: Arc<dyn SchemaSource>) -> Result<Self, StoreError> {
-        let client = Client::connect(url, NoTls).map_err(|e| sql_err!(Metadata, e))?;
-        Self::from_client(client, schema_source)
+    pub async fn connect(
+        url: &str,
+        schema_source: Arc<dyn SchemaSource>,
+    ) -> Result<Self, StoreError> {
+        let config: tokio_postgres::Config = url.parse().map_err(|e| sql_err!(Metadata, e))?;
+        let manager = deadpool_postgres::Manager::from_config(
+            config,
+            NoTls,
+            deadpool_postgres::ManagerConfig {
+                recycling_method: deadpool_postgres::RecyclingMethod::Fast,
+            },
+        );
+        let pool = Pool::builder(manager)
+            .max_size(16)
+            .build()
+            .map_err(|e| sql_err!(Metadata, e))?;
+        Self::from_pool(pool, schema_source).await
     }
 
-    pub fn from_client(
-        mut client: Client,
+    /// Uebernimmt einen bereits aufgebauten Pool.
+    pub async fn from_pool(
+        pool: Pool,
         schema_source: Arc<dyn SchemaSource>,
     ) -> Result<Self, StoreError> {
         let schema = schema_source
             .schema()
             .map_err(|e| StoreError::Metadata(e.to_string()))?;
-        apply_schema(&mut client, &POSTGRES, &schema)?;
-        set_applied_revision(&mut client, &POSTGRES, schema_source.revision().0)?;
-
+        {
+            let mut client = pool.get().await.map_err(|e| sql_err!(Metadata, e))?;
+            apply_schema(&mut client, &POSTGRES, &schema).await?;
+            set_applied_revision(&client, &POSTGRES, schema_source.revision().0).await?;
+        }
         Ok(Self {
-            client: Mutex::new(client),
+            pool,
             schema_source,
             schema: Mutex::new(schema),
         })
     }
 
     /// Uebernimmt einen neuen Schemastand und migriert die Datenbank.
-    pub fn refresh_schema(&self) -> Result<bool, StoreError> {
+    pub async fn refresh_schema(&self) -> Result<bool, StoreError> {
         let revision = self.schema_source.revision();
-        let mut client = self.client.lock().expect("client lock");
-        if applied_revision(&mut client) == Some(revision.0) {
+        let mut client = conn!(self);
+        if applied_revision(&client).await == Some(revision.0) {
             return Ok(false);
         }
         let schema = self
             .schema_source
             .schema()
             .map_err(|e| StoreError::Metadata(e.to_string()))?;
-        apply_schema(&mut client, &POSTGRES, &schema)?;
-        set_applied_revision(&mut client, &POSTGRES, revision.0)?;
+        apply_schema(&mut client, &POSTGRES, &schema).await?;
+        set_applied_revision(&client, &POSTGRES, revision.0).await?;
         *self.schema.lock().expect("schema lock") = schema;
         Ok(true)
     }
 
     /// Spalten, die in der Datenbank stehen, aber nicht mehr im Schema.
-    pub fn pending_destructive_changes(&self) -> Result<Vec<String>, StoreError> {
-        let mut client = self.client.lock().expect("client lock");
+    pub async fn pending_destructive_changes(&self) -> Result<Vec<String>, StoreError> {
+        let client = conn!(self);
         let schema = self.schema();
-        ddl::pending_destructive_changes(
-            &PostgresCatalog::new(&mut *client),
-            &POSTGRES,
-            &schema,
-        )
+        ddl::pending_destructive_changes(&PostgresCatalog::new(&client), &POSTGRES, &schema).await
     }
 
     fn dialect(&self) -> &'static dyn Dialect {
@@ -135,23 +168,29 @@ impl PostgresStore {
     }
 
     /// Anzahl gespeicherter Saetze je Aktivierungszustand.
-    pub fn count_state(&self, set_name: &str, is_active: bool) -> usize {
+    pub async fn count_state(&self, set_name: &str, is_active: bool) -> usize {
         let Ok(schema) = self.entity_set(set_name) else {
             return 0;
         };
         let set = schema.set(set_name).expect("geprueft");
-        let mut client = self.client.lock().expect("client lock");
+        let Ok(client) = self.pool.get().await else {
+            return 0;
+        };
         let result = if set.draft_enabled {
-            client.query_one(
-                &format!(
-                    "SELECT COUNT(*) FROM {} WHERE {} = $1",
-                    quote(set_name),
-                    quote(IS_ACTIVE_COLUMN)
-                ),
-                &[&is_active],
-            )
+            client
+                .query_one(
+                    &format!(
+                        "SELECT COUNT(*) FROM {} WHERE {} = $1",
+                        quote(set_name),
+                        quote(IS_ACTIVE_COLUMN)
+                    ),
+                    &[&is_active],
+                )
+                .await
         } else if is_active {
-            client.query_one(&format!("SELECT COUNT(*) FROM {}", quote(set_name)), &[])
+            client
+                .query_one(&format!("SELECT COUNT(*) FROM {}", quote(set_name)), &[])
+                .await
         } else {
             return 0;
         };
@@ -159,22 +198,25 @@ impl PostgresStore {
     }
 
     /// Anzahl der Draft-Verwaltungssaetze. Diagnose- und Testhilfe.
-    pub fn count_draft_admin(&self) -> usize {
-        let mut client = self.client.lock().expect("client lock");
+    pub async fn count_draft_admin(&self) -> usize {
+        let Ok(client) = self.pool.get().await else {
+            return 0;
+        };
         client
             .query_one(
                 &format!("SELECT COUNT(*) FROM {}", quote(DRAFT_ADMIN_TABLE)),
                 &[],
             )
+            .await
             .map(|r| r.get::<_, i64>(0))
             .unwrap_or(0) as usize
     }
 
     // -- SELECT-Bausteine ----------------------------------------------------
 
-    fn load_draft_admin(
+    async fn load_draft_admin(
         &self,
-        conn: &mut impl GenericClient,
+        conn: &impl GenericClient,
         draft_uuid: &str,
     ) -> Result<Option<Value>, StoreError> {
         let rows = conn
@@ -189,7 +231,7 @@ impl PostgresStore {
                     table = quote(DRAFT_ADMIN_TABLE),
                 ),
                 &[&draft_uuid],
-            )
+            ).await
             .map_err(|e| sql_err!(Metadata, e))?;
         let Some(row) = rows.first() else {
             return Ok(None);
@@ -202,9 +244,9 @@ impl PostgresStore {
         })))
     }
 
-    fn store_draft_admin(
+    async fn store_draft_admin(
         &self,
-        conn: &mut impl GenericClient,
+        conn: &impl GenericClient,
         record: &DataRecord,
     ) -> Result<Option<String>, StoreError> {
         let Some(admin) = record.draft_admin_data() else {
@@ -231,20 +273,20 @@ impl PostgresStore {
                 &admin.in_process_by_user,
                 &admin.last_changed_by_user,
             ],
-        )
+        ).await
         .map_err(|e| sql_err!(Metadata, e))?;
         Ok(Some(uuid))
     }
 
     /// Schreibt einen Datensatz (INSERT ... ON CONFLICT DO UPDATE).
-    fn write_record(
+    async fn write_record(
         &self,
-        conn: &mut impl GenericClient,
+        conn: &impl GenericClient,
         set: &EntitySet,
         record: &DataRecord,
     ) -> Result<(), StoreError> {
         // Laeuft in derselben Transaktion wie der Satz selbst.
-        let admin_id = self.store_draft_admin(conn, record)?;
+        let admin_id = self.store_draft_admin(conn, record).await?;
 
         let mut columns: Vec<String> = vec![];
         let mut values: Vec<SqlParam> = vec![];
@@ -292,7 +334,7 @@ impl PostgresStore {
         );
         trace!("write: {sql}");
         let bound = bind(&values);
-        conn.execute(&sql, &as_refs(&bound))
+        conn.execute(&sql, &as_refs(&bound)).await
             .map_err(|e| sql_err!(Metadata, e))?;
         Ok(())
     }
@@ -306,9 +348,9 @@ impl PostgresStore {
     }
 
     /// Einzelsatz ueber den Primaerschluessel.
-    fn load_one(
+    async fn load_one(
         &self,
-        conn: &mut impl GenericClient,
+        conn: &impl GenericClient,
         set: &EntitySet,
         key: &EntityKey,
     ) -> Result<DataRecord, StoreError> {
@@ -321,7 +363,7 @@ impl PostgresStore {
             ));
         }
         let q = t.build()?;
-        let records = self.query_records(conn, set, q.text, q.params, None, "")?;
+        let records = self.query_records(conn, set, q.text, q.params, None, "").await?;
         records.into_iter().next().ok_or_else(|| {
             StoreError::not_found(format!(
                 "{}/{}/{}",
@@ -336,15 +378,15 @@ impl PostgresStore {
         })
     }
 
-    fn finish_record(
+    async fn finish_record(
         &self,
-        conn: &mut impl GenericClient,
+        conn: &impl GenericClient,
         mut map: Map<String, Value>,
         admin_id: Option<String>,
         messages: Option<String>,
     ) -> Result<DataRecord, StoreError> {
         if let Some(admin_id) = admin_id {
-            if let Some(admin) = self.load_draft_admin(conn, &admin_id)? {
+            if let Some(admin) = self.load_draft_admin(conn, &admin_id).await? {
                 map.insert("DraftAdministrativeData".into(), admin);
             }
         }
@@ -357,9 +399,9 @@ impl PostgresStore {
     }
 
     /// Fuehrt ein SELECT aus und materialisiert die Zeilen.
-    fn query_records(
+    async fn query_records(
         &self,
-        conn: &mut impl GenericClient,
+        conn: &impl GenericClient,
         set: &EntitySet,
         query_text: String,
         params: Vec<SqlParam>,
@@ -375,7 +417,7 @@ impl PostgresStore {
 
         let bound = bind(&params);
         let rows = conn
-            .query(&sql, &as_refs(&bound))
+            .query(&sql, &as_refs(&bound)).await
             .map_err(|e| sql_err!(Metadata, format!("{e} in {sql}")))?;
 
         // Nur die tatsaechlich projizierten Spalten materialisieren: $select
@@ -414,18 +456,20 @@ impl PostgresStore {
             raw.push((map, admin_id, messages));
         }
 
-        raw.into_iter()
-            .map(|(map, admin, messages)| self.finish_record(conn, map, admin, messages))
-            .collect()
+        let mut records = Vec::with_capacity(raw.len());
+        for (map, admin, messages) in raw {
+            records.push(self.finish_record(conn, map, admin, messages).await?);
+        }
+        Ok(records)
     }
 
     // -- Kompositionen --------------------------------------------------------
 
     /// Schluessel der Kompositionskinder **im selben Aktivierungszustand**
     /// wie der Parent.
-    fn child_keys(
+    async fn child_keys(
         &self,
-        conn: &mut impl GenericClient,
+        conn: &impl GenericClient,
         set: &EntitySet,
         key: &EntityKey,
     ) -> Result<Vec<(String, EntityKey)>, StoreError> {
@@ -449,7 +493,7 @@ impl PostgresStore {
             }
             let bound = bind(&params);
             let rows = conn
-                .query(&sql, &as_refs(&bound))
+                .query(&sql, &as_refs(&bound)).await
                 .map_err(|e| sql_err!(Metadata, e))?;
             for row in rows {
                 let id: String = row.get(0);
@@ -463,9 +507,9 @@ impl PostgresStore {
         Ok(result)
     }
 
-    fn delete_row(
+    async fn delete_row(
         &self,
-        conn: &mut impl GenericClient,
+        conn: &impl GenericClient,
         set: &EntitySet,
         key: &EntityKey,
     ) -> Result<(), StoreError> {
@@ -482,62 +526,70 @@ impl PostgresStore {
         );
         let params = Self::key_params(set, key);
         let bound = bind(&params);
-        conn.execute(&sql, &as_refs(&bound))
+        conn.execute(&sql, &as_refs(&bound)).await
             .map_err(|e| sql_err!(Metadata, e))?;
         Ok(())
     }
 
-    fn draft_edit_tree(
-        &self,
-        conn: &mut impl GenericClient,
-        set: &EntitySet,
-        key: &EntityKey,
-    ) -> Result<(), StoreError> {
-        let mut record = self.load_one(conn, set, key)?;
+    /// Rekursiv, deshalb geboxt: eine `async fn`, die sich selbst aufruft,
+    /// haette eine Zukunft von unbestimmter Groesse.
+    fn draft_edit_tree<'a>(
+        &'a self,
+        conn: &'a impl GenericClient,
+        set: &'a EntitySet,
+        key: &'a EntityKey,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), StoreError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+        let mut record = self.load_one(conn, set, key).await?;
         record.edit();
-        self.write_record(conn, set, &record)?;
+        self.write_record(conn, set, &record).await?;
         let schema = self.schema();
-        for (child_set, child_key) in self.child_keys(conn, set, key)? {
+        for (child_set, child_key) in self.child_keys(conn, set, key).await? {
             let child = schema
                 .set(&child_set)
                 .map_err(|e| StoreError::Metadata(e.to_string()))?;
-            self.draft_edit_tree(conn, child, &child_key)?;
+            self.draft_edit_tree(conn, child, &child_key).await?;
         }
         Ok(())
+        })
     }
 
     /// Aktiviert einen Draft samt Kompositionskindern.
     ///
     /// Der Parent wird zuerst als aktiv geschrieben, sonst laufen die Kinder
     /// in ihren Fremdschluessel. Erst danach faellt die Draft-Zeile.
-    fn draft_activate_tree(
-        &self,
-        conn: &mut impl GenericClient,
-        set_name: &str,
-        key: &EntityKey,
-    ) -> Result<Value, StoreError> {
+    fn draft_activate_tree<'a>(
+        &'a self,
+        conn: &'a impl GenericClient,
+        set_name: &'a str,
+        key: &'a EntityKey,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, StoreError>> + Send + 'a>>
+    {
+        Box::pin(async move {
         if key.is_active_entity {
             return Err(StoreError::InvalidState);
         }
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
-        let mut record = self.load_one(conn, set, key)?;
+        let mut record = self.load_one(conn, set, key).await?;
         record.activate()?;
-        self.write_record(conn, set, &record)?;
+        self.write_record(conn, set, &record).await?;
 
-        for (child_set, child_key) in self.child_keys(conn, set, key)? {
-            self.draft_activate_tree(conn, &child_set, &child_key)?;
+        for (child_set, child_key) in self.child_keys(conn, set, key).await? {
+            self.draft_activate_tree(conn, &child_set, &child_key).await?;
         }
 
-        self.delete_row(conn, set, key)?;
+        self.delete_row(conn, set, key).await?;
         Ok(json!(record))
+        })
     }
 
     // -- $expand --------------------------------------------------------------
 
-    fn expand_rows(
+    async fn expand_rows(
         &self,
-        conn: &mut impl GenericClient,
+        conn: &impl GenericClient,
         set: &EntitySet,
         rows: &mut [DataRecord],
         query: &ODataQuery,
@@ -557,7 +609,7 @@ impl PostgresStore {
                 continue;
             }
             match set.get_association(name) {
-                Ok(assoc) => self.expand_association(conn, rows, assoc)?,
+                Ok(assoc) => self.expand_association(conn, rows, assoc).await?,
                 Err(e) if strict => return Err(StoreError::Metadata(e.to_string())),
                 Err(_) => {}
             }
@@ -565,9 +617,9 @@ impl PostgresStore {
         Ok(())
     }
 
-    fn expand_association(
+    async fn expand_association(
         &self,
-        conn: &mut impl GenericClient,
+        conn: &impl GenericClient,
         rows: &mut [DataRecord],
         assoc: &Association,
     ) -> Result<(), StoreError> {
@@ -601,7 +653,7 @@ impl PostgresStore {
                     .filter_raw(raw, params)
                     .shadow_drafts()
                     .build()?;
-                let found = self.query_records(conn, target, sql.text, sql.params, None, "")?;
+                let found = self.query_records(conn, target, sql.text, sql.params, None, "").await?;
                 let by_id: HashMap<String, Value> = found
                     .iter()
                     .map(|r| (r.id().to_string(), r.core_json()))
@@ -628,7 +680,7 @@ impl PostgresStore {
                     .filter_raw(raw, params)
                     .shadow_drafts()
                     .build()?;
-                let found = self.query_records(conn, target, sql.text, sql.params, None, "")?;
+                let found = self.query_records(conn, target, sql.text, sql.params, None, "").await?;
 
                 let mut grouped: HashMap<String, Vec<Value>> = HashMap::new();
                 for record in found.iter() {
@@ -648,45 +700,47 @@ impl PostgresStore {
 }
 
 /// Setzt die von [`ddl::migration_plan`] geplanten Anweisungen ab.
-fn apply_schema(
-    client: &mut Client,
+async fn apply_schema(
+    client: &mut Object,
     dialect: &dyn Dialect,
     schema: &Schema,
 ) -> Result<(), StoreError> {
-    let plan = {
-        let catalog = PostgresCatalog::new(client);
-        ddl::migration_plan(&catalog, dialect, schema)?
-    };
+    let plan = ddl::migration_plan(&PostgresCatalog::new(&*client), dialect, schema).await?;
     for statement in plan {
         debug!("DDL: {statement}");
         client
             .batch_execute(&statement)
+            .await
             .map_err(|e| sql_err!(Conversion, format!("{e} in {statement}")))?;
     }
     Ok(())
 }
 
-fn applied_revision(client: &mut Client) -> Option<u64> {
+async fn applied_revision(client: &impl GenericClient) -> Option<u64> {
     client
         .query_one(&ddl::revision_select_sql(), &[])
+        .await
         .ok()
         .map(|row| row.get::<_, i64>(0) as u64)
 }
 
-fn set_applied_revision(
-    client: &mut Client,
+async fn set_applied_revision(
+    client: &impl GenericClient,
     dialect: &dyn Dialect,
     revision: u64,
 ) -> Result<(), StoreError> {
     client
         .execute(&ddl::revision_delete_sql(), &[])
+        .await
         .map_err(|e| sql_err!(Conversion, e))?;
     client
         .execute(&ddl::revision_insert_sql(dialect), &[&(revision as i64)])
+        .await
         .map_err(|e| sql_err!(Conversion, e))?;
     Ok(())
 }
 
+#[async_trait::async_trait]
 impl DataStore for PostgresStore {
     /// Metadaten kommen ueber [`SchemaSource`], nicht ueber den Store-Trait.
     fn navigation(&mut self, _single: bool) -> &mut Navigation {
@@ -700,7 +754,7 @@ impl DataStore for PostgresStore {
         debug!("set_navigations() ignoriert - PostgresStore nutzt die SchemaSource");
     }
 
-    fn get_collection(
+    async fn get_collection(
         &self,
         set_name: &str,
         query: &ODataQuery,
@@ -717,34 +771,34 @@ impl DataStore for PostgresStore {
         }
         let sql = sql.build()?;
 
-        let mut client = self.client.lock().expect("client lock");
+        let client = conn!(self);
         let mut records = self.query_records(
-            &mut *client,
+            &client,
             set,
             sql.text,
             sql.params,
             order_by_clause(set, self.dialect(), query)?,
             &paging_clause(self.dialect(), query),
-        )?;
+        ).await?;
 
         for record in records.iter_mut() {
             for s in query.select.iter() {
                 record.touch(s);
             }
         }
-        self.expand_rows(&mut *client, set, &mut records, query, false)?;
+        self.expand_rows(&client, set, &mut records, query, false).await?;
         Ok(records)
     }
 
-    fn count(&self, set_name: &str, query: &ODataQuery) -> usize {
+    async fn count(&self, set_name: &str, query: &ODataQuery) -> usize {
         let mut q = data_store::query::count_query(query);
         q.orderby.clear();
-        self.get_collection(set_name, &q)
+        self.get_collection(set_name, &q).await
             .map(|r| r.len())
             .unwrap_or(0)
     }
 
-    fn read_entity(
+    async fn read_entity(
         &self,
         set_name: &str,
         key: &EntityKey,
@@ -752,14 +806,14 @@ impl DataStore for PostgresStore {
     ) -> Result<DataRecord, StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
-        let mut client = self.client.lock().expect("client lock");
-        let mut rows = [self.load_one(&mut *client, set, key)?];
-        self.expand_rows(&mut *client, set, &mut rows, query, true)?;
+        let client = conn!(self);
+        let mut rows = [self.load_one(&client, set, key).await?];
+        self.expand_rows(&client, set, &mut rows, query, true).await?;
         let [row] = rows;
         Ok(row)
     }
 
-    fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
+    async fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
         let mut record = DataRecord::from_json(data)?;
@@ -797,7 +851,7 @@ impl DataStore for PostgresStore {
                 let parent_uuid =
                     Uuid::parse_str(&parent_id).map_err(|e| StoreError::Conflict(e.to_string()))?;
                 let parent_key = EntityKey::new(parent_uuid, record.is_active_entity());
-                let parent_record = self.load_one(&mut tx, parent_set, &parent_key)?;
+                let parent_record = self.load_one(&tx, parent_set, &parent_key).await?;
 
                 match (record.is_active_entity(), parent_record.draft_admin_data()) {
                     (true, None) => {}
@@ -809,13 +863,13 @@ impl DataStore for PostgresStore {
                 record.create_draft();
             }
 
-            self.write_record(&mut tx, set, &record)?;
+            self.write_record(&tx, set, &record).await?;
             Ok::<_, StoreError>(())
         });
         Ok(record)
     }
 
-    fn patch_entity(
+    async fn patch_entity(
         &self,
         set_name: &str,
         key: &EntityKey,
@@ -839,64 +893,65 @@ impl DataStore for PostgresStore {
             }
         }
         in_transaction!(self, |tx| {
-            let mut record = self.load_one(&mut tx, set, key)?;
+            let mut record = self.load_one(&tx, set, key).await?;
             record.merge(patch);
-            self.write_record(&mut tx, set, &record)?;
+            self.write_record(&tx, set, &record).await?;
             Ok::<_, StoreError>(())
         });
         Ok(patch.clone())
     }
 
-    fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
+    async fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
         in_transaction!(self, |tx| {
-            self.delete_row(&mut tx, set, key)?;
+            self.delete_row(&tx, set, key).await?;
             if !key.is_active_entity {
-                self.delete_row(&mut tx, set, &key.sibling())?;
+                self.delete_row(&tx, set, &key.sibling()).await?;
             }
             Ok::<_, StoreError>(())
         });
         Ok(())
     }
 
-    fn delete_entity_tree_only(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
+    async fn delete_entity_tree_only(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
         in_transaction!(self, |tx| {
-            self.delete_row(&mut tx, set, key)?;
+            self.delete_row(&tx, set, key).await?;
             Ok::<_, StoreError>(())
         });
         Ok(())
     }
 
-    fn read_sibling_entity(
+    async fn read_sibling_entity(
         &self,
         set_name: &str,
         key: &EntityKey,
     ) -> Result<DataRecord, StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
-        let mut client = self.client.lock().expect("client lock");
-        self.load_one(&mut *client, set, &key.sibling())
+        let client = conn!(self);
+        self.load_one(&client, set, &key.sibling()).await
     }
 
-    fn get_property(
+    async fn get_property(
         &self,
         set_name: &str,
         key: &EntityKey,
         property: &str,
     ) -> Result<Value, StoreError> {
-        self.read_entity(set_name, key, &ODataQuery::new())?
+        self.read_entity(set_name, key, &ODataQuery::new()).await?
             .get(property)
             .ok_or_else(|| StoreError::PropertyNotFound(property.into()))
     }
 
-    fn commit(&self) {}
+    async fn commit(&self) {}
 }
 
+#[async_trait::async_trait]
 impl DraftDataStore for PostgresStore {
-    fn draft_edit(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
+    async fn draft_edit(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
         if !key.is_active_entity {
             return Err(StoreError::InvalidState);
         }
@@ -904,7 +959,7 @@ impl DraftDataStore for PostgresStore {
         let set = schema.set(set_name).expect("geprueft");
 
         let record = in_transaction!(self, |tx| {
-            let mut record = self.load_one(&mut tx, set, key)?;
+            let mut record = self.load_one(&tx, set, key).await?;
 
             // Kinder duerfen nur mit dem Parent in den Draft.
             if let Some(parent) = set.composition_parent() {
@@ -919,7 +974,7 @@ impl DraftDataStore for PostgresStore {
                 let parent_uuid =
                     Uuid::parse_str(&parent_id).map_err(|e| StoreError::Conflict(e.to_string()))?;
                 if self
-                    .load_one(&mut tx, parent_set, &EntityKey::new(parent_uuid, false))
+                    .load_one(&tx, parent_set, &EntityKey::new(parent_uuid, false)).await
                     .is_err()
                 {
                     return Err(StoreError::InvalidState);
@@ -927,31 +982,31 @@ impl DraftDataStore for PostgresStore {
             }
 
             record.edit();
-            self.write_record(&mut tx, set, &record)?;
-            for (child_set, child_key) in self.child_keys(&mut tx, set, key)? {
+            self.write_record(&tx, set, &record).await?;
+            for (child_set, child_key) in self.child_keys(&tx, set, key).await? {
                 let child = schema
                     .set(&child_set)
                     .map_err(|e| StoreError::Metadata(e.to_string()))?;
-                self.draft_edit_tree(&mut tx, child, &child_key)?;
+                self.draft_edit_tree(&tx, child, &child_key).await?;
             }
             Ok::<_, StoreError>(record)
         });
         Ok(json!(record))
     }
 
-    fn draft_activate(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
+    async fn draft_activate(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
         if key.is_active_entity {
             return Err(StoreError::InvalidState);
         }
         Ok(in_transaction!(self, |tx| {
-            self.draft_activate_tree(&mut tx, set_name, key)
+            self.draft_activate_tree(&tx, set_name, key).await
         }))
     }
 
-    fn draft_prepare(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
+    async fn draft_prepare(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
-        let mut client = self.client.lock().expect("client lock");
-        Ok(json!(self.load_one(&mut *client, set, key)?))
+        let client = conn!(self);
+        Ok(json!(self.load_one(&client, set, key).await?))
     }
 }

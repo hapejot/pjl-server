@@ -11,14 +11,14 @@ use tower::ServiceExt;
 
 const ENTITY_ID: &str = "00000000-0000-0000-0000-000000000001";
 
-fn app_state() -> (TempDir, AppState) {
+async fn app_state() -> (TempDir, AppState) {
     let dir = TempDir::new().unwrap();
     let store = Arc::new(YamlStore::open(dir.path()).unwrap());
     store
         .create_entity(
             "EntitySet",
             &json!({ "ID": ENTITY_ID, "IsActiveEntity": true, "name": "Order", "plural": "Orders" }),
-        )
+        ).await
         .unwrap();
     let state = AppState::designer(store);
     state.reload();
@@ -46,12 +46,12 @@ async fn request(state: &AppState, method: Method, uri: &str, body: Value) -> (S
     (status, value)
 }
 
-fn fields_of(state: &AppState, parent: &str) -> Vec<Value> {
+async fn fields_of(state: &AppState, parent: &str) -> Vec<Value> {
     let query = odata::query::ODataQuery::new()
         .filter(odata::query::Expr::equals_guid(parent, "entity_ID"));
     state
         .store
-        .get_collection("FieldSet", &query)
+        .get_collection("FieldSet", &query).await
         .unwrap()
         .iter()
         .map(|r| json!(r))
@@ -60,7 +60,7 @@ fn fields_of(state: &AppState, parent: &str) -> Vec<Value> {
 
 #[tokio::test]
 async fn creates_a_child_through_a_navigation() {
-    let (_dir, state) = app_state();
+    let (_dir, state) = app_state().await;
     request(
         &state,
         Method::POST,
@@ -80,12 +80,12 @@ async fn creates_a_child_through_a_navigation() {
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(body["entity_ID"], json!(ENTITY_ID));
     assert_eq!(body["IsActiveEntity"], json!(false));
-    assert_eq!(fields_of(&state, ENTITY_ID).len(), 1);
+    assert_eq!(fields_of(&state, ENTITY_ID).await.len(), 1);
 }
 
 #[tokio::test]
 async fn rejects_creation_on_an_unknown_navigation() {
-    let (_dir, state) = app_state();
+    let (_dir, state) = app_state().await;
 
     let (status, _) = request(
         &state,
@@ -101,13 +101,13 @@ async fn rejects_creation_on_an_unknown_navigation() {
 /// Draft-Aktionen und das Verwerfen muessen die Kinder einer Composition mitnehmen.
 #[tokio::test]
 async fn draft_actions_cascade_to_children() {
-    let (_dir, state) = app_state();
+    let (_dir, state) = app_state().await;
     state
         .store
         .create_entity(
             "FieldSet",
             &json!({ "IsActiveEntity": true, "entity_ID": ENTITY_ID, "name": "status" }),
-        )
+        ).await
         .unwrap();
 
     let (status, _) = request(
@@ -118,7 +118,7 @@ async fn draft_actions_cascade_to_children() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let drafted = fields_of(&state, ENTITY_ID);
+    let drafted = fields_of(&state, ENTITY_ID).await;
     assert_eq!(drafted.len(), 1);
     assert_eq!(drafted[0]["IsActiveEntity"], json!(false));
 
@@ -130,20 +130,20 @@ async fn draft_actions_cascade_to_children() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let activated = fields_of(&state, ENTITY_ID);
+    let activated = fields_of(&state, ENTITY_ID).await;
     assert_eq!(activated.len(), 1);
     assert_eq!(activated[0]["IsActiveEntity"], json!(true));
 }
 
 #[tokio::test]
 async fn discarding_a_draft_keeps_the_active_children() {
-    let (_dir, state) = app_state();
+    let (_dir, state) = app_state().await;
     state
         .store
         .create_entity(
             "FieldSet",
             &json!({ "IsActiveEntity": true, "entity_ID": ENTITY_ID, "name": "status" }),
-        )
+        ).await
         .unwrap();
     request(
         &state,
@@ -162,7 +162,7 @@ async fn discarding_a_draft_keeps_the_active_children() {
     .await;
 
     assert_eq!(status, StatusCode::NO_CONTENT);
-    let remaining = fields_of(&state, ENTITY_ID);
+    let remaining = fields_of(&state, ENTITY_ID).await;
     assert_eq!(remaining.len(), 1);
     assert_eq!(remaining[0]["IsActiveEntity"], json!(true));
     assert!(
@@ -172,20 +172,20 @@ async fn discarding_a_draft_keeps_the_active_children() {
                 "EntitySet",
                 &EntityKey::new_active(ENTITY_ID),
                 &Default::default()
-            )
+            ).await
             .is_ok()
     );
 }
 
 #[tokio::test]
 async fn deleting_the_parent_removes_its_children() {
-    let (_dir, state) = app_state();
+    let (_dir, state) = app_state().await;
     state
         .store
         .create_entity(
             "FieldSet",
             &json!({ "IsActiveEntity": true, "entity_ID": ENTITY_ID, "name": "status" }),
-        )
+        ).await
         .unwrap();
 
     let (status, _) = request(
@@ -197,12 +197,12 @@ async fn deleting_the_parent_removes_its_children() {
     .await;
 
     assert_eq!(status, StatusCode::NO_CONTENT);
-    assert!(fields_of(&state, ENTITY_ID).is_empty());
+    assert!(fields_of(&state, ENTITY_ID).await.is_empty());
 }
 
 #[tokio::test]
 async fn metadata_marks_children_as_draft_nodes() {
-    let (_dir, state) = app_state();
+    let (_dir, state) = app_state().await;
     let response = srv::router()
         .with_state(state.clone())
         .oneshot(

@@ -11,8 +11,8 @@
 use std::error::Error;
 
 use data_store::SqlParam;
-use postgres::types::{to_sql_checked, FromSql, IsNull, ToSql, Type};
-use postgres::Row;
+use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, ToSql, Type};
+use tokio_postgres::Row;
 
 /// Huelle um [`SqlParam`], damit der Treiber den Wert binden kann.
 #[derive(Debug)]
@@ -22,7 +22,7 @@ impl ToSql for PgParam<'_> {
     fn to_sql(
         &self,
         ty: &Type,
-        out: &mut postgres::types::private::BytesMut,
+        out: &mut tokio_postgres::types::private::BytesMut,
     ) -> Result<IsNull, Box<dyn Error + Sync + Send>> {
         match self.0 {
             SqlParam::Null => Ok(IsNull::Yes),
@@ -61,7 +61,7 @@ impl ToSql for PgParam<'_> {
 pub fn from_postgres(row: &Row, index: usize) -> Result<SqlParam, data_store::StoreError> {
     let column_type = row.columns()[index].type_().clone();
     let read = |p: Option<SqlParam>| p.unwrap_or(SqlParam::Null);
-    let err = |e: postgres::Error| {
+    let err = |e: tokio_postgres::Error| {
         data_store::StoreError::Conversion(format!(
             "Spalte '{}' ({}): {e}",
             row.columns()[index].name(),

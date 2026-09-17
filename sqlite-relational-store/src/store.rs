@@ -59,8 +59,13 @@ macro_rules! sql_err {
 /// Setzt die von [`ddl::migration_plan`] geplanten Anweisungen ab.
 ///
 /// Die Planung kennt keine Verbindung; hier wird sie ausgefuehrt.
-fn apply_schema(conn: &Connection, dialect: &dyn Dialect, schema: &Schema) -> Result<(), StoreError> {
-    let plan = ddl::migration_plan(&SqliteCatalog::new(conn), dialect, schema)?;
+async fn apply_schema(
+    conn: &Mutex<Connection>,
+    dialect: &dyn Dialect,
+    schema: &Schema,
+) -> Result<(), StoreError> {
+    let plan = ddl::migration_plan(&SqliteCatalog::new(conn), dialect, schema).await?;
+    let conn = conn.lock().expect("connection lock");
     for statement in plan {
         debug!("DDL: {statement}");
         conn.execute_batch(&statement)
@@ -98,7 +103,7 @@ pub struct RelationalStore {
 impl RelationalStore {
     /// Oeffnet `<root>/data.sqlite` und bringt die Datenbank auf den Stand des
     /// Schemas.
-    pub fn open(
+    pub async fn open(
         root: impl Into<PathBuf>,
         schema_source: Arc<dyn SchemaSource>,
     ) -> Result<Self, StoreError> {
@@ -106,15 +111,15 @@ impl RelationalStore {
         std::fs::create_dir_all(&root)?;
         let path = root.join("data.sqlite");
         let conn = Connection::open(&path).map_err(|e| sql_err!(Metadata, e))?;
-        Self::from_connection(conn, schema_source, Some(path))
+        Self::from_connection(conn, schema_source, Some(path)).await
     }
 
-    pub fn open_in_memory(schema_source: Arc<dyn SchemaSource>) -> Result<Self, StoreError> {
+    pub async fn open_in_memory(schema_source: Arc<dyn SchemaSource>) -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory().map_err(|e| sql_err!(Metadata, e))?;
-        Self::from_connection(conn, schema_source, None)
+        Self::from_connection(conn, schema_source, None).await
     }
 
-    fn from_connection(
+    async fn from_connection(
         conn: Connection,
         schema_source: Arc<dyn SchemaSource>,
         path: Option<PathBuf>,
@@ -127,11 +132,12 @@ impl RelationalStore {
         let schema = schema_source
             .schema()
             .map_err(|e| StoreError::Metadata(e.to_string()))?;
-        apply_schema(&conn, &SQLITE, &schema)?;
-        set_applied_revision(&conn, &SQLITE, schema_source.revision().0)?;
+        let conn = Mutex::new(conn);
+        apply_schema(&conn, &SQLITE, &schema).await?;
+        set_applied_revision(&conn.lock().expect("connection lock"), &SQLITE, schema_source.revision().0)?;
 
         Ok(Self {
-            conn: Mutex::new(conn),
+            conn,
             schema_source,
             schema: Mutex::new(schema),
             path,
@@ -139,26 +145,25 @@ impl RelationalStore {
     }
 
     /// Uebernimmt einen neuen Schemastand und migriert die Datenbank.
-    pub fn refresh_schema(&self) -> Result<bool, StoreError> {
+    pub async fn refresh_schema(&self) -> Result<bool, StoreError> {
         let revision = self.schema_source.revision();
-        let conn = self.conn.lock().expect("connection lock");
-        if applied_revision(&conn) == Some(revision.0) {
+        if applied_revision(&self.conn.lock().expect("connection lock")) == Some(revision.0) {
             return Ok(false);
         }
         let schema = self
             .schema_source
             .schema()
             .map_err(|e| StoreError::Metadata(e.to_string()))?;
-        apply_schema(&conn, &SQLITE, &schema)?;
-        set_applied_revision(&conn, &SQLITE, revision.0)?;
+        apply_schema(&self.conn, &SQLITE, &schema).await?;
+        set_applied_revision(&self.conn.lock().expect("connection lock"), &SQLITE, revision.0)?;
         *self.schema.lock().expect("schema lock") = schema;
         Ok(true)
     }
 
     /// Spalten, die in der Datenbank stehen, aber nicht mehr im Schema.
-    pub fn pending_destructive_changes(&self) -> Result<Vec<String>, StoreError> {
-        let conn = self.conn.lock().expect("connection lock");
-        ddl::pending_destructive_changes(&SqliteCatalog::new(&conn), &SQLITE, &self.schema())
+    pub async fn pending_destructive_changes(&self) -> Result<Vec<String>, StoreError> {
+        ddl::pending_destructive_changes(&SqliteCatalog::new(&self.conn), &SQLITE, &self.schema())
+            .await
     }
 
     /// Der SQL-Dialekt dieses Stores.
@@ -727,6 +732,7 @@ impl RelationalStore {
     }
 }
 
+#[async_trait::async_trait]
 impl DataStore for RelationalStore {
     /// Metadaten kommen ueber [`SchemaSource`], nicht ueber den Store-Trait.
     fn navigation(&mut self, _single: bool) -> &mut Navigation {
@@ -741,7 +747,7 @@ impl DataStore for RelationalStore {
         debug!("set_navigations() ignoriert - RelationalStore nutzt die SchemaSource");
     }
 
-    fn get_collection(
+    async fn get_collection(
         &self,
         set_name: &str,
         query: &ODataQuery,
@@ -783,15 +789,15 @@ impl DataStore for RelationalStore {
         Ok(records)
     }
 
-    fn count(&self, set_name: &str, query: &ODataQuery) -> usize {
+    async fn count(&self, set_name: &str, query: &ODataQuery) -> usize {
         let mut q = data_store::query::count_query(query);
         q.orderby.clear();
-        self.get_collection(set_name, &q)
+        self.get_collection(set_name, &q).await
             .map(|r| r.len())
             .unwrap_or(0)
     }
 
-    fn read_entity(
+    async fn read_entity(
         &self,
         set_name: &str,
         key: &EntityKey,
@@ -806,7 +812,7 @@ impl DataStore for RelationalStore {
         Ok(row)
     }
 
-    fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
+    async fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
         let mut record = DataRecord::from_json(data)?;
@@ -864,7 +870,7 @@ impl DataStore for RelationalStore {
         Ok(record)
     }
 
-    fn patch_entity(
+    async fn patch_entity(
         &self,
         set_name: &str,
         key: &EntityKey,
@@ -898,7 +904,7 @@ impl DataStore for RelationalStore {
         Ok(patch.clone())
     }
 
-    fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
+    async fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
         // Ein Draft verwirft immer auch seinen aktiven Zwilling; beide
@@ -913,7 +919,7 @@ impl DataStore for RelationalStore {
         Ok(())
     }
 
-    fn delete_entity_tree_only(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
+    async fn delete_entity_tree_only(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
         in_transaction!(self, |conn| {
@@ -923,7 +929,7 @@ impl DataStore for RelationalStore {
         Ok(())
     }
 
-    fn read_sibling_entity(
+    async fn read_sibling_entity(
         &self,
         set_name: &str,
         key: &EntityKey,
@@ -934,22 +940,23 @@ impl DataStore for RelationalStore {
         self.load_one(&conn, set, &key.sibling())
     }
 
-    fn get_property(
+    async fn get_property(
         &self,
         set_name: &str,
         key: &EntityKey,
         property: &str,
     ) -> Result<Value, StoreError> {
-        self.read_entity(set_name, key, &ODataQuery::new())?
+        self.read_entity(set_name, key, &ODataQuery::new()).await?
             .get(property)
             .ok_or_else(|| StoreError::PropertyNotFound(property.into()))
     }
 
-    fn commit(&self) {}
+    async fn commit(&self) {}
 }
 
+#[async_trait::async_trait]
 impl DraftDataStore for RelationalStore {
-    fn draft_edit(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
+    async fn draft_edit(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
         if !key.is_active_entity {
             return Err(StoreError::InvalidState);
         }
@@ -997,7 +1004,7 @@ impl DraftDataStore for RelationalStore {
     /// Der Elternsatz muss als erstes als aktiv eingefügt werden, weil die
     /// Kinder sonst einen Foreign-Key Fehler bekommen, da sie ja auf die
     /// Eltern zeigen.
-    fn draft_activate(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
+    async fn draft_activate(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
         if key.is_active_entity {
             return Err(StoreError::InvalidState);
         }
@@ -1009,7 +1016,7 @@ impl DraftDataStore for RelationalStore {
         }))
     }
 
-    fn draft_prepare(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
+    async fn draft_prepare(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
         let conn = self.conn.lock().expect("connection lock");

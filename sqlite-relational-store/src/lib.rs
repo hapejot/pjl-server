@@ -17,11 +17,11 @@
 //!   liefert einen Fehler statt stiller Abweichung.
 
 pub mod catalog;
-pub mod ddl;
-pub mod dialect;
-pub mod sql;
 pub mod store;
 pub mod value;
+
+// Die SQL-Erzeugung ist backend-unabhaengig und liegt im gemeinsamen Kern.
+pub use relational_core::{ddl, dialect, sql};
 
 pub use data_store::schema::{Schema, SchemaError, SchemaSource, StaticSchema};
 pub use data_store::{

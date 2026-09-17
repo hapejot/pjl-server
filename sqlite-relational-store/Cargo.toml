@@ -7,6 +7,7 @@ description = "Relationale SQLite-Implementierung des DataStore-Interfaces: eine
 [dependencies]
 anyhow = "1.0.104"
 data-store = { version = "0.1.0", path = "../data-store" }
+relational-core = { version = "0.1.0", path = "../relational-core" }
 odata = { version = "0.1.0", path = "../odata" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde_json = "1"

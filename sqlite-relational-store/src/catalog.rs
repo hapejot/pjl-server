@@ -1,25 +1,12 @@
-//! Lesender Zugriff auf den Systemkatalog der Datenbank.
-//!
-//! Die Migration muss wissen, was bereits existiert. *Wie* man das erfragt,
-//! ist der am wenigsten portable Teil des ganzen Stores: SQLite antwortet
-//! ueber `PRAGMA` und `sqlite_master`, andere Datenbanken ueber
-//! `information_schema`. Das Trait trennt diese Frage von der Migration
-//! selbst - [`crate::ddl::migration_plan`] kommt dadurch ohne
-//! Datenbankverbindung aus und ist ohne laufende Datenbank testbar.
+//! Systemkatalog von SQLite.
 
 use std::collections::HashSet;
 
 use data_store::StoreError;
+use relational_core::ddl::quote;
+use relational_core::Catalog;
 use rusqlite::Connection;
 
-pub trait Catalog {
-    fn table_exists(&self, table: &str) -> Result<bool, StoreError>;
-
-    /// Namen der vorhandenen Spalten. Fuer eine unbekannte Tabelle leer.
-    fn existing_columns(&self, table: &str) -> Result<HashSet<String>, StoreError>;
-}
-
-/// Katalog von SQLite.
 pub struct SqliteCatalog<'a> {
     conn: &'a Connection,
 }
@@ -53,10 +40,7 @@ impl Catalog for SqliteCatalog<'_> {
         // zusaetzlich gequotet.
         let mut stmt = self
             .conn
-            .prepare(&format!(
-                "PRAGMA table_info({})",
-                crate::ddl::quote(table)
-            ))
+            .prepare(&format!("PRAGMA table_info({})", quote(table)))
             .map_err(catalog_err)?;
         let rows = stmt
             .query_map([], |row| row.get::<_, String>(1))
@@ -70,34 +54,8 @@ impl Catalog for SqliteCatalog<'_> {
 }
 
 #[cfg(test)]
-pub mod tests {
+mod tests {
     use super::*;
-
-    /// Katalog ohne Datenbank, fuer Tests der Migrationsplanung.
-    #[derive(Default)]
-    pub struct FakeCatalog {
-        pub tables: std::collections::HashMap<String, HashSet<String>>,
-    }
-
-    impl FakeCatalog {
-        pub fn with_table(mut self, table: &str, columns: &[&str]) -> Self {
-            self.tables.insert(
-                table.to_string(),
-                columns.iter().map(|c| c.to_string()).collect(),
-            );
-            self
-        }
-    }
-
-    impl Catalog for FakeCatalog {
-        fn table_exists(&self, table: &str) -> Result<bool, StoreError> {
-            Ok(self.tables.contains_key(table))
-        }
-
-        fn existing_columns(&self, table: &str) -> Result<HashSet<String>, StoreError> {
-            Ok(self.tables.get(table).cloned().unwrap_or_default())
-        }
-    }
 
     #[test]
     fn sqlite_catalog_reads_its_own_tables() {

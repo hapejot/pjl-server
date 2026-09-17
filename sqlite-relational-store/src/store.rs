@@ -19,10 +19,10 @@ use tracing::{debug, trace};
 use uuid::Uuid;
 
 use crate::catalog::SqliteCatalog;
-use crate::ddl::{self, quote, DRAFT_ADMIN_COLUMN, DRAFT_ADMIN_TABLE, DRAFT_MESSAGES_COLUMN};
-use crate::dialect::{Dialect, SQLITE};
-use crate::sql::query::{order_by_clause, Translator};
-use crate::sql::{paging_clause, placeholders};
+use relational_core::ddl::{self, quote, DRAFT_ADMIN_COLUMN, DRAFT_ADMIN_TABLE, DRAFT_MESSAGES_COLUMN};
+use relational_core::dialect::{Dialect, SQLITE};
+use relational_core::sql::query::{order_by_clause, Translator};
+use relational_core::sql::{paging_clause, placeholders};
 use crate::value::{from_sqlite, to_sqlite};
 
 /// Fuehrt `body` in einer Transaktion aus.

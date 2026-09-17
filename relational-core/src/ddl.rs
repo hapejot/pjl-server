@@ -277,7 +277,7 @@ pub fn revision_insert_sql(dialect: &dyn Dialect) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalog::tests::FakeCatalog;
+    use crate::catalog::FakeCatalog;
     use crate::dialect::SQLITE;
 
     fn schema() -> Schema {

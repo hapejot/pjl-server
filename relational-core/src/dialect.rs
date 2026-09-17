@@ -124,6 +124,95 @@ impl Dialect for Sqlite {
     }
 }
 
+/// Dialekt von PostgreSQL.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Postgres;
+
+pub static POSTGRES: Postgres = Postgres;
+
+impl Dialect for Postgres {
+    fn placeholder(&self, index: usize) -> String {
+        format!("${index}")
+    }
+
+    /// Bool und die Ganzzahlen bekommen ihren echten Typ - das ist der
+    /// Gewinn gegenueber SQLite.
+    ///
+    /// Datum, Zeitstempel und Dezimalzahlen bleiben dagegen TEXT, obwohl
+    /// Postgres `DATE`, `TIMESTAMPTZ` und `NUMERIC` kennt. Der Grund liegt
+    /// nicht bei der Datenbank, sondern bei [`data_store::SqlParam`]: der
+    /// Typ transportiert diese Werte als Zeichenkette, und
+    /// `data_store::param_to_json` fuehrt Dezimalzahlen ohnehin ueber `f64`
+    /// nach JSON. Ein `NUMERIC` in der Spalte wuerde die Genauigkeit also
+    /// nicht bis zum Aufrufer durchhalten - es kaeme eine Abhaengigkeit auf
+    /// eine Dezimalbibliothek hinzu, ohne dass am Ergebnis etwas besser
+    /// waere. Sobald `SqlParam` eigene Varianten dafuer hat, gehoert das
+    /// hier geaendert.
+    fn column_type(&self, data_type: &DataType) -> &'static str {
+        match data_type {
+            DataType::Bool => "BOOLEAN",
+            DataType::Int32 => "INTEGER",
+            DataType::Int64 => "BIGINT",
+            DataType::Binary => "BYTEA",
+            DataType::Guid
+            | DataType::String { .. }
+            | DataType::Date
+            | DataType::DateTimeOffset
+            | DataType::Decimal { .. } => "TEXT",
+        }
+    }
+
+    fn bool_literal(&self, value: bool) -> &'static str {
+        if value {
+            "TRUE"
+        } else {
+            "FALSE"
+        }
+    }
+
+    fn bool_constant(&self, value: bool) -> String {
+        self.bool_literal(value).to_string()
+    }
+
+    /// Mit echtem `BOOLEAN` steht die Spalte fuer sich; ein Vergleich gegen
+    /// 0/1 waere ein Typfehler.
+    fn bool_predicate(&self, column: &str, expected: bool) -> String {
+        if expected {
+            column.to_string()
+        } else {
+            format!("NOT {column}")
+        }
+    }
+
+    fn paging(&self, top: Option<u32>, skip: Option<u32>) -> String {
+        match (top, skip) {
+            (None, None) => String::new(),
+            (Some(top), None) => format!(" LIMIT {top}"),
+            (None, Some(skip)) => format!(" OFFSET {skip}"),
+            (Some(top), Some(skip)) => format!(" LIMIT {top} OFFSET {skip}"),
+        }
+    }
+
+    /// Postgres sortiert NULL aufsteigend **zuletzt**. Ohne Korrektur waere
+    /// die Reihenfolge eine andere als in den uebrigen Backends.
+    fn order_direction(&self, direction: SortDirection) -> String {
+        match direction {
+            SortDirection::Asc => "ASC NULLS FIRST".into(),
+            SortDirection::Desc => "DESC NULLS LAST".into(),
+        }
+    }
+
+    fn position(&self, haystack: &str, needle: &str) -> String {
+        format!("strpos({haystack}, {needle})")
+    }
+
+    /// `substr` mit negativem Offset zaehlt in Postgres nicht vom Ende her;
+    /// dafuer gibt es `right`.
+    fn ends_with(&self, haystack: &str, needle: &str) -> String {
+        format!("right({haystack}, length({needle})) = {needle}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,5 +228,39 @@ mod tests {
     fn booleans_are_numbers_in_sqlite() {
         assert_eq!(SQLITE.bool_literal(true), "1");
         assert_eq!(SQLITE.bool_predicate("\"Flag\"", false), "\"Flag\" = 0");
+    }
+
+    /// Mit echtem BOOLEAN steht die Spalte fuer sich - ein Vergleich gegen
+    /// 0/1 waere ein Typfehler.
+    #[test]
+    fn booleans_are_a_type_of_their_own_in_postgres() {
+        assert_eq!(POSTGRES.bool_literal(true), "TRUE");
+        assert_eq!(POSTGRES.bool_predicate("\"Flag\"", true), "\"Flag\"");
+        assert_eq!(POSTGRES.bool_predicate("\"Flag\"", false), "NOT \"Flag\"");
+        assert_eq!(POSTGRES.bool_constant(false), "FALSE");
+    }
+
+    /// Postgres braucht kein Ersatz-LIMIT vor einem OFFSET.
+    #[test]
+    fn postgres_takes_an_offset_without_a_limit() {
+        assert_eq!(POSTGRES.paging(None, Some(5)), " OFFSET 5");
+        assert_eq!(POSTGRES.paging(Some(2), Some(5)), " LIMIT 2 OFFSET 5");
+    }
+
+    /// Die NULL-Ordnung muss zwischen den Backends uebereinstimmen, sonst
+    /// liefert dieselbe Abfrage je nach Datenbank eine andere Reihenfolge.
+    #[test]
+    fn both_dialects_sort_nulls_first_when_ascending() {
+        assert_eq!(SQLITE.order_direction(SortDirection::Asc), "ASC");
+        assert_eq!(
+            POSTGRES.order_direction(SortDirection::Asc),
+            "ASC NULLS FIRST"
+        );
+    }
+
+    #[test]
+    fn placeholders_are_numbered_differently() {
+        assert_eq!(SQLITE.placeholder(3), "?3");
+        assert_eq!(POSTGRES.placeholder(3), "$3");
     }
 }

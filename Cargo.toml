@@ -5,6 +5,7 @@ members = [
     "fiori-server",
     "odata",
     "odata-yaml-store",
+    "postgres-relational-store",
     "relational-core",
     "sqlite-data-store",
     "sqlite-relational-store",

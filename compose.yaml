@@ -8,6 +8,16 @@
 #   docker compose up --build
 #   Designer  -> http://localhost:3033   ("Publish Dictionary" in jeder Liste)
 #   Laufzeit  -> http://localhost:3034   (nach dem Publish neu starten)
+#
+# Fuer die Tests des Postgres-Backends gibt es zusaetzlich eine Datenbank im
+# Profil `dev`. Sie laeuft nicht mit hoch, wenn man nur die Server starten
+# will:
+#
+#   docker compose --profile dev up -d postgres
+#   PJL_TEST_POSTGRES=postgres://pjl:pjl@localhost:5433/pjl cargo test
+#
+# Ohne die Variable ueberspringen die Postgres-Tests sich selbst - ein
+# `cargo test` ohne laufende Datenbank bleibt gruen.
 
 services:
   designer:
@@ -41,6 +51,28 @@ services:
       - export:/app/export:ro
     depends_on:
       - designer
+
+  # Nur fuer Tests und lokale Entwicklung. Port 5433, damit ein bereits
+  # installiertes Postgres auf 5432 nicht kollidiert.
+  postgres:
+    image: postgres:17-alpine
+    profiles: ["dev"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pjl
+      POSTGRES_PASSWORD: pjl
+      POSTGRES_DB: pjl
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pjl -d pjl"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    tmpfs:
+      # Testdaten muessen einen Neustart nicht ueberleben; im RAM ist die
+      # Suite spuerbar schneller.
+      - /var/lib/postgresql/data
 
 volumes:
   design-data:

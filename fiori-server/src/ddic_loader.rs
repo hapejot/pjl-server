@@ -4,11 +4,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use odata::query::ODataQuery;
 use data_store::{DataRecord, DataStore, Navigation};
+use odata::query::ODataQuery;
 use serde_json::Value;
 use spec::{
-    EntitySpec, FieldSpec, Relationship, app::App, data_dictionary::DataDictonary, package::Package,
+    app::App, data_dictionary::DataDictionary, package::Package, EntitySpec, FieldSpec,
+    Relationship,
 };
 use tracing::{info, warn};
 
@@ -19,7 +20,7 @@ struct LoadedEntity {
     package: String,
 }
 
-pub fn load_ddic_from_store(ddic: &mut DataDictonary, store: &dyn DataStore) {
+pub fn load_ddic_from_store(ddic: &mut DataDictionary, store: &dyn DataStore) {
     let packages = load_packages(ddic, store);
     let entities = load_entities(ddic, store, &packages);
     let known: HashSet<String> = ddic.entity_names().map(str::to_string).collect();
@@ -36,7 +37,7 @@ pub fn load_ddic_from_store(ddic: &mut DataDictonary, store: &dyn DataStore) {
 /// kommt insbesondere die Ownership korrekt an - die frühere Direktableitung
 /// liess `Navigation::owning` immer auf `false` stehen, wodurch der Store
 /// keine Komposition erkennen konnte.
-pub fn navigations_from_ddic(ddic: &DataDictonary) -> Vec<Navigation> {
+pub fn navigations_from_ddic(ddic: &DataDictionary) -> Vec<Navigation> {
     match spec_schema::schema_from_ddic(ddic) {
         Ok(schema) => schema.to_navigations(),
         Err(e) => {
@@ -46,7 +47,7 @@ pub fn navigations_from_ddic(ddic: &DataDictonary) -> Vec<Navigation> {
     }
 }
 
-fn load_packages(ddic: &mut DataDictonary, store: &dyn DataStore) -> HashMap<String, String> {
+fn load_packages(ddic: &mut DataDictionary, store: &dyn DataStore) -> HashMap<String, String> {
     let mut by_id = HashMap::new();
     for record in read_set(store, "PackageSet") {
         let Some(name) = text(&record, "name") else {
@@ -60,7 +61,7 @@ fn load_packages(ddic: &mut DataDictonary, store: &dyn DataStore) -> HashMap<Str
 }
 
 fn load_entities(
-    ddic: &mut DataDictonary,
+    ddic: &mut DataDictionary,
     store: &dyn DataStore,
     packages: &HashMap<String, String>,
 ) -> HashMap<String, LoadedEntity> {
@@ -82,7 +83,7 @@ fn load_entities(
 }
 
 fn load_fields(
-    ddic: &mut DataDictonary,
+    ddic: &mut DataDictionary,
     store: &dyn DataStore,
     entities: &HashMap<String, LoadedEntity>,
 ) {
@@ -104,7 +105,7 @@ fn load_fields(
 }
 
 fn load_relationships(
-    ddic: &mut DataDictonary,
+    ddic: &mut DataDictionary,
     store: &dyn DataStore,
     entities: &HashMap<String, LoadedEntity>,
     known: &HashSet<String>,
@@ -161,7 +162,7 @@ fn load_relationships(
 }
 
 fn load_apps(
-    ddic: &mut DataDictonary,
+    ddic: &mut DataDictionary,
     store: &dyn DataStore,
     entities: &HashMap<String, LoadedEntity>,
     packages: &HashMap<String, String>,
@@ -331,8 +332,8 @@ mod tests {
         (dir, store)
     }
 
-    fn loaded(store: &YamlStore) -> DataDictonary {
-        let mut ddic = DataDictonary::new();
+    fn loaded(store: &YamlStore) -> DataDictionary {
+        let mut ddic = DataDictionary::new();
         load_ddic_from_store(&mut ddic, store);
         ddic.activate();
         ddic

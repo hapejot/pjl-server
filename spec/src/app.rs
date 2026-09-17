@@ -1,4 +1,4 @@
-use crate::{EntitySpec, data_dictionary::DataDictonary, package::Package};
+use crate::{EntitySpec, data_dictionary::DataDictionary, package::Package};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -47,7 +47,7 @@ impl App {
     }
 
     // resolvers
-    pub fn main_entity<'a>(&self, _ddic: &'a DataDictonary) -> EntitySpec {
+    pub fn main_entity<'a>(&self, _ddic: &'a DataDictionary) -> EntitySpec {
         if let Some(entity) = _ddic.active_entity(&self.main_entity) {
             return entity.clone();
         }

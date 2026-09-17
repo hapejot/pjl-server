@@ -22,8 +22,20 @@ pub const DRAFT_ADMIN_TABLE: &str = "DraftAdministrativeData";
 /// Ablage der angewandten Schema-Revision.
 pub const REVISION_TABLE: &str = "_schema_revision";
 
-pub fn sql_err(e: rusqlite::Error) -> StoreError {
-    StoreError::Conversion(format!("DDL: {e}"))
+// pub fn sql_err(e: rusqlite::Error) -> StoreError {
+//     StoreError::Conversion(format!("DDL: {e}"))
+// }
+
+/// Erzeugt einen `StoreError`, der Modul und Zeilennummer der Fehlerstelle
+/// enthaelt.
+///
+/// Die Funktion `sql_err` kann das nicht - sie ortet sich immer an ihrer
+/// eigenen Definition, nicht am Aufruf. Der Makro bindet `module_path!()` und
+/// `line!()` an der Aufrufstelle ein. `store.rs` nutzt weiterhin `sql_err`.
+macro_rules! ddl_err {
+    ($variant:ident, $e:expr) => {
+        StoreError::$variant(format!("DDL ({}:{}): {}", module_path!(), line!(), $e))
+    };
 }
 
 /// Bezeichner sicher quoten.
@@ -101,7 +113,7 @@ pub fn create_table_sql(schema: &Schema, set: &EntitySet) -> Result<String, Stor
     if let Some(parent) = set.composition_parent() {
         let target = schema
             .set(&parent.target_set)
-            .map_err(|e| StoreError::Metadata(e.to_string()))?;
+            .map_err(|e| ddl_err!(Metadata, e))?;
         let fk_column = parent.foreign_key.column();
         if set.draft_enabled && target.draft_enabled {
             parts.push(format!(
@@ -156,13 +168,13 @@ CREATE TABLE IF NOT EXISTS \"DraftAdministrativeData\" (
 fn existing_columns(conn: &Connection, table: &str) -> Result<HashSet<String>, StoreError> {
     let mut stmt = conn
         .prepare(&format!("PRAGMA table_info({})", quote(table)))
-        .map_err(sql_err)?;
+        .map_err(|e| ddl_err!(Conversion, e))?;
     let rows = stmt
         .query_map([], |row| row.get::<_, String>(1))
-        .map_err(sql_err)?;
+        .map_err(|e| ddl_err!(Conversion, e))?;
     let mut columns = HashSet::new();
     for row in rows {
-        columns.insert(row.map_err(sql_err)?);
+        columns.insert(row.map_err(|e| ddl_err!(Conversion, e))?);
     }
     Ok(columns)
 }
@@ -174,7 +186,7 @@ fn table_exists(conn: &Connection, table: &str) -> Result<bool, StoreError> {
             [table],
             |row| row.get(0),
         )
-        .map_err(sql_err)?;
+        .map_err(|e| ddl_err!(Conversion, e))?;
     Ok(count > 0)
 }
 
@@ -186,17 +198,15 @@ fn table_exists(conn: &Connection, table: &str) -> Result<bool, StoreError> {
 /// Typaenderungen und Spalten-Drops werden **nicht** automatisch ausgefuehrt -
 /// sie brauchen einen Tabellen-Rebuild und damit eine bewusste Entscheidung.
 pub fn ensure_schema(conn: &Connection, schema: &Schema) -> Result<(), StoreError> {
-    conn.execute_batch(DRAFT_ADMIN_DDL).map_err(sql_err)?;
+    conn.execute_batch(DRAFT_ADMIN_DDL)
+        .map_err(|e| ddl_err!(Conversion, e))?;
     conn.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS {} (revision INTEGER NOT NULL)",
         quote(REVISION_TABLE)
     ))
-    .map_err(sql_err)?;
+    .map_err(|e| ddl_err!(Conversion, e))?;
 
-    for set in schema
-        .creation_order()
-        .map_err(|e| StoreError::Metadata(e.to_string()))?
-    {
+    for set in schema.creation_order().map_err(|e| ddl_err!(Metadata, e))? {
         if table_exists(conn, &set.name)? {
             let existing = existing_columns(conn, &set.name)?;
             let mut wanted: Vec<(String, String)> = set
@@ -219,16 +229,18 @@ pub fn ensure_schema(conn: &Connection, schema: &Schema) -> Result<(), StoreErro
                     quote(&name),
                     ty
                 ))
-                .map_err(sql_err)?;
+                .map_err(|e| ddl_err!(Conversion, e))?;
             }
         } else {
             let ddl = create_table_sql(schema, set)?;
             debug!("DDL: {ddl}");
-            conn.execute_batch(&ddl).map_err(sql_err)?;
+            conn.execute_batch(&ddl)
+                .map_err(|e| ddl_err!(Conversion, e))?;
         }
 
         for stmt in index_statements(set) {
-            conn.execute_batch(&stmt).map_err(sql_err)?;
+            conn.execute_batch(&stmt)
+                .map_err(|e| ddl_err!(Conversion, e))?;
         }
     }
     Ok(())
@@ -271,7 +283,7 @@ pub fn applied_revision(conn: &Connection) -> Option<u64> {
 
 pub fn set_applied_revision(conn: &Connection, revision: u64) -> Result<(), StoreError> {
     conn.execute(&format!("DELETE FROM {}", quote(REVISION_TABLE)), [])
-        .map_err(sql_err)?;
+        .map_err(|e| ddl_err!(Conversion, e))?;
     conn.execute(
         &format!(
             "INSERT INTO {} (revision) VALUES (?1)",
@@ -279,6 +291,6 @@ pub fn set_applied_revision(conn: &Connection, revision: u64) -> Result<(), Stor
         ),
         [revision as i64],
     )
-    .map_err(sql_err)?;
+    .map_err(|e| ddl_err!(Conversion, e))?;
     Ok(())
 }

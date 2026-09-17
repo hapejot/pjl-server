@@ -14,7 +14,7 @@ use data_store::schema::{
     Association, Cardinality, Column, DataType, EntitySet, ForeignKeySide, Ownership, Schema,
     SchemaBuilder, SchemaError, SchemaRevision, SchemaSource, ID_SUFFIX,
 };
-use spec::data_dictionary::DataDictonary;
+use spec::data_dictionary::DataDictionary;
 use spec::{EntitySpec, FieldSpec};
 use tracing::warn;
 
@@ -22,7 +22,7 @@ use tracing::warn;
 ///
 /// `ddic.activate()` muss vorher gelaufen sein, sonst sind keine
 /// Lookup-Felder vorhanden.
-pub fn schema_from_ddic(ddic: &DataDictonary) -> Result<Schema, SchemaError> {
+pub fn schema_from_ddic(ddic: &DataDictionary) -> Result<Schema, SchemaError> {
     let entities: Vec<EntitySpec> = ddic.entities();
     // Kompositionen aus den Relationships zurueckgewinnen: (Entity, Navigationsname) -> owned
     let ownership = composition_index(ddic);
@@ -35,7 +35,7 @@ pub fn schema_from_ddic(ddic: &DataDictonary) -> Result<Schema, SchemaError> {
 }
 
 /// `(entity_name, navigation_name) -> Ownership`
-fn composition_index(ddic: &DataDictonary) -> HashMap<(String, String), Ownership> {
+fn composition_index(ddic: &DataDictionary) -> HashMap<(String, String), Ownership> {
     let mut index = HashMap::new();
     for rel in ddic.relationships() {
         let (Some(one), Some(one_field), Some(many), Some(many_property)) = (
@@ -59,7 +59,7 @@ fn composition_index(ddic: &DataDictonary) -> HashMap<(String, String), Ownershi
 }
 
 fn entity_set(
-    ddic: &DataDictonary,
+    ddic: &DataDictionary,
     entity: &EntitySpec,
     ownership: &HashMap<(String, String), Ownership>,
 ) -> Result<EntitySet, SchemaError> {
@@ -222,7 +222,7 @@ struct Inner {
 }
 
 impl DdicSchemaSource {
-    pub fn new(ddic: &DataDictonary) -> Result<Self, SchemaError> {
+    pub fn new(ddic: &DataDictionary) -> Result<Self, SchemaError> {
         Ok(Self {
             inner: RwLock::new(Inner {
                 schema: Arc::new(schema_from_ddic(ddic)?),
@@ -232,7 +232,7 @@ impl DdicSchemaSource {
     }
 
     /// Uebernimmt einen neu geladenen DDIC-Stand.
-    pub fn set_dictionary(&self, ddic: &DataDictonary) -> Result<SchemaRevision, SchemaError> {
+    pub fn set_dictionary(&self, ddic: &DataDictionary) -> Result<SchemaRevision, SchemaError> {
         let schema = Arc::new(schema_from_ddic(ddic)?);
         let mut inner = self.inner.write().expect("schema lock");
         inner.schema = schema;
@@ -256,8 +256,8 @@ mod tests {
     use super::*;
     use data_store::schema::ColumnRole;
 
-    fn activated_ddic() -> DataDictonary {
-        let mut ddic = DataDictonary::new();
+    fn activated_ddic() -> DataDictionary {
+        let mut ddic = DataDictionary::new();
         ddic.activate();
         ddic
     }

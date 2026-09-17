@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{EntitySpec, FieldSpec, Relationship, app::App, package::Package};
 
-pub struct DataDictonary {
+pub struct DataDictionary {
     packages: Vec<Package>,
     entities: Vec<EntitySpec>,
     relationships: Vec<Relationship>,
@@ -10,7 +10,7 @@ pub struct DataDictonary {
     active: HashMap<String, EntitySpec>,
 }
 
-impl DataDictonary {
+impl DataDictionary {
     pub fn new() -> Self {
         let _core = Package::new("core");
         let core = Package::new("core");
@@ -398,7 +398,7 @@ mod tests {
 
     #[test]
     fn activate_exposes_lookup_fields_with_cardinality() {
-        let mut ddic = DataDictonary::new();
+        let mut ddic = DataDictionary::new();
         ddic.activate();
 
         let package = ddic
@@ -452,7 +452,7 @@ mod tests {
 
     #[test]
     fn derives_foreign_key_field_from_active_entities() {
-        let mut ddic = DataDictonary::new();
+        let mut ddic = DataDictionary::new();
         ddic.activate();
 
         let entity = ddic.active_entity("Entity").expect("active entity");

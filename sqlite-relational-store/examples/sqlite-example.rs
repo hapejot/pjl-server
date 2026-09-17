@@ -4,9 +4,15 @@ use data_store::*;
 use odata::query::{Expr, ODataQuery, SortDirection};
 use serde_json::json;
 use sqlite_relational_store::RelationalStore;
+use tracing::info;
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use uuid::Uuid;
 
 fn main() -> anyhow::Result<()> {
+    tracing_subscriber::registry()
+        .with(fmt::layer().with_ansi(false).with_line_number(true))
+        .with(EnvFilter::from_default_env())
+        .init();
     let s = match Schema::load("schema.json") {
         Ok(s) => s,
         Err(e) => {
@@ -40,6 +46,10 @@ fn main() -> anyhow::Result<()> {
         &json!({ "ID": to_uuid(2), "Customer_ID": cust_schmidt, "Amount": 480, "Status": "Released" }),
     )?;
     store.create_entity(
+        ORDERS,
+        &json!({ "ID": to_uuid(3), "Customer_ID": cust_schmidt, "Amount": 4200, "Status": "In Process" }),
+    )?;
+    store.create_entity(
         ITEMS,
         &json!({ "ID": to_uuid(10), "Order_ID": to_uuid(1), "Material": "M-100", "Qty": 5 }),
     )?;
@@ -56,18 +66,26 @@ fn main() -> anyhow::Result<()> {
     // Tests on Data
     let key = EntityKey::new(to_uuid(1), false);
 
+    info!("Lese Auftrag {key:?} mit `Customer` erweitert.");
     let order = store.read_entity(
         ORDERS,
         &key,
         &ODataQuery::new().expand("_Items").expand("Customer"),
     )?;
-    println!(
-        "\nGelesene Order: {}",
-        serde_json::to_string_pretty(&order)?
-    );
+    info!("Gelesene Order: {}", serde_json::to_string_pretty(&order)?);
 
+    info!("PATCH Auftrag {key:?}");
     store.patch_entity(ORDERS, &key, &json!({ "Status": "Released" }))?;
-    store.draft_activate(ORDERS, &EntityKey::new(to_uuid(2), false))?;
+
+    let key2 = EntityKey::new(to_uuid(2), false);
+    info!("DRAFT ACTIVATE {key2:?}");
+    store.draft_activate(ORDERS, &key2)?;
+    info!("EDIT DRAFT {key2:?}");
+    store.draft_edit(ORDERS, &key2.sibling())?;
+    info!("PATCH {key2:?}");
+    store.patch_entity(ORDERS, &key2, &json!({"Status": "In Progress"}))?;
+
+    info!("DRAFT ACTIVATE {key:?}");
     store.draft_activate(ORDERS, &key)?;
 
     let query = ODataQuery::new()
@@ -75,7 +93,7 @@ fn main() -> anyhow::Result<()> {
         .order_by("Amount", SortDirection::Desc)
         .expand("_Items");
     let released = store.get_collection(ORDERS, &query)?;
-    println!(
+    info!(
         "\nReleased Orders (sortiert nach Amount desc): {}",
         serde_json::to_string_pretty(&released)?
     );

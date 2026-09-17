@@ -1,9 +1,9 @@
-use spec::data_dictionary::DataDictonary;
+use spec::data_dictionary::DataDictionary;
 
 fn main() {
     println!("boostrap");
 
-    let mut ddic = DataDictonary::new();
+    let mut ddic = DataDictionary::new();
     ddic.activate();
     ddic.dump();
 }

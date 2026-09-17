@@ -63,3 +63,7 @@ POST {{host}}/EntitySet(ID=889a5bcc-847b-41f5-978a-7d745d89015d,IsActiveEntity=f
 
 ### Draft verwerfen (Kind-Drafts verschwinden mit)
 DELETE {{host}}/EntitySet(ID=889a5bcc-847b-41f5-978a-7d745d89015d,IsActiveEntity=false)
+
+
+
+GET {{host}}/EntitySet?$count=true&$select=HasActiveEntity,HasDraftEntity,ID,IsActiveEntity,name&$expand=DraftAdministrativeData($select=DraftUUID,InProcessByUser)&$filter=(IsActiveEntity%20eq%20false%20or%20SiblingEntity/IsActiveEntity%20eq%20null)&$skip=0&$top=30

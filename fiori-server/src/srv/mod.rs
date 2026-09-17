@@ -1,24 +1,24 @@
 use std::collections::HashMap;
 
 use axum::{
-    Json, Router,
     extract::{Path, Query, State},
-    http::{HeaderName, StatusCode, header},
+    http::{header, HeaderName, StatusCode},
     response::Html,
     response::IntoResponse,
     response::Response,
     routing::{get, post},
-};
-use odata::{
-    path::{PathSegment, parse_odata_path},
-    query::{BinOp, ExpandItem, Expr, ODataQuery},
+    Json, Router,
 };
 use data_store::{DataRecord, EntityKey, StoreError};
+use odata::{
+    path::{parse_odata_path, PathSegment},
+    query::{BinOp, ExpandItem, Expr, ODataQuery},
+};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use spec::{
-    AtomValueList, EntitySpec, FieldSpec, MeasureKind, Relationship, app::App,
-    data_dictionary::DataDictonary, package::Package,
+    app::App, data_dictionary::DataDictionary, package::Package, AtomValueList, EntitySpec,
+    FieldSpec, MeasureKind, Relationship,
 };
 use tracing::*;
 
@@ -291,7 +291,7 @@ pub struct EntitySet {
 }
 
 impl EntitySet {
-    fn from_entity(ddic: &DataDictonary, x: &EntitySpec) -> EntitySet {
+    fn from_entity(ddic: &DataDictionary, x: &EntitySpec) -> EntitySet {
         let mut navigation_property_bindings = Vec::new();
         navigation_property_bindings.push(NavigationPropertyBinding {
             path: "SiblingEntity".into(),
@@ -330,7 +330,7 @@ impl EntitySet {
     }
 }
 
-fn draft_annotations_for_entity(ddic: &DataDictonary, entity: &EntitySpec) -> Vec<String> {
+fn draft_annotations_for_entity(ddic: &DataDictionary, entity: &EntitySpec) -> Vec<String> {
     let entity_name = entity.name();
     let set_name = entity.setname();
     // Ein Kind einer Composition ist DraftNode, alles andere ein eigenstaendiger DraftRoot.
@@ -360,7 +360,7 @@ fn draft_annotations_for_entity(ddic: &DataDictonary, entity: &EntitySpec) -> Ve
 
 /// Ohne explizite `NavigationRestrictions` bietet Fiori Elements in einer
 /// Object-Page-Tabelle kein Anlegen an.
-fn navigation_restrictions(ddic: &DataDictonary, entity: &EntitySpec) -> String {
+fn navigation_restrictions(ddic: &DataDictionary, entity: &EntitySpec) -> String {
     let restricted: String = ddic
         .owned_children(entity.name())
         .map(|relationship| {
@@ -1914,7 +1914,7 @@ fn delete_entity(state: &AppState, segments: &[PathSegment]) -> Result<(), OData
 
     let key = EntityKey::from(&*record);
     delete_owned_children(state, &set, &key)?;
-    
+
     // If deleting a draft, don't also delete active sibling (discard only the draft)
     // If deleting an active, also delete its draft sibling (cleanup both versions)
     if !key.is_active_entity {
@@ -1940,7 +1940,7 @@ fn delete_entity(state: &AppState, segments: &[PathSegment]) -> Result<(), OData
 
 /// Kinder einer Composition mitloeschen. Wird nur der Draft verworfen, bleiben
 /// die aktiven Kinder erhalten.
-/// 
+///
 /// When deleting a draft parent:
 /// - Delete draft children using delete_entity_tree_only (which doesn't also delete active siblings)
 /// - Keep active children
@@ -2151,23 +2151,21 @@ mod tests {
 
     #[test]
     fn entity_type_from_entity_maps_field_variants() {
-        let mut ddic = DataDictonary::new();
+        let mut ddic = DataDictionary::new();
         ddic.activate();
         let entity = ddic.active_entity("Entity").unwrap();
 
         let entity_type = EntityType::from_entity(entity);
         dbg!(&entity_type);
-        assert!(
-            entity_type
-                .properties
-                .iter()
-                .any(|property| property.name == "name" && property.type_ == "Edm.String")
-        );
+        assert!(entity_type
+            .properties
+            .iter()
+            .any(|property| property.name == "name" && property.type_ == "Edm.String"));
     }
 
     #[test]
     fn facets_include_a_list_section_per_to_many_navigation() {
-        let mut ddic = DataDictonary::new();
+        let mut ddic = DataDictionary::new();
         ddic.activate();
         // "Entity" has to-many lookups _Fields, _Many, _One after activation.
         let entity = ddic.active_entity("Entity").unwrap();
@@ -2220,30 +2218,22 @@ mod tests {
         assert!(value_list_annotations.annotations.iter().any(|annotation| {
             annotation.term == "Common.Label" && annotation.string.as_deref() == Some("Code")
         }));
-        assert!(
-            value_list_annotations
-                .annotations
-                .iter()
-                .any(|annotation| annotation.term == "Org.OData.Core.V1.Computed")
-        );
-        assert!(
-            value_list_annotations
-                .annotations
-                .iter()
-                .any(|annotation| annotation.term == "Org.OData.Core.V1.Immutable")
-        );
-        assert!(
-            value_list_annotations
-                .annotations
-                .iter()
-                .any(|annotation| annotation.term == "Common.ValueList")
-        );
-        assert!(
-            value_list_annotations
-                .annotations
-                .iter()
-                .any(|annotation| annotation.term == "Common.ValueListWithFixedValues")
-        );
+        assert!(value_list_annotations
+            .annotations
+            .iter()
+            .any(|annotation| annotation.term == "Org.OData.Core.V1.Computed"));
+        assert!(value_list_annotations
+            .annotations
+            .iter()
+            .any(|annotation| annotation.term == "Org.OData.Core.V1.Immutable"));
+        assert!(value_list_annotations
+            .annotations
+            .iter()
+            .any(|annotation| annotation.term == "Common.ValueList"));
+        assert!(value_list_annotations
+            .annotations
+            .iter()
+            .any(|annotation| annotation.term == "Common.ValueListWithFixedValues"));
 
         let measure = FieldSpec::Measure {
             name: "amount".into(),

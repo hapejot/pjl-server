@@ -6,3 +6,9 @@ testdata
 odata-yaml-store/testdata
 Dockerfile.V1
 tmp.json
+log
+query.sql
+sample.sql
+tmp.jq
+rel-data/data.sqlite
+rel-data

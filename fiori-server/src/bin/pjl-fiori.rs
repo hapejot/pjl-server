@@ -1,5 +1,5 @@
 use axum::{routing::get, Router};
-use data_store::StaticSchema;
+use data_store::{Schema, StaticSchema};
 use sqlite_relational_store::RelationalStore;
 use std::{net::SocketAddr, sync::Arc};
 use tower_http::{services::ServeDir, trace::TraceLayer};
@@ -11,10 +11,11 @@ use fiori_server::*;
 
 async fn main_loop() -> anyhow::Result<()> {
     info!("init");
+    let s = Schema::load("schema.json")?;
     // let ystore = Arc::new(odata_yaml_store::YamlStore::open("data")?);
     let store = Arc::new(RelationalStore::open(
         "rel-data",
-        Arc::new(StaticSchema::new(schema())),
+        Arc::new(StaticSchema::new(s)),
     )?);
     let store = Extender::new(store, Arc::new(DefaultHook))?;
 
@@ -38,10 +39,6 @@ async fn main_loop() -> anyhow::Result<()> {
     info!("läuft");
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-fn schema() -> data_store::Schema {
-    data_store::Schema::default()
 }
 
 #[tokio::main]

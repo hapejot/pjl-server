@@ -25,6 +25,25 @@ use crate::sql::query::{order_by_clause, Translator};
 use crate::sql::{paging_clause, placeholders};
 use crate::value::{from_sqlite, to_sqlite};
 
+/// Fuehrt `body` in einer Transaktion aus.
+///
+/// Ein abgebrochener Schreibvorgang darf keinen halben Zustand hinterlassen:
+/// ein Draft-Kopf ohne Verwaltungsdaten, ein aktivierter Parent ohne seine
+/// Kinder, ein geloeschter Draft ohne den zugehoerigen aktiven Satz. Ohne
+/// Klammer war das bisher nur deshalb unauffaellig, weil der Mutex auf der
+/// Verbindung die Zugriffe faktisch serialisiert hat.
+macro_rules! in_transaction {
+    ($self:expr, |$conn:ident| $body:block) => {{
+        let guard = $self.conn.lock().expect("connection lock");
+        let $conn = guard
+            .unchecked_transaction()
+            .map_err(|e| sql_err!(Conversion, e))?;
+        let result = (|| $body)()?;
+        $conn.commit().map_err(|e| sql_err!(Conversion, e))?;
+        result
+    }};
+}
+
 macro_rules! sql_err {
     ($variant:ident, $e:expr) => {{
         let bt = Backtrace::capture();
@@ -189,10 +208,29 @@ impl RelationalStore {
         result.unwrap_or(0) as usize
     }
 
+    /// Anzahl der Draft-Verwaltungssaetze.
+    ///
+    /// Diagnose- und Testhilfe: die Tabelle haengt an keinem Entity-Set und
+    /// ist ueber den `DataStore`-Trait nicht sichtbar. Ein Satz ohne
+    /// zugehoerigen Draft-Kopf ist verwaist - genau das soll nicht
+    /// vorkommen.
+    pub fn count_draft_admin(&self) -> usize {
+        let conn = self.conn.lock().expect("connection lock");
+        conn.query_row(
+            &format!("SELECT COUNT(*) FROM {}", quote(DRAFT_ADMIN_TABLE)),
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap_or(0) as usize
+    }
+
     // -- SELECT-Bausteine ----------------------------------------------------
 
-    fn load_draft_admin(&self, draft_uuid: &str) -> Result<Option<Value>, StoreError> {
-        let conn = self.conn.lock().expect("connection lock");
+    fn load_draft_admin(
+        &self,
+        conn: &Connection,
+        draft_uuid: &str,
+    ) -> Result<Option<Value>, StoreError> {
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT \"DraftUUID\", \"DraftIsCreatedByMe\", \"InProcessByUser\", \
@@ -214,12 +252,15 @@ impl RelationalStore {
         })))
     }
 
-    fn store_draft_admin(&self, record: &DataRecord) -> Result<Option<String>, StoreError> {
+    fn store_draft_admin(
+        &self,
+        conn: &Connection,
+        record: &DataRecord,
+    ) -> Result<Option<String>, StoreError> {
         let Some(admin) = record.draft_admin_data() else {
             return Ok(None);
         };
         let uuid = admin.draft_uuid.to_string();
-        let conn = self.conn.lock().expect("connection lock");
         conn.execute(
             &format!(
                 "INSERT INTO {} (\"DraftUUID\", \"DraftIsCreatedByMe\", \"InProcessByUser\", \
@@ -242,8 +283,15 @@ impl RelationalStore {
     }
 
     /// Schreibt einen Datensatz (INSERT ... ON CONFLICT DO UPDATE).
-    fn write_record(&self, set: &EntitySet, record: &DataRecord) -> Result<(), StoreError> {
-        let admin_id = self.store_draft_admin(record)?;
+    fn write_record(
+        &self,
+        conn: &Connection,
+        set: &EntitySet,
+        record: &DataRecord,
+    ) -> Result<(), StoreError> {
+        // Laeuft in derselben Transaktion wie der Satz selbst: ein
+        // Draft-Kopf ohne Verwaltungsdaten waere nicht mehr aktivierbar.
+        let admin_id = self.store_draft_admin(conn, record)?;
 
         let mut columns: Vec<String> = vec![];
         let mut values: Vec<SqlParam> = vec![];
@@ -292,10 +340,7 @@ impl RelationalStore {
         );
         trace!("write: {sql}");
         trace!(".....: {values:?}");
-        self.conn
-            .lock()
-            .expect("connection lock")
-            .execute(&sql, params_from_iter(values.iter().map(to_sqlite)))
+        conn.execute(&sql, params_from_iter(values.iter().map(to_sqlite)))
             .map_err(|e| sql_err!(Metadata, e))?;
         Ok(())
     }
@@ -309,7 +354,12 @@ impl RelationalStore {
     }
 
     /// Einzelsatz ueber den Primaerschluessel.
-    fn load_one(&self, set: &EntitySet, key: &EntityKey) -> Result<DataRecord, StoreError> {
+    fn load_one(
+        &self,
+        conn: &Connection,
+        set: &EntitySet,
+        key: &EntityKey,
+    ) -> Result<DataRecord, StoreError> {
         let mut t = Translator::new(set, self.dialect()).filter(&Expr::equals_guid(key.id.to_string(), "ID"));
         if set.draft_enabled {
             t = t.filter(&Expr::equals_value(
@@ -318,7 +368,7 @@ impl RelationalStore {
             ));
         }
         let q = t.build()?;
-        let records = self.query_records(set, q.text, q.params, None, "")?;
+        let records = self.query_records(conn, set, q.text, q.params, None, "")?;
         records.into_iter().next().ok_or_else(|| {
             StoreError::not_found(format!(
                 "{}/{}/{}",
@@ -335,12 +385,13 @@ impl RelationalStore {
 
     fn finish_record(
         &self,
+        conn: &Connection,
         mut map: Map<String, Value>,
         admin_id: Option<String>,
         messages: Option<String>,
     ) -> Result<DataRecord, StoreError> {
         if let Some(admin_id) = admin_id {
-            if let Some(admin) = self.load_draft_admin(&admin_id)? {
+            if let Some(admin) = self.load_draft_admin(conn, &admin_id)? {
                 map.insert("DraftAdministrativeData".into(), admin);
             }
         }
@@ -355,6 +406,7 @@ impl RelationalStore {
     /// Fuehrt ein SELECT aus und materialisiert die Zeilen.
     fn query_records(
         &self,
+        conn: &Connection,
         set: &EntitySet,
         query_text: String,
         params: Vec<SqlParam>,
@@ -368,11 +420,11 @@ impl RelationalStore {
         sql.push_str(paging);
         debug!("query: {sql}");
 
-        // Rohdaten einsammeln, damit die Verbindung fuer die Nachladeschritte
-        // (Draft-Admin) wieder frei ist.
+        // Rohdaten einsammeln, bevor nachgeladen wird: das Statement haelt
+        // eine Ausleihe auf die Verbindung, die Nachladeschritte brauchen sie
+        // selbst.
         let mut raw: Vec<(Map<String, Value>, Option<String>, Option<String>)> = vec![];
         {
-            let conn = self.conn.lock().expect("connection lock");
             let mut stmt = conn.prepare(&sql).map_err(|e| sql_err!(Metadata, e))?;
             // Nur die tatsaechlich projizierten Spalten materialisieren.
             // Grund: $select verkleinert die SELECT-Liste. Wir muessen also
@@ -443,7 +495,7 @@ impl RelationalStore {
         }
 
         raw.into_iter()
-            .map(|(map, admin, messages)| self.finish_record(map, admin, messages))
+            .map(|(map, admin, messages)| self.finish_record(conn, map, admin, messages))
             .collect()
     }
 
@@ -453,6 +505,7 @@ impl RelationalStore {
     /// wie der Parent.
     fn child_keys(
         &self,
+        conn: &Connection,
         set: &EntitySet,
         key: &EntityKey,
     ) -> Result<Vec<(String, EntityKey)>, StoreError> {
@@ -474,7 +527,6 @@ impl RelationalStore {
                 sql.push_str(&format!(" AND {} = ?2", quote(IS_ACTIVE_COLUMN)));
                 params.push(SqlParam::Bool(key.is_active_entity));
             }
-            let conn = self.conn.lock().expect("connection lock");
             let mut stmt = conn.prepare(&sql).map_err(|e| sql_err!(Metadata, e))?;
             let ids = stmt
                 .query_map(params_from_iter(params.iter().map(to_sqlite)), |row| row.get::<_, String>(0))
@@ -492,7 +544,12 @@ impl RelationalStore {
         Ok(result)
     }
 
-    fn delete_row(&self, set: &EntitySet, key: &EntityKey) -> Result<(), StoreError> {
+    fn delete_row(
+        &self,
+        conn: &Connection,
+        set: &EntitySet,
+        key: &EntityKey,
+    ) -> Result<(), StoreError> {
         // ON DELETE CASCADE raeumt die Kompositionskinder ab - im Gegensatz
         // zum Dokumentenstore gibt es hier keine Rekursion in Rust.
         let sql = format!(
@@ -505,32 +562,65 @@ impl RelationalStore {
                 String::new()
             }
         );
-        self.conn
-            .lock()
-            .expect("connection lock")
-            .execute(&sql, params_from_iter(Self::key_params(set, key).iter().map(to_sqlite)))
-            .map_err(|e| sql_err!(Metadata, e))?;
+        conn.execute(
+            &sql,
+            params_from_iter(Self::key_params(set, key).iter().map(to_sqlite)),
+        )
+        .map_err(|e| sql_err!(Metadata, e))?;
         Ok(())
     }
 
-    fn draft_edit_tree(&self, set: &EntitySet, key: &EntityKey) -> Result<(), StoreError> {
-        let mut record = self.load_one(set, key)?;
+    fn draft_edit_tree(
+        &self,
+        conn: &Connection,
+        set: &EntitySet,
+        key: &EntityKey,
+    ) -> Result<(), StoreError> {
+        let mut record = self.load_one(conn, set, key)?;
         record.edit();
-        self.write_record(set, &record)?;
+        self.write_record(conn, set, &record)?;
         let schema = self.schema();
-        for (child_set, child_key) in self.child_keys(set, key)? {
+        for (child_set, child_key) in self.child_keys(conn, set, key)? {
             let child = schema
                 .set(&child_set)
                 .map_err(|e| StoreError::Metadata(e.to_string()))?;
-            self.draft_edit_tree(child, &child_key)?;
+            self.draft_edit_tree(conn, child, &child_key)?;
         }
         Ok(())
+    }
+
+    /// Aktiviert einen Draft samt Kompositionskindern.
+    ///
+    /// Der Parent wird zuerst als aktiv geschrieben, sonst laufen die Kinder
+    /// in ihren Fremdschluessel. Erst danach faellt die Draft-Zeile.
+    fn draft_activate_tree(
+        &self,
+        conn: &Connection,
+        set_name: &str,
+        key: &EntityKey,
+    ) -> Result<Value, StoreError> {
+        if key.is_active_entity {
+            return Err(StoreError::InvalidState);
+        }
+        let schema = self.entity_set(set_name)?;
+        let set = schema.set(set_name).expect("geprueft");
+        let mut record = self.load_one(conn, set, key)?;
+        record.activate()?;
+        self.write_record(conn, set, &record)?;
+
+        for (child_set, child_key) in self.child_keys(conn, set, key)? {
+            self.draft_activate_tree(conn, &child_set, &child_key)?;
+        }
+
+        self.delete_row(conn, set, key)?;
+        Ok(json!(record))
     }
 
     // -- $expand --------------------------------------------------------------
 
     fn expand_rows(
         &self,
+        conn: &Connection,
         set: &EntitySet,
         rows: &mut [DataRecord],
         query: &ODataQuery,
@@ -550,7 +640,7 @@ impl RelationalStore {
                 continue;
             }
             match set.get_association(name) {
-                Ok(assoc) => self.expand_association(rows, assoc)?,
+                Ok(assoc) => self.expand_association(conn, rows, assoc)?,
                 Err(e) if strict => return Err(StoreError::Metadata(e.to_string())),
                 Err(_) => {}
             }
@@ -560,6 +650,7 @@ impl RelationalStore {
 
     fn expand_association(
         &self,
+        conn: &Connection,
         rows: &mut [DataRecord],
         assoc: &Association,
     ) -> Result<(), StoreError> {
@@ -593,7 +684,7 @@ impl RelationalStore {
                     .filter_raw(raw, params)
                     .shadow_drafts()
                     .build()?;
-                let found = self.query_records(target, sql.text, sql.params, None, "")?;
+                let found = self.query_records(conn, target, sql.text, sql.params, None, "")?;
                 let by_id: HashMap<String, Value> = found
                     .iter()
                     .map(|r| (r.id().to_string(), r.core_json()))
@@ -616,7 +707,7 @@ impl RelationalStore {
                     .filter_raw(raw, params)
                     .shadow_drafts()
                     .build()?;
-                let found = self.query_records(target, sql.text, sql.params, None, "")?;
+                let found = self.query_records(conn, target, sql.text, sql.params, None, "")?;
 
                 let mut grouped: HashMap<String, Vec<Value>> = HashMap::new();
                 for record in found.iter() {
@@ -673,7 +764,9 @@ impl DataStore for RelationalStore {
         let sql = sql.build()?;
         debug!("build returns: {}", &sql.text);
 
+        let conn = self.conn.lock().expect("connection lock");
         let mut records = self.query_records(
+            &conn,
             set,
             sql.text,
             sql.params,
@@ -686,7 +779,7 @@ impl DataStore for RelationalStore {
                 record.touch(s);
             }
         }
-        self.expand_rows(set, &mut records, query, false)?;
+        self.expand_rows(&conn, set, &mut records, query, false)?;
         Ok(records)
     }
 
@@ -706,8 +799,9 @@ impl DataStore for RelationalStore {
     ) -> Result<DataRecord, StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
-        let mut rows = [self.load_one(set, key)?];
-        self.expand_rows(set, &mut rows, query, true)?;
+        let conn = self.conn.lock().expect("connection lock");
+        let mut rows = [self.load_one(&conn, set, key)?];
+        self.expand_rows(&conn, set, &mut rows, query, true)?;
         let [row] = rows;
         Ok(row)
     }
@@ -737,31 +831,36 @@ impl DataStore for RelationalStore {
             }
         }
 
-        if let Some(parent) = set.composition_parent() {
-            let parent_set = schema
-                .set(&parent.target_set)
-                .map_err(|e| StoreError::Metadata(e.to_string()))?;
-            let fk = parent.foreign_key.column();
-            let parent_id = record
-                .get(fk)
-                .and_then(|v| v.as_str().map(str::to_string))
-                .ok_or_else(|| StoreError::PropertyNotFound(format!("{set_name}.{fk}")))?;
-            let parent_uuid =
-                Uuid::parse_str(&parent_id).map_err(|e| StoreError::Conflict(e.to_string()))?;
-            let parent_key = EntityKey::new(parent_uuid, record.is_active_entity());
-            let parent_record = self.load_one(parent_set, &parent_key)?;
+        // Pruefung des Parents und das Schreiben gehoeren zusammen: sonst
+        // koennte der Parent dazwischen aktiviert oder geloescht werden.
+        in_transaction!(self, |conn| {
+            if let Some(parent) = set.composition_parent() {
+                let parent_set = schema
+                    .set(&parent.target_set)
+                    .map_err(|e| StoreError::Metadata(e.to_string()))?;
+                let fk = parent.foreign_key.column();
+                let parent_id = record
+                    .get(fk)
+                    .and_then(|v| v.as_str().map(str::to_string))
+                    .ok_or_else(|| StoreError::PropertyNotFound(format!("{set_name}.{fk}")))?;
+                let parent_uuid =
+                    Uuid::parse_str(&parent_id).map_err(|e| StoreError::Conflict(e.to_string()))?;
+                let parent_key = EntityKey::new(parent_uuid, record.is_active_entity());
+                let parent_record = self.load_one(&conn, parent_set, &parent_key)?;
 
-            match (record.is_active_entity(), parent_record.draft_admin_data()) {
-                (true, None) => {}
-                (true, Some(_)) => return Err(StoreError::InvalidState),
-                (false, None) => return Err(StoreError::InvalidState),
-                (false, Some(admin)) => record.set_draft_uuid(admin.draft_uuid),
+                match (record.is_active_entity(), parent_record.draft_admin_data()) {
+                    (true, None) => {}
+                    (true, Some(_)) => return Err(StoreError::InvalidState),
+                    (false, None) => return Err(StoreError::InvalidState),
+                    (false, Some(admin)) => record.set_draft_uuid(admin.draft_uuid),
+                }
+            } else if !record.is_active_entity() {
+                record.create_draft();
             }
-        } else if !record.is_active_entity() {
-            record.create_draft();
-        }
 
-        self.write_record(set, &record)?;
+            self.write_record(&conn, set, &record)?;
+            Ok::<_, StoreError>(())
+        });
         Ok(record)
     }
 
@@ -788,26 +887,40 @@ impl DataStore for RelationalStore {
                 }
             }
         }
-        let mut record = self.load_one(set, key)?;
-        record.merge(patch);
-        self.write_record(set, &record)?;
+        // Lesen, Zusammenfuehren und Schreiben sind ein Vorgang - sonst
+        // ueberschreibt der spaetere Patch die Aenderung des frueheren.
+        in_transaction!(self, |conn| {
+            let mut record = self.load_one(&conn, set, key)?;
+            record.merge(patch);
+            self.write_record(&conn, set, &record)?;
+            Ok::<_, StoreError>(())
+        });
         Ok(patch.clone())
     }
 
     fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
-        self.delete_row(set, key)?;
-        if !key.is_active_entity {
-            self.delete_row(set, &key.sibling())?;
-        }
+        // Ein Draft verwirft immer auch seinen aktiven Zwilling; beide
+        // Loeschungen gelten gemeinsam oder gar nicht.
+        in_transaction!(self, |conn| {
+            self.delete_row(&conn, set, key)?;
+            if !key.is_active_entity {
+                self.delete_row(&conn, set, &key.sibling())?;
+            }
+            Ok::<_, StoreError>(())
+        });
         Ok(())
     }
 
     fn delete_entity_tree_only(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
-        self.delete_row(set, key)
+        in_transaction!(self, |conn| {
+            self.delete_row(&conn, set, key)?;
+            Ok::<_, StoreError>(())
+        });
+        Ok(())
     }
 
     fn read_sibling_entity(
@@ -817,7 +930,8 @@ impl DataStore for RelationalStore {
     ) -> Result<DataRecord, StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
-        self.load_one(set, &key.sibling())
+        let conn = self.conn.lock().expect("connection lock");
+        self.load_one(&conn, set, &key.sibling())
     }
 
     fn get_property(
@@ -841,36 +955,41 @@ impl DraftDataStore for RelationalStore {
         }
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
-        let mut record = self.load_one(set, key)?;
+        // Der ganze Teilbaum geht gemeinsam in den Draft. Ein Abbruch in der
+        // Mitte hinterliesse einen Draft-Parent mit aktiven Kindern.
+        let record = in_transaction!(self, |conn| {
+            let mut record = self.load_one(&conn, set, key)?;
 
-        // Kinder duerfen nur mit dem Parent in den Draft.
-        if let Some(parent) = set.composition_parent() {
-            let parent_set = schema
-                .set(&parent.target_set)
-                .map_err(|e| StoreError::Metadata(e.to_string()))?;
-            let fk = parent.foreign_key.column();
-            let parent_id = record
-                .get(fk)
-                .and_then(|v| v.as_str().map(str::to_string))
-                .ok_or_else(|| StoreError::PropertyNotFound(format!("{set_name}.{fk}")))?;
-            let parent_uuid =
-                Uuid::parse_str(&parent_id).map_err(|e| StoreError::Conflict(e.to_string()))?;
-            if self
-                .load_one(parent_set, &EntityKey::new(parent_uuid, false))
-                .is_err()
-            {
-                return Err(StoreError::InvalidState);
+            // Kinder duerfen nur mit dem Parent in den Draft.
+            if let Some(parent) = set.composition_parent() {
+                let parent_set = schema
+                    .set(&parent.target_set)
+                    .map_err(|e| StoreError::Metadata(e.to_string()))?;
+                let fk = parent.foreign_key.column();
+                let parent_id = record
+                    .get(fk)
+                    .and_then(|v| v.as_str().map(str::to_string))
+                    .ok_or_else(|| StoreError::PropertyNotFound(format!("{set_name}.{fk}")))?;
+                let parent_uuid =
+                    Uuid::parse_str(&parent_id).map_err(|e| StoreError::Conflict(e.to_string()))?;
+                if self
+                    .load_one(&conn, parent_set, &EntityKey::new(parent_uuid, false))
+                    .is_err()
+                {
+                    return Err(StoreError::InvalidState);
+                }
             }
-        }
 
-        record.edit();
-        self.write_record(set, &record)?;
-        for (child_set, child_key) in self.child_keys(set, key)? {
-            let child = schema
-                .set(&child_set)
-                .map_err(|e| StoreError::Metadata(e.to_string()))?;
-            self.draft_edit_tree(child, &child_key)?;
-        }
+            record.edit();
+            self.write_record(&conn, set, &record)?;
+            for (child_set, child_key) in self.child_keys(&conn, set, key)? {
+                let child = schema
+                    .set(&child_set)
+                    .map_err(|e| StoreError::Metadata(e.to_string()))?;
+                self.draft_edit_tree(&conn, child, &child_key)?;
+            }
+            Ok::<_, StoreError>(record)
+        });
         Ok(json!(record))
     }
 
@@ -882,23 +1001,18 @@ impl DraftDataStore for RelationalStore {
         if key.is_active_entity {
             return Err(StoreError::InvalidState);
         }
-        let schema = self.entity_set(set_name)?;
-        let set = schema.set(set_name).expect("geprueft");
-        let mut record = self.load_one(set, key)?;
-        record.activate()?;
-        self.write_record(set, &record)?;
-
-        for (child_set, child_key) in self.child_keys(set, key)? {
-            self.draft_activate(&child_set, &child_key)?;
-        }
-
-        self.delete_row(set, key)?;
-        Ok(json!(record))
+        // Eine Aktivierung ist entweder vollstaendig oder gar nicht
+        // geschehen. Scheitert ein Kind, darf der Parent nicht aktiv
+        // zurueckbleiben.
+        Ok(in_transaction!(self, |conn| {
+            self.draft_activate_tree(&conn, set_name, key)
+        }))
     }
 
     fn draft_prepare(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
-        Ok(json!(self.load_one(set, key)?))
+        let conn = self.conn.lock().expect("connection lock");
+        Ok(json!(self.load_one(&conn, set, key)?))
     }
 }

@@ -399,3 +399,84 @@ fn sibling_of_missing_record_is_an_error() {
     assert!(store.read_sibling_entity(ORDERS, &active(1)).is_err());
     let _ = EntityKey::new(uuid(1), true);
 }
+
+// ---------------------------------------------------------------------------
+// Transaktionen
+// ---------------------------------------------------------------------------
+
+/// Schema mit einer Pflichtspalte, damit ein Schreibversuch gezielt an der
+/// Datenbank scheitern kann.
+fn strict_schema() -> Schema {
+    Schema::builder()
+        .set(
+            EntitySet::new("TicketSet", "Ticket")
+                .drafts()
+                .column(Column::new("Titel", DataType::String { max_length: None }).required()),
+        )
+        .build()
+        .expect("Schema")
+}
+
+fn strict_store() -> RelationalStore {
+    RelationalStore::open_in_memory(Arc::new(StaticSchema::new(strict_schema()))).expect("store")
+}
+
+/// Ein Draft entsteht in zwei Anweisungen: erst die Verwaltungsdaten, dann
+/// der Satz selbst. Scheitert die zweite, darf die erste nicht stehen
+/// bleiben - ein Draft-Kopf ohne Satz ist von aussen nicht mehr erreichbar
+/// und damit auch nicht mehr aufraeumbar.
+#[test]
+fn a_failed_create_leaves_no_orphaned_draft_administration() {
+    let store = strict_store();
+    assert_eq!(store.count_draft_admin(), 0);
+
+    let result = store.create_entity(
+        "TicketSet",
+        &json!({"ID": uuid(1), "IsActiveEntity": false}),
+    );
+    assert!(result.is_err(), "Pflichtspalte fehlt, das muss scheitern");
+
+    assert_eq!(
+        store.count_draft_admin(),
+        0,
+        "die Verwaltungsdaten des gescheiterten Drafts sind zurueckgerollt"
+    );
+    assert_eq!(store.count_state("TicketSet", false), 0);
+}
+
+/// Der Gegenbeweis: gelingt das Anlegen, stehen beide Teile.
+#[test]
+fn a_successful_create_writes_record_and_administration_together() {
+    let store = strict_store();
+    store
+        .create_entity(
+            "TicketSet",
+            &json!({"ID": uuid(1), "IsActiveEntity": false, "Titel": "Drucker klemmt"}),
+        )
+        .expect("Anlegen gelingt");
+    assert_eq!(store.count_state("TicketSet", false), 1);
+    assert_eq!(store.count_draft_admin(), 1);
+}
+
+/// Ein gescheitertes Patch darf den gespeicherten Satz nicht halb
+/// veraendert zuruecklassen.
+#[test]
+fn a_failed_patch_changes_nothing() {
+    let store = strict_store();
+    store
+        .create_entity(
+            "TicketSet",
+            &json!({"ID": uuid(1), "IsActiveEntity": false, "Titel": "Drucker klemmt"}),
+        )
+        .unwrap();
+
+    let key = EntityKey::new(uuid(1), false);
+    let result = store.patch_entity("TicketSet", &key, &json!({"Titel": null}));
+    assert!(result.is_err(), "Pflichtspalte darf nicht geleert werden");
+
+    let record = store
+        .read_entity("TicketSet", &key, &ODataQuery::new())
+        .unwrap();
+    assert_eq!(record.get("Titel"), Some(json!("Drucker klemmt")));
+    assert_eq!(store.count_draft_admin(), 1);
+}

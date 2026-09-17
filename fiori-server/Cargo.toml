@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.104"
 axum = { version = "0.8.9", features = ["tracing"] }
+clap = { version = "4.5", features = ["derive", "env"] }
 data-store = { version = "0.1.0", path = "../data-store", features = ["conformance"] }
 futures-util = "0.3.32"
 handlebars = "6.3"

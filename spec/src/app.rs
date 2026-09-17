@@ -1,7 +1,7 @@
 use crate::{EntitySpec, data_dictionary::DataDictionary, package::Package};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct App {
     name: String,
     title: String,

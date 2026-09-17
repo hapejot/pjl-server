@@ -1055,6 +1055,7 @@ pub fn router() -> Router<AppState> {
         .route("/$metadata", get(metadata))
         .route("/info", get(info))
         .route("/reload", post(reload))
+        .route("/export", post(export))
         .route(
             "/{*path}",
             get(get_handler)
@@ -1074,6 +1075,41 @@ async fn reload(State(state): State<AppState>) -> impl IntoResponse {
         "relationships": ddic.relationships().count(),
         "apps": ddic.apps().count(),
     }))
+}
+
+/// Aufruf der ungebundenen Aktion `export` (Action Import).
+///
+/// OData v4 ruft einen Action Import per `POST <service>/<name>` auf - daher
+/// die Route `/export`. Deklariert wird sie in [`export_action`] und
+/// [`export_action_import`]; ohne beides waere dies ein privater Endpunkt,
+/// den kein OData-Client finden kann.
+///
+/// Schreibt das modellierte Dictionary als Dateipaar in das Exportverzeichnis
+/// und liefert `Service.ExportResult` zurueck.
+async fn export(State(state): State<AppState>) -> Response {
+    if !state.mode().is_designer() {
+        return ODataError::not_found(format!(
+            "Unknown action '{EXPORT_ACTION}' - the runtime server has nothing to export"
+        ))
+        .into_response();
+    }
+    match crate::export::export_dictionary(&state) {
+        Ok(report) => {
+            info!("dictionary exported to {}", report.ddic_path);
+            let mut body = json!(report);
+            // Kontext auf den ComplexType, nicht auf ein Entity Set: das
+            // Ergebnis ist ein einzelner Wert, keine Entitaet.
+            body.as_object_mut().expect("report object").insert(
+                "@odata.context".to_string(),
+                json!("/Service/$metadata#Service.ExportResult"),
+            );
+            to_json_response(body).into_response()
+        }
+        Err(e) => {
+            error!("export failed: {e:#}");
+            ODataError::internal(format!("export failed: {e}")).into_response()
+        }
+    }
 }
 
 fn build_query(params: &HashMap<String, String>) -> Result<ODataQuery, ODataError> {
@@ -1249,6 +1285,14 @@ impl ODataError {
         Self {
             status: StatusCode::NOT_FOUND,
             code: "NotFound",
+            message: message.into(),
+        }
+    }
+
+    fn internal(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "InternalError",
             message: message.into(),
         }
     }
@@ -2009,7 +2053,11 @@ fn content_type_json() -> (HeaderName, String) {
 
 async fn index(State(state): State<AppState>) -> Json<Value> {
     trace!("index");
-    let mut value: Vec<Value> = state
+    // Ausschliesslich das, was auch in `$metadata` steht. Frueher haengte hier
+    // eine feste Liste (`EntityConfigs`, `EntityFields`, ...) an, die seit dem
+    // Umstieg auf das Data Dictionary keine Entsprechung mehr hat - im
+    // Laufzeitserver waeren das Eintraege eines fremden Modells.
+    let value: Vec<Value> = state
         .ddic()
         .active_entities()
         .map(|e| {
@@ -2017,16 +2065,6 @@ async fn index(State(state): State<AppState>) -> Json<Value> {
             json!({"name": set, "url": set})
         })
         .collect();
-    value.extend([
-        json!({ "name": "EntityConfigs", "url": "EntityConfigs" }),
-        json!({ "name": "EntityFields", "url": "EntityFields" }),
-        json!({ "name": "EntityFacets", "url": "EntityFacets" }),
-        json!({ "name": "EntityNavigations", "url": "EntityNavigations" }),
-        json!({ "name": "EntityRelationships", "url": "EntityRelationships" }),
-        json!({ "name": "EntityTableFacets", "url": "EntityTableFacets" }),
-        json!({ "name": "FieldValueLists", "url": "FieldValueLists" }),
-        json!({ "name": "FieldValueListItems", "url": "FieldValueListItems" }),
-    ]);
     Json(json!({
       "@odata.context": "/Service/$metadata",
       "value": value
@@ -2103,8 +2141,9 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
     let xml = meta
         .replace("%TYPE-DEFINITIONS%", &type_defs.concat())
         .replace("%ENTITY-SETS%", &entity_sets.concat())
+        .replace("%ACTION-IMPORTS%", &export_action_import(&state))
         .replace("%ANNOTATIONS%", &annotations.concat())
-        .replace("%ACTIONS%", &actions.concat())
+        .replace("%ACTIONS%", &[actions.concat(), export_action(&state)].concat())
         .to_string();
     (
         [
@@ -2113,6 +2152,64 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
         ],
         xml,
     )
+}
+
+/// Name der ungebundenen Aktion und ihres Action Imports.
+///
+/// Der Import traegt denselben Namen, damit die Aufruf-URL
+/// `POST /Service/export` lautet - genau der Pfad, den OData v4 fuer einen
+/// Action Import vorsieht.
+pub const EXPORT_ACTION: &str = "export";
+
+/// Ergebnistyp der Export-Aktion, als `ComplexType` deklariert.
+///
+/// Muss mit [`crate::export::ExportReport`] uebereinstimmen - ein OData-Client
+/// liest die Felder ueber diese Deklaration.
+fn export_result_type() -> String {
+    r##"<ComplexType Name="ExportResult">
+        <Property Name="ddic_path"         Type="Edm.String" Nullable="false"/>
+        <Property Name="schema_path"       Type="Edm.String" Nullable="false"/>
+        <Property Name="packages"          Type="Edm.Int32"  Nullable="false"/>
+        <Property Name="entities"          Type="Edm.Int32"  Nullable="false"/>
+        <Property Name="relationships"     Type="Edm.Int32"  Nullable="false"/>
+        <Property Name="apps"              Type="Edm.Int32"  Nullable="false"/>
+        <Property Name="entity_sets"       Type="Edm.Int32"  Nullable="false"/>
+        <Property Name="skipped_metamodel" Type="Edm.Int32"  Nullable="false"/>
+    </ComplexType>"##
+        .to_string()
+}
+
+/// Die ungebundene Aktion selbst.
+///
+/// Ungebunden, weil das Veroeffentlichen den Service als Ganzes betrifft und
+/// nicht einen einzelnen Datensatz - eine gebundene Aktion braeuchte einen
+/// Kontext, den es hier nicht gibt.
+///
+/// Nur der Designer deklariert sie; im Laufzeitserver gibt es nichts zu
+/// exportieren, und eine Aktion im `$metadata`, die der Server anschliessend
+/// ablehnt, waere eine Luege gegenueber dem Client.
+fn export_action(state: &AppState) -> String {
+    if !state.mode().is_designer() {
+        return String::new();
+    }
+    [
+        export_result_type(),
+        format!(
+            r##"<Action Name="{EXPORT_ACTION}" IsBound="false">
+                    <ReturnType Type="Service.ExportResult" Nullable="false"/>
+                </Action>"##
+        ),
+    ]
+    .concat()
+}
+
+/// Der Action Import - erst er macht die Aktion ueber den EntityContainer
+/// aufrufbar und damit fuer einen OData-Client sichtbar.
+fn export_action_import(state: &AppState) -> String {
+    if !state.mode().is_designer() {
+        return String::new();
+    }
+    format!(r##"<ActionImport Name="{EXPORT_ACTION}" Action="Service.{EXPORT_ACTION}"/>"##)
 }
 
 fn edmx_template() -> String {
@@ -2139,6 +2236,7 @@ fn edmx_template() -> String {
     </Annotation>
     <EntityContainer Name="EntityContainer">
       %ENTITY-SETS%
+      %ACTION-IMPORTS%
     </EntityContainer>
     %TYPE-DEFINITIONS%
     <EntityType Name="DraftAdministrativeData">
@@ -2308,5 +2406,37 @@ mod tests {
             expand[0].nested_query.expand[0].nested_query.select,
             vec!["name".to_string()]
         );
+    }
+
+    /// Der `ComplexType` ist von Hand geschrieben, das Ergebnis kommt aus
+    /// `serde`. Laufen die beiden auseinander, liest ein OData-Client
+    /// Felder, die es nicht gibt - oder uebersieht welche.
+    #[test]
+    fn export_result_type_matches_the_actual_payload() {
+        let declared: Vec<String> = export_result_type()
+            .lines()
+            .filter_map(|line| line.split_once(r#"<Property Name=""#))
+            .filter_map(|(_, rest)| rest.split_once('"'))
+            .map(|(name, _)| name.to_string())
+            .collect();
+
+        let report = crate::export::ExportReport {
+            ddic_path: String::new(),
+            schema_path: String::new(),
+            packages: 0,
+            entities: 0,
+            relationships: 0,
+            apps: 0,
+            entity_sets: 0,
+            skipped_metamodel: 0,
+        };
+        let Value::Object(payload) = json!(report) else {
+            panic!("report is not an object");
+        };
+        let mut actual: Vec<String> = payload.keys().cloned().collect();
+        let mut declared = declared;
+        declared.sort();
+        actual.sort();
+        assert_eq!(declared, actual);
     }
 }

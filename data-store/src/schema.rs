@@ -446,13 +446,13 @@ impl Schema {
         navigations
     }
 
-    pub fn save(&self, name: &str) -> anyhow::Result<()> {
+    pub fn save(&self, name: impl AsRef<std::path::Path>) -> anyhow::Result<()> {
         let writer = File::create(name)?;
         serde_json::to_writer(writer, &self)?;
         Ok(())
     }
 
-    pub fn load(name: &str) -> anyhow::Result<Schema> {
+    pub fn load(name: impl AsRef<std::path::Path>) -> anyhow::Result<Schema> {
         let reader = File::open(name)?;
         Ok(serde_json::from_reader::<_, Schema>(reader)?)
     }

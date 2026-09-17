@@ -20,7 +20,7 @@ fn app_state() -> (TempDir, AppState) {
             &json!({ "ID": ENTITY_ID, "IsActiveEntity": true, "name": "Order", "plural": "Orders" }),
         )
         .unwrap();
-    let state = AppState::new(store);
+    let state = AppState::designer(store);
     state.reload();
     (dir, state)
 }

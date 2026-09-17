@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{EntitySpec, FieldSpec, Relationship, app::App, package::Package};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataDictionary {
     packages: Vec<Package>,
     entities: Vec<EntitySpec>,
@@ -152,6 +152,20 @@ impl DataDictionary {
             ],
             relationships: vec![rel, r2, r3, r4, r5, r6, r7],
             apps: vec![a1, a2, a3, a4, a5],
+            active: HashMap::new(),
+        }
+    }
+
+    /// Ein leeres Dictionary - Basis fuer gefilterte Kopien (z.B. beim Export,
+    /// wo das Metamodell selbst nicht mit in den Laufzeitserver soll).
+    ///
+    /// `new()` liefert dagegen immer das eincompilierte Metamodell.
+    pub fn empty() -> Self {
+        Self {
+            packages: Vec::new(),
+            entities: Vec::new(),
+            relationships: Vec::new(),
+            apps: Vec::new(),
             active: HashMap::new(),
         }
     }

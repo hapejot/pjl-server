@@ -61,9 +61,23 @@ WORKDIR /app
 # Ziel-Dateiname bewusst fest auf "app", damit ENTRYPOINT unten unabhängig
 # von BIN_NAME immer passt.
 COPY --from=build /usr/src/app/${BIN_NAME} /app/app
+# Die statischen UI5-Assets gehören mit ins Image: ohne sie liefert der
+# ServeDir-Fallback nur 404, und das Launchpad bleibt leer.
+COPY web /app/web
+
+# Schreibbare Verzeichnisse für Datenbank und Export. Beide sind als Volume
+# gedacht - im Designer-Container liegt hier das Modell, im Laufzeit-Container
+# die Fachdaten.
+RUN mkdir -p /app/data /app/export && chown -R appuser /app/data /app/export
 
 USER appuser
-ENV PORT=8080
+# Der Server liest PORT/DATA_DIR/EXPORT_DIR/WEB_ROOT aus der Umgebung
+# (siehe fiori-server/src/config.rs); früher war 3033 hart verdrahtet und
+# EXPOSE 8080 damit wirkungslos.
+ENV PORT=8080 \
+    DATA_DIR=/app/data \
+    EXPORT_DIR=/app/export \
+    WEB_ROOT=/app/web
 EXPOSE 8080
 
 ENTRYPOINT ["/app/app"]

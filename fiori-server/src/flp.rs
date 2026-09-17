@@ -268,6 +268,9 @@ pub async fn app_manifest_handler(
         json!({
           "type": "Component",
           "id": list_target.clone(),
+          // Without an explicit contextPattern the target inherits the deepest
+          // context of the route (i.e. the sub item), see ObjectPage below.
+          "contextPattern": "",
           "controlAggregation": "beginColumnPages",
           "name": "sap.fe.templates.ListReport",
           "options": {
@@ -275,6 +278,7 @@ pub async fn app_manifest_handler(
               "entitySet": main_set.clone(),
               "contextPath": format!("/{}", &main_set),
               "initialLoad": "Enabled",
+              "controlConfiguration": list_control_configuration(&_state, a.name()),
               "navigation": {
                 main_set.clone(): {
                   "detail": {
@@ -287,28 +291,22 @@ pub async fn app_manifest_handler(
           },
         }),
     );
-    targets.insert(
-        object_target.clone(),
-        json!({
-            "type": "Component",
-            "controlAggregation": "midColumnPages",
-            "id": object_target.clone(),
-            "name": "sap.fe.templates.ObjectPage",
-            "options": {
-              "settings": {
-                "entitySet": main_set.clone(),
-                "contextPath": format!("/{}", &main_set),
-              }
-            },
-        }),
-    );
-
     let mut object_navigation: serde_json::Map<String, Value> = serde_json::Map::new();
 
-    for rel in ddic.relationships().filter(|r| r.one() == main_name) {
-        let nav = rel.name().to_string();
+    // Every to-many navigation of the main entity becomes a section (table) on the
+    // mid column ObjectPage. Clicking a row must open the sub ObjectPage in the
+    // third (end) column of the FlexibleColumnLayout.
+    for rel in ddic
+        .relationships()
+        .filter(|r| r.one.is_some() && r.many.is_some() && r.one() == main_name)
+    {
+        // Navigation property as it exists in the EDMX (e.g. `_Fields`), NOT the
+        // technical relationship name.
+        let nav = rel.one_property().to_string();
         let child_entity = rel.many().to_string();
-        let child_object_target = format!("{}ObjectPage", child_entity);
+        // Unique per navigation: two relationships may point to the same child
+        // entity (e.g. Entity/_One and Entity/_Many -> Relation).
+        let child_object_target = format!("{}{}ObjectPage", main_name, nav.trim_start_matches('_'));
 
         routes.push(json!({
           "name": child_object_target,
@@ -335,16 +333,42 @@ pub async fn app_manifest_handler(
               "type": "Component"
             }),
         );
+        debug!(
+            "{}: sub object page {} -> {} ({})",
+            main_name, nav, child_object_target, child_entity
+        );
 
         object_navigation.insert(
             nav,
             json!({
               "detail": {
-                "route": child_entity.to_string() + "ObjectPage"
+                "route": child_object_target
               }
             }),
         );
     }
+
+    targets.insert(
+        object_target.clone(),
+        json!({
+            "type": "Component",
+            "controlAggregation": "midColumnPages",
+            // Pin this page to the main entity context. Otherwise the three
+            // target route (list, object, sub object) binds the mid column to
+            // the sub item context as well and the page requests main entity
+            // properties (e.g. `plural`) on the child entity.
+            "contextPattern": format!("/{}({{key}})", main_set),
+            "id": object_target.clone(),
+            "name": "sap.fe.templates.ObjectPage",
+            "options": {
+              "settings": {
+                "entitySet": main_set.clone(),
+                "contextPath": format!("/{}", &main_set),
+                "navigation": Value::Object(object_navigation),
+              }
+            },
+        }),
+    );
 
     let sem = format!("{}-{}", a.main_entity(&ddic).name(), a.action());
     let sap_app = json!({
@@ -430,6 +454,94 @@ pub async fn app_manifest_handler(
     });
 
     Ok(Json(r))
+}
+
+/// Zusatzkonfiguration der ListReport-Tabelle.
+///
+/// Im Designer bekommt jede Liste einen Toolbar-Button "Publish Dictionary".
+/// Der Button ist eine Fiori-Elements-*custom action* - das betrifft aber nur
+/// die Darstellung. Ausgeloest wird die ungebundene OData-Aktion `export`
+/// (siehe `srv::export_action`), die regulaer im `$metadata` deklariert ist.
+///
+/// Fiori Elements kennt fuer Toolbar-Buttons nur `DataFieldForAction` auf
+/// *gebundene* Aktionen; ein ungebundener Action Import laesst sich nicht
+/// annotieren. Deshalb der Umweg ueber einen eigenen Handler, der die Aktion
+/// selbst am Modell aufruft.
+///
+/// Der Laufzeitserver bekommt den Button nicht - dort ist die Aktion gar nicht
+/// erst deklariert.
+fn list_control_configuration(state: &AppState, app_id: &str) -> Value {
+    if !state.mode().is_designer() {
+        return json!({});
+    }
+    json!({
+      "@com.sap.vocabularies.UI.v1.LineItem": {
+        "actions": {
+          "publishDictionary": {
+            "enabled": true,
+            // Modulpfad relativ zum Komponenten-Namensraum: UI5 laedt
+            // `./apps/<Entity>/ext/Publish.js`, siehe `publish_ext_handler`.
+            "press": format!("{app_id}.ext.Publish.publish"),
+            "text": "Publish Dictionary",
+            "visible": true
+          }
+        }
+      }
+    })
+}
+
+/// Handler-Modul hinter dem "Publish Dictionary"-Button.
+///
+/// Ruft die ungebundene Aktion ueber das OData-V4-Modell auf. Ein
+/// Operation-Binding auf den Action Import (`/export(...)`) statt eines
+/// direkten `fetch`: so laeuft der Aufruf durch dieselbe Modellschicht wie
+/// jede andere Aktion des Service - inklusive der Fehlerbehandlung des
+/// Modells - und der Pfad stammt aus dem `$metadata` statt aus einer hier
+/// fest verdrahteten URL.
+pub async fn publish_ext_handler(
+    Path(app): Path<String>,
+    State(_state): State<AppState>,
+) -> impl IntoResponse {
+    debug!("ext/Publish.js for {}", app);
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        format!(
+            r##"sap.ui.define([
+    "sap/m/MessageBox",
+    "sap/m/MessageToast"
+], function (MessageBox, MessageToast) {{
+    "use strict";
+    return {{
+        publish: function () {{
+            // `this` ist die Fiori-Elements ExtensionAPI der ListReport-Seite.
+            var oModel = this.getModel();
+            // Ungebundene Aktion: das Binding haengt an der Wurzel des
+            // Service, nicht an einem Kontext. Die drei Punkte sind die
+            // V4-Schreibweise fuer "noch nicht ausgefuehrt".
+            var oOperation = oModel.bindContext("/{action}(...)");
+            MessageToast.show("Publishing data dictionary...");
+            oOperation.execute().then(function () {{
+                var r = oOperation.getBoundContext().getObject();
+                MessageBox.success(
+                    "Data dictionary published.\n\n" +
+                    r.entities + " entities, " + r.relationships + " relationships, " +
+                    r.apps + " apps, " + r.entity_sets + " entity sets.\n\n" +
+                    r.ddic_path + "\n" + r.schema_path + "\n\n" +
+                    "Restart the runtime server to pick up the changes."
+                );
+            }}).catch(function (oError) {{
+                MessageBox.error("Export failed: " + (oError.message || oError));
+            }});
+        }}
+    }};
+}});
+"##,
+            action = crate::srv::EXPORT_ACTION
+        ),
+    )
 }
 
 pub async fn app_handler(

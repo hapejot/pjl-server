@@ -28,7 +28,7 @@ fn app_state() -> (TempDir, AppState) {
                      "name": "Order", "plural": "Orders", "package_ID": PACKAGE_ID }),
         )
         .unwrap();
-    let state = AppState::new(store);
+    let state = AppState::designer(store);
     state.reload();
     (dir, state)
 }

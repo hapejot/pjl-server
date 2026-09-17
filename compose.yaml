@@ -1,9 +1,48 @@
+# Zwei Server, ein Image-Rezept: beide werden aus demselben Dockerfile und
+# demselben Code gebaut und unterscheiden sich nur im Binary.
+#
+# Der Designer schreibt sein Modell nach `export/`, der Laufzeitserver liest
+# es von dort - deshalb teilen sich beide das Volume `export`, beim
+# Laufzeitserver schreibgeschuetzt.
+#
+#   docker compose up --build
+#   Designer  -> http://localhost:3033   ("Publish Dictionary" in jeder Liste)
+#   Laufzeit  -> http://localhost:3034   (nach dem Publish neu starten)
 
 services:
-  app-server:
+  designer:
     build:
       context: .
       target: run
       args:
-        BIN_NAME: pjl-fiori
+        BIN_NAME: pjl-designer
     restart: unless-stopped
+    ports:
+      - "3033:8080"
+    volumes:
+      - design-data:/app/data
+      - export:/app/export
+
+  runtime:
+    build:
+      context: .
+      target: run
+      args:
+        BIN_NAME: pjl-runtime
+    restart: unless-stopped
+    ports:
+      - "3034:8080"
+    environment:
+      # Ohne Dictionary hat der Laufzeitserver nichts zu tun und beendet sich
+      # mit einem Hinweis - bis der Designer einmal exportiert hat.
+      DDIC: /app/export/ddic.json
+    volumes:
+      - runtime-data:/app/data
+      - export:/app/export:ro
+    depends_on:
+      - designer
+
+volumes:
+  design-data:
+  runtime-data:
+  export:

@@ -34,11 +34,22 @@ impl PathSegment {
             .collect()
     }
 
+    /// Liefert den `ID`-Schluessel des Segments.
+    ///
+    /// Akzeptiert sowohl die benannte Form `Set(ID=guid'...')` als auch die
+    /// positionale Form `Set(guid'...')` (in OData V4 zulaessig, wenn der
+    /// Entity-Typ genau einen Schluessel hat -- Fiori/UI5 nutzt das im Batch).
     pub fn id(&self) -> Option<Uuid> {
-        self.keys
-            .iter()
-            .find(|x| x.name == Some("ID".into()))
-            .and_then(|x| Uuid::parse_str(&x.value.to_string_value()).ok())
+        // 1. Benannter Schluessel "ID=..."
+        if let Some(kv) = self.keys.iter().find(|x| x.name.as_deref() == Some("ID")) {
+            return Uuid::parse_str(&kv.value.to_string_value()).ok();
+        }
+        // 2. Positionaler Einzelschluessel: genau ein Key ohne Namen.
+        let unnamed: Vec<&KeyValue> = self.keys.iter().filter(|x| x.name.is_none()).collect();
+        if unnamed.len() == 1 {
+            return Uuid::parse_str(&unnamed[0].value.to_string_value()).ok();
+        }
+        None
     }
 }
 

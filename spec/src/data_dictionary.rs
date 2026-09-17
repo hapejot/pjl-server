@@ -83,7 +83,7 @@ impl DataDictionary {
             .owned();
         let r2 = Relationship::new("entity_package", core.name())
             .with_many("Entity", "package")
-            .with_one("Package", "_Entitites");
+            .with_one("Package", "_Entities");
         let r3 = Relationship::new("many_entity", core.name())
             .with_one("Entity", "_Many")
             .with_many("Relation", "many");
@@ -413,7 +413,7 @@ mod tests {
         assert!(package_fields.iter().any(|field| matches!(
             field,
             FieldSpec::Lookup { name, entity, collection, owned }
-                if name == "_Entitites" && entity == "Entity" && *collection
+                if name == "_Entities" && entity == "Entity" && *collection
         )));
 
         let entity = ddic

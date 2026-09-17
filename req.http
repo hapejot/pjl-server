@@ -5,22 +5,22 @@ http://localhost:3033/Service/EntitySet(ID=889a5bcc-847b-41f5-978a-7d745d89015d,
 @package = PackageSet(ID=76d7d436-62e7-411f-9e59-c37ce823c971,IsActiveEntity=true)
 
 ### To-Many-Liste
-GET {{host}}/{{package}}/_Entitites?$count=true&$top=30&$skip=0
+GET {{host}}/{{package}}/_Entities?$count=true&$top=30&$skip=0
 
 ### To-Many gefiltert
-GET {{host}}/{{package}}/_Entitites?$filter=name eq 'Person'
+GET {{host}}/{{package}}/_Entities?$filter=name eq 'Person'
 
 ### To-Many, Anzahl
-GET {{host}}/{{package}}/_Entitites/$count
+GET {{host}}/{{package}}/_Entities/$count
 
 ### Einzelner Eintrag der To-Many-Liste
-GET {{host}}/{{package}}/_Entitites(ID=889a5bcc-847b-41f5-978a-7d745d89015d,IsActiveEntity=true)
+GET {{host}}/{{package}}/_Entities(ID=889a5bcc-847b-41f5-978a-7d745d89015d,IsActiveEntity=true)
 
 ### To-One-Navigation
 GET {{host}}/{{entity}}/package
 
 ### Mehrstufige Navigation
-GET {{host}}/{{entity}}/package/_Entitites/$count
+GET {{host}}/{{entity}}/package/_Entities/$count
 
 ### Property
 GET {{host}}/{{entity}}/name
@@ -47,7 +47,7 @@ DELETE {{host}}/EntitySet(ID=889a5bcc-847b-41f5-978a-7d745d89015d,IsActiveEntity
 DELETE {{host}}/{{entity}}
 
 ### Loeschen ueber eine Navigation
-DELETE {{host}}/{{package}}/_Entitites(ID=889a5bcc-847b-41f5-978a-7d745d89015d,IsActiveEntity=true)
+DELETE {{host}}/{{package}}/_Entities(ID=889a5bcc-847b-41f5-978a-7d745d89015d,IsActiveEntity=true)
 
 ### Draft anlegen, Kind hinzufuegen, aktivieren
 POST {{host}}/{{entity}}/Service.draftEdit

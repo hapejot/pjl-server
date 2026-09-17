@@ -118,7 +118,7 @@ async fn deletes_through_a_navigation_path() {
     let status = delete(
         &state,
         &format!(
-            "/PackageSet(ID={PACKAGE_ID},IsActiveEntity=true)/_Entitites(ID={ENTITY_ID},IsActiveEntity=true)"
+            "/PackageSet(ID={PACKAGE_ID},IsActiveEntity=true)/_Entities(ID={ENTITY_ID},IsActiveEntity=true)"
         ),
     )
     .await;

@@ -1076,12 +1076,30 @@ async fn reload(State(state): State<AppState>) -> impl IntoResponse {
     }))
 }
 
-fn build_query(params: &HashMap<String, String>) -> ODataQuery {
-    ODataQuery {
-        filter: params.get("$filter").map(|x| Expr::parse(x).unwrap()),
+fn build_query(params: &HashMap<String, String>) -> Result<ODataQuery, ODataError> {
+    let filter = match params.get("$filter") {
+        Some(raw) => Some(Expr::parse(raw).map_err(|e| {
+            ODataError::bad_request(format!("Invalid $filter '{raw}': {e}"))
+        })?),
+        None => None,
+    };
+    let top = match params.get("$top") {
+        Some(raw) => Some(raw.parse::<u32>().map_err(|e| {
+            ODataError::bad_request(format!("Invalid $top '{raw}': {e}"))
+        })?),
+        None => None,
+    };
+    let skip = match params.get("$skip") {
+        Some(raw) => Some(raw.parse::<u32>().map_err(|e| {
+            ODataError::bad_request(format!("Invalid $skip '{raw}': {e}"))
+        })?),
+        None => None,
+    };
+    Ok(ODataQuery {
+        filter,
         orderby: vec![],
-        top: params.get("$top").map(|x| x.parse().unwrap()),
-        skip: params.get("$skip").map(|x| x.parse().unwrap()),
+        top,
+        skip,
         select: params
             .get("$select")
             .and_then(|x| Some(x.split(",").map(|y| y.to_string()).collect::<Vec<_>>()))
@@ -1092,7 +1110,7 @@ fn build_query(params: &HashMap<String, String>) -> ODataQuery {
             .unwrap_or_else(|| vec![]),
         count: params.get("$count").is_some(),
         search: params.get("$search").cloned(),
-    }
+    })
 }
 
 fn parse_expand_items(raw: &str) -> Vec<ExpandItem> {
@@ -1304,7 +1322,10 @@ async fn get_handler(
     state: State<AppState>,
     params: Query<HashMap<String, String>>,
 ) -> Response {
-    let query = build_query(&params);
+    let query = match build_query(&params) {
+        Ok(q) => q,
+        Err(e) => return e.into_response(),
+    };
     let path_struct = match parse_odata_path(&path) {
         Ok(p) => p,
         Err(e) => {
@@ -1680,7 +1701,10 @@ async fn post_handler(
     params: Query<HashMap<String, String>>,
     payload: Option<Json<Value>>,
 ) -> Response {
-    let _p = build_query(&params);
+    let _p = match build_query(&params) {
+        Ok(q) => q,
+        Err(e) => return e.into_response(),
+    };
     let path_struct = match parse_odata_path(&path) {
         Ok(p) => p,
         Err(e) => {
@@ -1747,16 +1771,10 @@ fn draft_action(
             Ok(r)
         }
         "draftActivate" => {
-            for (child_set, foreign_key) in owned_children_of(state, set) {
-                for child in children_of(state, &child_set, &foreign_key, key.id)? {
-                    if !child.is_active_entity() {
-                        state
-                            .store
-                            .draft_activate(&child_set, &EntityKey::from(&child))
-                            .map_err(ODataError::from_store)?;
-                    }
-                }
-            }
+            // Kinderbaum wird vom Store rekursiv aktiviert: Parent zuerst
+            // (damit die zusammengesetzten FKs (entity_ID, IsActiveEntity)
+            // aufloesen), danach die Kinder. Frueher hat diese Funktion die
+            // Kinder vorab aktiviert, was gegen die FK-Reihenfolge lief.
             state
                 .store
                 .draft_activate(set, key)
@@ -2277,10 +2295,10 @@ mod tests {
 
     #[test]
     fn parses_nested_expand_options() {
-        let expand = parse_expand_items("_Entitites($expand=package($select=name))");
+        let expand = parse_expand_items("_Entities($expand=package($select=name))");
 
         assert_eq!(expand.len(), 1);
-        assert_eq!(expand[0].navigation_property, "_Entitites");
+        assert_eq!(expand[0].navigation_property, "_Entities");
         assert_eq!(expand[0].nested_query.expand.len(), 1);
         assert_eq!(
             expand[0].nested_query.expand[0].navigation_property,

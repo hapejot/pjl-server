@@ -299,6 +299,7 @@ pub mod query {
         alias: &'a str,
         params: Vec<SqlValue>,
         filter: Vec<Expr>,
+        raw_filters: Vec<String>,
         select: Vec<String>,
     }
 
@@ -309,19 +310,21 @@ pub mod query {
                 alias,
                 params: vec![],
                 filter: vec![],
+                raw_filters: vec![],
                 select: vec![],
             }
         }
 
         pub fn build(mut self) -> Result<Sql, StoreError> {
             let _ = self.alias;
-            let condition_sql = self
+            let mut conditions: Vec<String> = self
                 .filter
                 .clone()
                 .iter()
                 .map(|expr| self.predicate(expr).unwrap())
-                .collect::<Vec<_>>()
-                .join(" AND ");
+                .collect();
+            conditions.extend(self.raw_filters.iter().cloned());
+            let condition_sql = conditions.join(" AND ");
 
             let fields_sql = if self.select.len() > 0 {
                 self.select.join(", ")
@@ -350,6 +353,21 @@ pub mod query {
         /// Uebersetzt einen Filterausdruck in ein `WHERE`-Fragment.
         pub fn filter(mut self, expr: &Expr) -> Self {
             self.filter.push(expr.clone());
+            self
+        }
+
+        /// Fuegt ein bereits fertiges `WHERE`-Fragment mit seinen Parametern
+        /// hinzu. Die Platzhalter im Fragment muessen die Form `?N` mit
+        /// bereits konsistenter Nummerierung haben -- typischerweise wird der
+        /// Aufrufer sie beim Zusammenbau mit [`placeholders`] erzeugen.
+        pub fn filter_raw(mut self, sql: impl Into<String>, params: Vec<SqlValue>) -> Self {
+            let sql = sql.into();
+            // Platzhalter im Fragment relativ zur laufenden Parameterliste
+            // umnummerieren, damit mehrere raw-Filter kombinierbar sind.
+            let mut offset = self.params.len();
+            let renumbered = renumber_placeholders(&sql, &mut offset);
+            self.params.extend(params);
+            self.raw_filters.push(renumbered);
             self
         }
 
@@ -516,11 +534,18 @@ pub mod query {
 
         fn build_inner(&self) -> Result<String, StoreError> {
             let base_sql = self.build_base()?;
+            // Draft-Flags aus dem Sibling-Join ableiten. `SiblingEntity/IsActiveEntity`
+            // ist:
+            //   NULL  -> kein Zwilling
+            //   1     -> Zwilling ist aktiv  (also bin ich der Draft) -> HasActiveEntity
+            //   0     -> Zwilling ist Draft  (also bin ich aktiv)     -> HasDraftEntity
+            // Wichtig: die vorherige Formel `1 - COALESCE(sibling, 0)` war falsch,
+            // weil sie NULL (kein Zwilling) zu `HasDraftEntity=1` machte.
             let r = format!(
                 r#"   SELECT
                         *,
-                        1 - COALESCE("SiblingEntity/IsActiveEntity", 0) AS "HasDraftEntity",
-                        COALESCE("SiblingEntity/IsActiveEntity", 0) AS "HasActiveEntity"
+                        CASE WHEN "SiblingEntity/IsActiveEntity" = 0 THEN 1 ELSE 0 END AS "HasDraftEntity",
+                        CASE WHEN "SiblingEntity/IsActiveEntity" = 1 THEN 1 ELSE 0 END AS "HasActiveEntity"
                       FROM ( {} )"#,
                 base_sql
             );
@@ -539,6 +564,36 @@ pub mod query {
             );
             Ok(r)
         }
+    }
+
+    /// Nummeriert `?N`-Platzhalter in `sql` neu, beginnend bei `*offset + 1`,
+    /// und aktualisiert `offset` auf den zuletzt verwendeten Wert. So laesst
+    /// sich ein vorformuliertes Fragment sicher in eine bestehende
+    /// Parameterliste einbetten.
+    fn renumber_placeholders(sql: &str, offset: &mut usize) -> String {
+        let mut result = String::with_capacity(sql.len());
+        let bytes = sql.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'?' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit() {
+                let start = i + 1;
+                let mut end = start;
+                while end < bytes.len() && bytes[end].is_ascii_digit() {
+                    end += 1;
+                }
+                // Original-Index wird verworfen: die relative Reihenfolge im
+                // Fragment ist massgebend, nicht der urspruengliche Wert.
+                let _original: usize = sql[start..end].parse().unwrap();
+                *offset += 1;
+                result.push('?');
+                result.push_str(&offset.to_string());
+                i = end;
+            } else {
+                result.push(bytes[i] as char);
+                i += 1;
+            }
+        }
+        result
     }
 
     /// `ORDER BY`-Klausel. Leere Sortierung ergibt `None`.

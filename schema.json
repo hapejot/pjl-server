@@ -566,8 +566,8 @@
         }
       },
       "associations": {
-        "_Entitites": {
-          "name": "_Entitites",
+        "_Entities": {
+          "name": "_Entities",
           "target_set": "EntitySet",
           "cardinality": "ToMany",
           "ownership": "Association",

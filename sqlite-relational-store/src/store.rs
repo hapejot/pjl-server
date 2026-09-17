@@ -185,13 +185,19 @@ impl RelationalStore {
     }
 
     /// Drafts verdecken ihren aktiven Zwilling.
+    ///
+    /// Bezugsspalten der aeusseren Zeile werden bare, ohne Tabellenalias,
+    /// referenziert. Damit greift die Klausel sowohl in der Basisabfrage als
+    /// auch als `WHERE`-Fragment am Translator-Envelope
+    /// (`SELECT * FROM (...)`, ohne `AS t`). Die innere Sub-Abfrage nutzt
+    /// den expliziten Alias `d`, damit die Korrelation eindeutig bleibt.
     fn shadow_predicate(set: &EntitySet) -> Option<String> {
         if !set.draft_enabled {
             return None;
         }
         Some(format!(
-            "({ALIAS}.{is_active} = 0 OR NOT EXISTS (SELECT 1 FROM {table} d \
-             WHERE d.{id} = {ALIAS}.{id} AND d.{is_active} = 0))",
+            "({is_active} = 0 OR NOT EXISTS (SELECT 1 FROM {table} d \
+             WHERE d.{id} = {id} AND d.{is_active} = 0))",
             table = quote(&set.name),
             id = quote(ID_COLUMN),
             is_active = quote(IS_ACTIVE_COLUMN),
@@ -214,10 +220,10 @@ impl RelationalStore {
             return Ok(None);
         };
         Ok(Some(json!({
-            "DraftUUID": row.get::<_, String>(0).map_err(|e| sql_err!(Metadata,e))?,
-            "DraftIsCreatedByMe": row.get::<_, i64>(1).map_err(|e| sql_err!(Metadata,e))? != 0,
-            "InProcessByUser": row.get::<_, Option<String>>(2).map_err(|e| sql_err!(Metadata,e))?.unwrap_or_default(),
-            "LastChangedByUser": row.get::<_, Option<String>>(3).map_err(|e| sql_err!(Metadata,e))?.unwrap_or_default(),
+            "DraftUUID": row.get::<_, String>("DraftUUID").map_err(|e| sql_err!(Metadata,e))?,
+            "DraftIsCreatedByMe": row.get::<_, i64>("DraftIsCreatedByMe").map_err(|e| sql_err!(Metadata,e))? != 0,
+            "InProcessByUser": row.get::<_, Option<String>>("InProcessByUser").map_err(|e| sql_err!(Metadata,e))?.unwrap_or_default(),
+            "LastChangedByUser": row.get::<_, Option<String>>("LastChangedByUser").map_err(|e| sql_err!(Metadata,e))?.unwrap_or_default(),
         })))
     }
 
@@ -393,36 +399,69 @@ impl RelationalStore {
         {
             let conn = self.conn.lock().expect("connection lock");
             let mut stmt = conn.prepare(&sql).map_err(|e| sql_err!(Metadata, e))?;
+            // Nur die tatsaechlich projizierten Spalten materialisieren.
+            // Grund: $select verkleinert die SELECT-Liste. Wir muessen also
+            // den Result-Set als Wahrheit nehmen und pro Spalte den Datentyp
+            // aus dem Schema nachschlagen (fuer sql_to_json). Die Zuordnung
+            // erfolgt namensbasiert -- robust gegen jede Umordnung.
+            let projected: Vec<(String, Option<data_store::schema::DataType>)> = stmt
+                .column_names()
+                .into_iter()
+                .map(|n| {
+                    let name = n.to_string();
+                    let data_type = set
+                        .columns()
+                        .find(|c| c.name == name)
+                        .map(|c| c.data_type.clone());
+                    (name, data_type)
+                })
+                .collect();
             let mut rows = stmt
                 .query(params_from_iter(params))
                 .map_err(|e| sql_err!(Metadata, e))?;
             while let Some(row) = rows.next().map_err(|e| sql_err!(Metadata, e))? {
                 let mut map = Map::new();
-                for (index, column) in set.columns().enumerate() {
-                    let value = row.get_ref(index).map_err(|e| sql_err!(Metadata, e))?;
-                    map.insert(column.name.clone(), sql_to_json(value, &column.data_type));
+                for (name, data_type) in &projected {
+                    // Draft-Ableitungen und interne Spalten weiter unten separat behandeln.
+                    let Some(dt) = data_type else { continue };
+                    let value = row
+                        .get_ref(name.as_str())
+                        .map_err(|e| sql_err!(Metadata, e))?;
+                    map.insert(name.clone(), sql_to_json(value, dt));
                 }
                 let mut admin_id = None;
                 let mut messages = None;
                 if set.draft_enabled {
-                    map.insert(
-                        "HasActiveEntity".into(),
-                        json!(
-                            row.get::<_, i64>("HasActiveEntity")
-                                .map_err(|e| sql_err!(Metadata, e))?
-                                != 0
-                        ),
-                    );
-                    map.insert(
-                        "HasDraftEntity".into(),
-                        json!(
-                            row.get::<_, i64>("HasDraftEntity")
-                                .map_err(|e| sql_err!(Metadata, e))?
-                                != 0
-                        ),
-                    );
-                    admin_id = row.get("DraftAdministrativeData_ID").ok();
-                    messages = row.get("DraftMessages").ok();
+                    // Nicht alle Draft-Spalten sind zwingend in der Projektion:
+                    // $select kann sie explizit weglassen. Deshalb nur setzen,
+                    // wenn tatsaechlich im Result-Set vorhanden.
+                    let has = |n: &str| projected.iter().any(|(name, _)| name == n);
+                    if has("HasActiveEntity") {
+                        map.insert(
+                            "HasActiveEntity".into(),
+                            json!(
+                                row.get::<_, i64>("HasActiveEntity")
+                                    .map_err(|e| sql_err!(Metadata, e))?
+                                    != 0
+                            ),
+                        );
+                    }
+                    if has("HasDraftEntity") {
+                        map.insert(
+                            "HasDraftEntity".into(),
+                            json!(
+                                row.get::<_, i64>("HasDraftEntity")
+                                    .map_err(|e| sql_err!(Metadata, e))?
+                                    != 0
+                            ),
+                        );
+                    }
+                    if has("DraftAdministrativeData_ID") {
+                        admin_id = row.get("DraftAdministrativeData_ID").ok();
+                    }
+                    if has("DraftMessages") {
+                        messages = row.get("DraftMessages").ok();
+                    }
                 }
                 raw.push((map, admin_id, messages));
             }
@@ -569,16 +608,23 @@ impl RelationalStore {
                     }
                     return Ok(());
                 }
-                let mut where_clause = format!(
-                    "{ALIAS}.{} IN ({})",
+                // Vollstaendige Abfrage ueber den Translator zusammenbauen,
+                // damit die Draft-Wrapper (Sibling-Join, HasActiveEntity, ...)
+                // konsistent zum Haupt-SELECT sind. Spalten werden ohne Alias
+                // referenziert -- das aeussere SELECT hat keinen `AS t`.
+                let mut raw = format!(
+                    "{} IN ({})",
                     quote(ID_COLUMN),
                     placeholders(ids.len(), 0)
                 );
                 if let Some(shadow) = Self::shadow_predicate(target) {
-                    where_clause = format!("{where_clause} AND {shadow}");
+                    raw = format!("{raw} AND {shadow}");
                 }
                 let params: Vec<SqlValue> = ids.iter().cloned().map(SqlValue::Text).collect();
-                let found = self.query_records(target, Some(where_clause), params, None, "")?;
+                let sql = Translator::new(target, ALIAS)
+                    .filter_raw(raw, params)
+                    .build()?;
+                let found = self.query_records(target, Some(sql.text), sql.params, None, "")?;
                 let by_id: HashMap<String, Value> = found
                     .iter()
                     .map(|r| (r.id().to_string(), r.core_json()))
@@ -595,13 +641,16 @@ impl RelationalStore {
             Cardinality::ToMany => {
                 let fk = assoc.foreign_key.column();
                 let ids: Vec<String> = rows.iter().map(|r| r.id().to_string()).collect();
-                let mut where_clause =
-                    format!("{ALIAS}.{} IN ({})", quote(fk), placeholders(ids.len(), 0));
+                let mut raw =
+                    format!("{} IN ({})", quote(fk), placeholders(ids.len(), 0));
                 if let Some(shadow) = Self::shadow_predicate(target) {
-                    where_clause = format!("{where_clause} AND {shadow}");
+                    raw = format!("{raw} AND {shadow}");
                 }
                 let params: Vec<SqlValue> = ids.iter().cloned().map(SqlValue::Text).collect();
-                let found = self.query_records(target, Some(where_clause), params, None, "")?;
+                let sql = Translator::new(target, ALIAS)
+                    .filter_raw(raw, params)
+                    .build()?;
+                let found = self.query_records(target, Some(sql.text), sql.params, None, "")?;
 
                 let mut grouped: HashMap<String, Vec<Value>> = HashMap::new();
                 for record in found.iter() {

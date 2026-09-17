@@ -6,7 +6,7 @@ use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::{error, info};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-use fiori_server::hook::{DefaultHook, Extender};
+use fiori_server::hook::{EntityDefaultsHook, Extender};
 use fiori_server::*;
 
 async fn main_loop() -> anyhow::Result<()> {
@@ -17,7 +17,7 @@ async fn main_loop() -> anyhow::Result<()> {
         "rel-data",
         Arc::new(StaticSchema::new(s)),
     )?);
-    let store = Extender::new(store, Arc::new(DefaultHook))?;
+    let store = Extender::new(store, Arc::new(EntityDefaultsHook))?;
 
     let state = AppState::new(store);
     state.reload();

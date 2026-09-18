@@ -1,0 +1,88 @@
+{
+  "packages": [
+    {
+      "name": "core"
+    },
+    {
+      "name": "sales"
+    }
+  ],
+  "entities": [
+    {
+      "name": "Order",
+      "package": "sales",
+      "type_name_plural": "Orders",
+      "fields": [
+        {
+          "Atom": {
+            "name": "amount",
+            "label": "Amount",
+            "edm_type": "Edm.Decimal",
+            "package": null,
+            "max_length": null,
+            "precision": 15,
+            "scale": 2,
+            "computed": false,
+            "immutable": false,
+            "value_list": null,
+            "presentation": {
+              "searchable": null,
+              "show_in_list": null,
+              "list_sort_order": null,
+              "list_importance": null,
+              "criticality_path": null,
+              "form_group": null,
+              "lookup": null
+            }
+          }
+        },
+        {
+          "Lookup": {
+            "name": "_Items",
+            "entity": "OrderItem",
+            "collection": true,
+            "owned": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "OrderItem",
+      "package": "sales",
+      "type_name_plural": "OrderItems",
+      "fields": [
+        {
+          "Lookup": {
+            "name": "order",
+            "entity": "Order",
+            "collection": false,
+            "owned": false
+          }
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "name": "order_items",
+      "one": "Order",
+      "one_field": "_Items",
+      "many": "OrderItem",
+      "many_property": "order",
+      "owned": true,
+      "package": "sales"
+    }
+  ],
+  "apps": [
+    {
+      "name": "orders",
+      "title": "Orders",
+      "main_entity": "Order",
+      "subtitle": null,
+      "icon": null,
+      "package": {
+        "name": "sales"
+      }
+    }
+  ]
+}

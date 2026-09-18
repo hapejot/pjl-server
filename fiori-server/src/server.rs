@@ -14,7 +14,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Context;
-use axum::{Router, routing::get};
+use axum::{routing::get, Router};
 use data_store::{DraftDataStore, Schema, SchemaSource, StaticSchema};
 use spec::data_dictionary::DataDictionary;
 use spec_schema::DdicSchemaSource;
@@ -24,7 +24,7 @@ use tracing::info;
 
 use crate::config::{ServerConfig, ServerMode};
 use crate::hook::{EntityDefaultsHook, Extender};
-use crate::{AppState, batch, flp, srv};
+use crate::{batch, flp, srv, AppState};
 
 /// Server nach Konfiguration aufbauen und bis zum Abbruch bedienen.
 pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
@@ -64,6 +64,7 @@ fn load_dictionary(config: &ServerConfig) -> anyhow::Result<DataDictionary> {
                     path.display()
                 )
             })?;
+            info!("loading ddic from {}", path.display());
             let ddic: DataDictionary = serde_json::from_reader(std::io::BufReader::new(file))
                 .with_context(|| format!("'{}' is not a valid data dictionary", path.display()))?;
             info!(
@@ -94,7 +95,11 @@ fn schema_source(
     if let Some(path) = &config.schema {
         let schema = Schema::load(path)
             .with_context(|| format!("cannot read schema '{}'", path.display()))?;
-        info!("schema '{}': {} sets", path.display(), schema.sets().count());
+        info!(
+            "schema '{}': {} sets",
+            path.display(),
+            schema.sets().count()
+        );
         return Ok(Arc::new(StaticSchema::new(schema)));
     }
     let mut activated = base.clone();

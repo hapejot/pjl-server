@@ -1,0 +1,10 @@
+ID: bb64beb5-98a8-4aec-90a9-01019738bdc9
+IsActiveEntity: true
+HasActiveEntity: false
+HasDraftEntity: false
+DraftAdministrativeData: null
+DraftMessages: []
+main_entity_ID: 00000000-0000-0000-0000-000000000001
+name: orders
+package_ID: 00000000-0000-0000-0000-0000000000a1
+title: Orders

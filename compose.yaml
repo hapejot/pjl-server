@@ -69,10 +69,10 @@ services:
       interval: 2s
       timeout: 3s
       retries: 15
-    tmpfs:
+    # tmpfs:
       # Testdaten muessen einen Neustart nicht ueberleben; im RAM ist die
       # Suite spuerbar schneller.
-      - /var/lib/postgresql/data
+      # - /var/lib/postgresql/data
 
 volumes:
   design-data:

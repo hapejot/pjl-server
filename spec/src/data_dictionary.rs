@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{EntitySpec, FieldSpec, Relationship, app::App, package::Package};
+use tracing::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataDictionary {
@@ -16,6 +17,7 @@ pub struct DataDictionary {
 
 impl DataDictionary {
     pub fn new() -> Self {
+        info!("using default ddic");
         let _core = Package::new("core");
         let core = Package::new("core");
 
@@ -407,6 +409,12 @@ impl DataDictionary {
                 println!("    {}", prop.name());
             }
         }
+    }
+}
+
+impl Default for DataDictionary {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

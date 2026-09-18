@@ -1,0 +1,12 @@
+ID: b92015c9-ae84-4c17-908c-771f8e7c6589
+IsActiveEntity: true
+HasActiveEntity: false
+HasDraftEntity: false
+DraftAdministrativeData: null
+DraftMessages: []
+entity_ID: 00000000-0000-0000-0000-000000000001
+label: Amount
+name: amount
+precision: 15
+scale: 2
+type: Edm.Decimal

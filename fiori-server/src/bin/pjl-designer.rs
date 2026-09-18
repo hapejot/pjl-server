@@ -10,7 +10,7 @@
 use fiori_server::config::{ServerConfig, ServerMode};
 use fiori_server::server;
 use tracing::{error, info};
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {

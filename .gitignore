@@ -12,3 +12,4 @@ sample.sql
 tmp.jq
 rel-data/data.sqlite
 rel-data
+design-data

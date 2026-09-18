@@ -1,0 +1,12 @@
+ID: a6950718-bfe8-4408-83a0-000714db7c36
+IsActiveEntity: true
+HasActiveEntity: false
+HasDraftEntity: false
+DraftAdministrativeData: null
+DraftMessages: []
+many_ID: 00000000-0000-0000-0000-000000000002
+name: order_items
+one_ID: 00000000-0000-0000-0000-000000000001
+owned: true
+source_field: _Items
+target_field: order

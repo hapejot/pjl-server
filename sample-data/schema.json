@@ -1,0 +1,103 @@
+{
+  "sets": {
+    "OrderSet": {
+      "name": "OrderSet",
+      "entity_name": "Order",
+      "draft_enabled": true,
+      "columns": {
+        "ID": {
+          "name": "ID",
+          "data_type": "Guid",
+          "nullable": false,
+          "default": null,
+          "write_policy": "Writable",
+          "role": "Key"
+        },
+        "IsActiveEntity": {
+          "name": "IsActiveEntity",
+          "data_type": "Bool",
+          "nullable": false,
+          "default": null,
+          "write_policy": "Writable",
+          "role": "Key"
+        },
+        "amount": {
+          "name": "amount",
+          "data_type": {
+            "Decimal": {
+              "precision": 15,
+              "scale": 2
+            }
+          },
+          "nullable": true,
+          "default": null,
+          "write_policy": "Writable",
+          "role": "Data"
+        }
+      },
+      "associations": {
+        "_Items": {
+          "name": "_Items",
+          "target_set": "OrderItemSet",
+          "cardinality": "ToMany",
+          "ownership": "Composition",
+          "foreign_key": {
+            "There": {
+              "column": "order_ID"
+            }
+          },
+          "reverse": "order"
+        }
+      }
+    },
+    "OrderItemSet": {
+      "name": "OrderItemSet",
+      "entity_name": "OrderItem",
+      "draft_enabled": true,
+      "columns": {
+        "ID": {
+          "name": "ID",
+          "data_type": "Guid",
+          "nullable": false,
+          "default": null,
+          "write_policy": "Writable",
+          "role": "Key"
+        },
+        "IsActiveEntity": {
+          "name": "IsActiveEntity",
+          "data_type": "Bool",
+          "nullable": false,
+          "default": null,
+          "write_policy": "Writable",
+          "role": "Key"
+        },
+        "order_ID": {
+          "name": "order_ID",
+          "data_type": "Guid",
+          "nullable": true,
+          "default": null,
+          "write_policy": "Writable",
+          "role": {
+            "ForeignKey": {
+              "target_set": "OrderSet"
+            }
+          }
+        }
+      },
+      "associations": {
+        "order": {
+          "name": "order",
+          "target_set": "OrderSet",
+          "cardinality": "ToOne",
+          "ownership": "Composition",
+          "foreign_key": {
+            "Here": {
+              "column": "order_ID"
+            }
+          },
+          "reverse": null
+        }
+      }
+    }
+  }
+}

@@ -169,7 +169,7 @@ pub mod query {
         /// Fuer Sets ohne Draft-Unterstuetzung wirkungslos.
         pub fn shadow_drafts(mut self) -> Self {
             if self.set.draft_enabled {
-                self.raw_filters.push(shadow_predicate(self.dialect));
+                // self.raw_filters.push(shadow_predicate(self.dialect));
             }
             self
         }
@@ -336,9 +336,7 @@ pub mod query {
                 Expr::UnaryNot(inner) => format!("(NOT {})", self.predicate(inner)?),
                 Expr::Bool(b) => self.dialect.bool_constant(*b),
                 Expr::FunctionCall { name, args } => self.function(name, args)?,
-                Expr::Identifier(name) => {
-                    self.dialect.bool_predicate(&self.column(name)?, true)
-                }
+                Expr::Identifier(name) => self.dialect.bool_predicate(&self.column(name)?, true),
                 other => return Err(unsupported(format!("{other:?}"))),
             })
         }
@@ -363,9 +361,10 @@ pub mod query {
             let sibling = quote(SIBLING_IS_ACTIVE);
             Ok(format!(
                 r#"SELECT *,
-                     CASE WHEN {sibling_is_draft} THEN {yes} ELSE {no} END AS {has_draft},
+                     CASE WHEN {sibling_is_draft} OR {is_draft} THEN {yes} ELSE {no} END AS {has_draft},
                      CASE WHEN {sibling_is_active} THEN {yes} ELSE {no} END AS {has_active}
                    FROM ( {base} )"#,
+                is_draft = self.dialect.bool_predicate("IsActiveEntity", false),
                 sibling_is_draft = self.dialect.bool_predicate(&sibling, false),
                 sibling_is_active = self.dialect.bool_predicate(&sibling, true),
                 yes = self.dialect.bool_literal(true),
@@ -495,15 +494,18 @@ pub mod query {
                 .select("HasActiveEntity")
                 .select("HasDraftEntity")
                 .select("name")
-                .filter(&Expr::parse(
-                    "(IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null)",
-                ).expect("parst"))
+                .filter(
+                    &Expr::parse(
+                        "(IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null)",
+                    )
+                    .expect("parst"),
+                )
                 .build()?;
 
             let expected = normalize(
                 r#"SELECT "ID", "IsActiveEntity", "HasActiveEntity", "HasDraftEntity", "name"
                    FROM (SELECT *,
-                       CASE WHEN "SiblingEntity/IsActiveEntity" = 0 THEN 1 ELSE 0 END AS "HasDraftEntity",
+                       CASE WHEN ("SiblingEntity/IsActiveEntity" = 0) OR ("IsActiveEntity" = 0) THEN 1 ELSE 0 END AS "HasDraftEntity",
                        CASE WHEN "SiblingEntity/IsActiveEntity" = 1 THEN 1 ELSE 0 END AS "HasActiveEntity"
                      FROM (
                        SELECT a.*,
@@ -525,9 +527,12 @@ pub mod query {
             let set = order_set();
             let implicit = Translator::new(&set, &SQLITE).shadow_drafts().build()?;
             let explicit = Translator::new(&set, &SQLITE)
-                .filter(&Expr::parse(
-                    "(IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null)",
-                ).expect("parst"))
+                .filter(
+                    &Expr::parse(
+                        "(IsActiveEntity eq false or SiblingEntity/IsActiveEntity eq null)",
+                    )
+                    .expect("parst"),
+                )
                 .build()?;
             assert!(
                 implicit.text.ends_with(
@@ -536,7 +541,9 @@ pub mod query {
                 "{}",
                 implicit.text
             );
-            assert!(explicit.text.contains(r#""SiblingEntity/IsActiveEntity" IS NULL"#));
+            assert!(explicit
+                .text
+                .contains(r#""SiblingEntity/IsActiveEntity" IS NULL"#));
             Ok(())
         }
 
@@ -547,7 +554,10 @@ pub mod query {
             let set = EntitySet::new("ThingSet", "Thing")
                 .column(Column::new("name", DataType::String { max_length: None }));
             let s = Translator::new(&set, &SQLITE).build()?;
-            assert_eq!(s.text, normalize(r#"SELECT * FROM (SELECT * FROM "ThingSet")"#));
+            assert_eq!(
+                s.text,
+                normalize(r#"SELECT * FROM (SELECT * FROM "ThingSet")"#)
+            );
             Ok(())
         }
 
@@ -555,11 +565,7 @@ pub mod query {
         #[test]
         fn untranslatable_filters_return_an_error() {
             let set = order_set();
-            for filter in [
-                "floor(Amount) eq 1",
-                "Nope eq 'x'",
-                "Customer/Name eq 'x'",
-            ] {
+            for filter in ["floor(Amount) eq 1", "Nope eq 'x'", "Customer/Name eq 'x'"] {
                 let expr = Expr::parse(filter).expect("parst");
                 let result = Translator::new(&set, &SQLITE).filter(&expr).build();
                 assert!(result.is_err(), "{filter} haette scheitern muessen");

@@ -39,26 +39,14 @@ impl DataDictionary {
         let relation_ent = EntitySpec::new("Relation", core.name(), "Relations")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
             .field(FieldSpec::bool_field("owned", "Owned"))
-            .field(FieldSpec::atom("source", "Source", "Edm.String"))
             .field(FieldSpec::atom(
                 "source_field",
-                "Source Field",
+                "List Reference",
                 "Edm.String",
             ))
-            .field(FieldSpec::atom(
-                "source_cardinality",
-                "Source Cardinality",
-                "Edm.String",
-            ))
-            .field(FieldSpec::atom("target", "Target", "Edm.String"))
             .field(FieldSpec::atom(
                 "target_field",
-                "Target Field",
-                "Edm.String",
-            ))
-            .field(FieldSpec::atom(
-                "target_cardinality",
-                "Target Cardinality",
+                "Single Field",
                 "Edm.String",
             ));
 
@@ -194,6 +182,7 @@ impl DataDictionary {
                 .iter_mut()
                 .find(|x| &x.name == one.as_ref().unwrap())
             {
+                debug!("adding one {}", relation.name);
                 e.fields.push(FieldSpec::Lookup {
                     name: one_field.clone().unwrap(),
                     entity: many.clone().unwrap(),
@@ -206,6 +195,7 @@ impl DataDictionary {
                 .iter_mut()
                 .find(|x| &x.name == many.as_ref().unwrap())
             {
+                debug!("adding many {}", relation.name);
                 e.fields.push(FieldSpec::Lookup {
                     name: many_property.clone().unwrap(),
                     entity: one.clone().unwrap(),
@@ -284,6 +274,7 @@ impl DataDictionary {
         }
         match self.entities.iter_mut().find(|e| e.name() == entity) {
             Some(e) => {
+                debug!("add field: {}", field.name());
                 e.fields.push(field);
                 true
             }
@@ -373,20 +364,26 @@ impl DataDictionary {
                 } = &r
                 {
                     if one == &active.name {
-                        active.fields.push(FieldSpec::Lookup {
-                            name: one_field.clone(),
-                            entity: many.clone(),
-                            collection: true,
-                            owned: false,
-                        });
+                        if !active.fields.iter().any(|x| x.name() == one_field) {
+                            debug!("add one field {}", one_field);
+                            active.fields.push(FieldSpec::Lookup {
+                                name: one_field.clone(),
+                                entity: many.clone(),
+                                collection: true,
+                                owned: false,
+                            });
+                        }
                     }
                     if many == &active.name {
-                        active.fields.push(FieldSpec::Lookup {
-                            name: many_property.clone(),
-                            entity: one.clone(),
-                            collection: false,
-                            owned: false,
-                        });
+                        if !active.fields.iter().any(|x| x.name() == many_property) {
+                            debug!("add many field {}", many_property);
+                            active.fields.push(FieldSpec::Lookup {
+                                name: many_property.clone(),
+                                entity: one.clone(),
+                                collection: false,
+                                owned: false,
+                            });
+                        }
                     }
                 }
             }

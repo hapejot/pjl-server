@@ -1,18 +1,17 @@
 use std::collections::HashMap;
 
 use axum::{
-    Json, Router,
     extract::{Path, State},
     http::header,
     response::{Html, IntoResponse},
     routing::get,
+    Json, Router,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use spec::app::App;
 use tracing::{debug, info};
 
 use crate::AppState;
-// use serde::{Deserialize, Serialize};
 use axum::{http::StatusCode, response::Response};
 
 pub struct AppError(anyhow::Error);

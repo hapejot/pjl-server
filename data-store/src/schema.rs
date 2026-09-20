@@ -14,6 +14,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
+use tracing::debug;
 
 /// Schluesselspalte jedes Entity-Sets.
 pub const ID_COLUMN: &str = "ID";
@@ -221,6 +222,10 @@ pub struct Association {
 impl Association {
     /// Gehaltenes Kind-Set: der Parent bestimmt den Lebenszyklus.
     pub fn is_composition_child(&self) -> bool {
+        debug!(
+            "is composition child: {:?} {:?}",
+            self.ownership, self.cardinality
+        );
         self.ownership == Ownership::Composition && self.cardinality == Cardinality::ToMany
     }
 

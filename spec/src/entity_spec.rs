@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 /// How a measure field relates to its unit/currency companion.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -436,6 +437,7 @@ impl EntitySpec {
     }
 
     pub fn field(mut self, fld: FieldSpec) -> Self {
+        debug!("add field {}", fld.name());
         self.fields.push(fld);
         self
     }

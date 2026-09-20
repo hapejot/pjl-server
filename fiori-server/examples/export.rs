@@ -13,6 +13,7 @@ use spec::data_dictionary::DataDictionary;
 const PACKAGE_ID: &str = "00000000-0000-0000-0000-0000000000a1";
 const ORDER_ID: &str = "00000000-0000-0000-0000-000000000001";
 const ITEM_ID: &str = "00000000-0000-0000-0000-000000000002";
+const RELATION_ID: &str = "a6950718-bfe8-4408-83a0-000714db7c36";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -50,7 +51,8 @@ async fn main() -> anyhow::Result<()> {
     create(
         &store,
         "RelationSet",
-        json!({ "IsActiveEntity": true, "name": "order_items", "owned": true,
+        json!({ "ID":RELATION_ID,
+                "IsActiveEntity": true, "name": "order_items", "owned": true,
                 "one_ID": ORDER_ID, "source_field": "_Items",
                 "many_ID": ITEM_ID, "target_field": "order" }),
     )

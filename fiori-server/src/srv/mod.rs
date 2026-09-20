@@ -302,6 +302,7 @@ impl EntitySet {
             target: "DraftAdministrativeData".into(),
         });
         for field in x.fields() {
+            debug!("from entity field: {}", field.name());
             if let FieldSpec::Lookup {
                 name,
                 entity,
@@ -1114,21 +1115,24 @@ async fn export(State(state): State<AppState>) -> Response {
 
 fn build_query(params: &HashMap<String, String>) -> Result<ODataQuery, ODataError> {
     let filter = match params.get("$filter") {
-        Some(raw) => Some(Expr::parse(raw).map_err(|e| {
-            ODataError::bad_request(format!("Invalid $filter '{raw}': {e}"))
-        })?),
+        Some(raw) => Some(
+            Expr::parse(raw)
+                .map_err(|e| ODataError::bad_request(format!("Invalid $filter '{raw}': {e}")))?,
+        ),
         None => None,
     };
     let top = match params.get("$top") {
-        Some(raw) => Some(raw.parse::<u32>().map_err(|e| {
-            ODataError::bad_request(format!("Invalid $top '{raw}': {e}"))
-        })?),
+        Some(raw) => Some(
+            raw.parse::<u32>()
+                .map_err(|e| ODataError::bad_request(format!("Invalid $top '{raw}': {e}")))?,
+        ),
         None => None,
     };
     let skip = match params.get("$skip") {
-        Some(raw) => Some(raw.parse::<u32>().map_err(|e| {
-            ODataError::bad_request(format!("Invalid $skip '{raw}': {e}"))
-        })?),
+        Some(raw) => Some(
+            raw.parse::<u32>()
+                .map_err(|e| ODataError::bad_request(format!("Invalid $skip '{raw}': {e}")))?,
+        ),
         None => None,
     };
     Ok(ODataQuery {
@@ -1600,7 +1604,8 @@ async fn follow_to_one(
     };
     let record = state
         .store
-        .get_collection(&set, &lookup).await
+        .get_collection(&set, &lookup)
+        .await
         .map_err(ODataError::from_store)?
         .into_iter()
         .next();
@@ -1726,14 +1731,20 @@ async fn read_single(
 ) -> Result<DataRecord, ODataError> {
     state
         .store
-        .read_entity(set, key, query).await
+        .read_entity(set, key, query)
+        .await
         .map_err(ODataError::from_store)
 }
 
-async fn read_collection(state: &AppState, set: &str, query: &ODataQuery) -> Result<Cursor, ODataError> {
+async fn read_collection(
+    state: &AppState,
+    set: &str,
+    query: &ODataQuery,
+) -> Result<Cursor, ODataError> {
     let records = state
         .store
-        .get_collection(set, query).await
+        .get_collection(set, query)
+        .await
         .map_err(ODataError::from_store)?;
     let count = if query.count {
         Some(state.store.count(set, query).await)
@@ -1777,10 +1788,12 @@ async fn post_handler(
                 Err(e) => e.into_response(),
             }
         }
-        segments if segments.len() > 1 => match create_in_navigation(&state, segments, body).await {
-            Ok(r) => created_response(r),
-            Err(e) => e.into_response(),
-        },
+        segments if segments.len() > 1 => {
+            match create_in_navigation(&state, segments, body).await {
+                Ok(r) => created_response(r),
+                Err(e) => e.into_response(),
+            }
+        }
         _ => ODataError::bad_request("POST is not supported for this path").into_response(),
     }
 }
@@ -1804,14 +1817,16 @@ async fn draft_action(
         "draftEdit" => {
             let r = state
                 .store
-                .draft_edit(set, key).await
+                .draft_edit(set, key)
+                .await
                 .map_err(ODataError::from_store)?;
             for (child_set, foreign_key) in owned_children_of(state, set) {
                 for child in children_of(state, &child_set, &foreign_key, key.id).await? {
                     if child.is_active_entity() {
                         state
                             .store
-                            .draft_edit(&child_set, &EntityKey::from(&child)).await
+                            .draft_edit(&child_set, &EntityKey::from(&child))
+                            .await
                             .map_err(ODataError::from_store)?;
                     }
                 }
@@ -1825,12 +1840,14 @@ async fn draft_action(
             // Kinder vorab aktiviert, was gegen die FK-Reihenfolge lief.
             state
                 .store
-                .draft_activate(set, key).await
+                .draft_activate(set, key)
+                .await
                 .map_err(ODataError::from_store)
         }
         "draftPrepare" => state
             .store
-            .draft_prepare(set, key).await
+            .draft_prepare(set, key)
+            .await
             .map_err(ODataError::from_store),
         other => Err(ODataError::not_found(format!("Unknown action '{other}'"))),
     }
@@ -1898,7 +1915,8 @@ async fn create_in_navigation(
     body["IsActiveEntity"] = json!(record.is_active_entity());
     let created = state
         .store
-        .create_entity(&target.setname(), &body).await
+        .create_entity(&target.setname(), &body)
+        .await
         .map_err(ODataError::from_store)?;
     Ok(json!(created))
 }
@@ -1929,7 +1947,8 @@ async fn children_of(
     let query = ODataQuery::new().filter(Expr::equals_guid(parent.to_string(), foreign_key));
     state
         .store
-        .get_collection(set, &query).await
+        .get_collection(set, &query)
+        .await
         .map_err(ODataError::from_store)
 }
 
@@ -1944,7 +1963,11 @@ async fn patch_handler(
     let _body = payload.map(|Json(v)| v).unwrap_or_else(|| json!({}));
     let key = _path_struct.segments.first().unwrap();
     let ekey = EntityKey::new(key.id().unwrap(), key.is_active_entity());
-    _state.store.patch_entity(&key.name, &ekey, &_body).await.unwrap();
+    _state
+        .store
+        .patch_entity(&key.name, &ekey, &_body)
+        .await
+        .unwrap();
     (
         [content_type_json(), odata_version()],
         json!([]).to_string(),
@@ -1986,19 +2009,22 @@ async fn delete_entity(state: &AppState, segments: &[PathSegment]) -> Result<(),
     if !key.is_active_entity {
         state
             .store
-            .delete_entity_tree_only(&set, &key).await
+            .delete_entity_tree_only(&set, &key)
+            .await
             .map_err(ODataError::from_store)?;
     } else {
         state
             .store
-            .delete_entity(&set, &key).await
+            .delete_entity(&set, &key)
+            .await
             .map_err(ODataError::from_store)?;
         // Mit dem aktiven Satz verschwindet auch ein noch offener Draft.
         // The store doesn't automatically delete the draft when deleting an active,
         // so we need to do it explicitly in fiori-server.
         state
             .store
-            .delete_entity_tree_only(&set, &key.sibling()).await
+            .delete_entity_tree_only(&set, &key.sibling())
+            .await
             .map_err(ODataError::from_store)?;
     }
     Ok(())
@@ -2024,13 +2050,15 @@ async fn delete_owned_children(
                 // Parent is draft, child is also draft: delete it WITHOUT deleting active sibling
                 state
                     .store
-                    .delete_entity_tree_only(&child_set, &EntityKey::from(&child)).await
+                    .delete_entity_tree_only(&child_set, &EntityKey::from(&child))
+                    .await
                     .map_err(ODataError::from_store)?;
             } else if parent.is_active_entity {
                 // Parent is active: delete all children (will also delete active siblings if draft)
                 state
                     .store
-                    .delete_entity(&child_set, &EntityKey::from(&child)).await
+                    .delete_entity(&child_set, &EntityKey::from(&child))
+                    .await
                     .map_err(ODataError::from_store)?;
             }
             // else: parent is draft and child is active - skip deletion (keep active children)
@@ -2147,7 +2175,10 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
         .replace("%ENTITY-SETS%", &entity_sets.concat())
         .replace("%ACTION-IMPORTS%", &export_action_import(&state))
         .replace("%ANNOTATIONS%", &annotations.concat())
-        .replace("%ACTIONS%", &[actions.concat(), export_action(&state)].concat())
+        .replace(
+            "%ACTIONS%",
+            &[actions.concat(), export_action(&state)].concat(),
+        )
         .to_string();
     (
         [

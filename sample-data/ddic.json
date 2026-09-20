@@ -37,6 +37,29 @@
           }
         },
         {
+          "Atom": {
+            "name": "amount",
+            "label": "Amount",
+            "edm_type": "Edm.Decimal",
+            "package": null,
+            "max_length": null,
+            "precision": 15,
+            "scale": 2,
+            "computed": false,
+            "immutable": false,
+            "value_list": null,
+            "presentation": {
+              "searchable": null,
+              "show_in_list": null,
+              "list_sort_order": null,
+              "list_importance": null,
+              "criticality_path": null,
+              "form_group": null,
+              "lookup": null
+            }
+          }
+        },
+        {
           "Lookup": {
             "name": "_Items",
             "entity": "OrderItem",

@@ -70,10 +70,10 @@ pub mod query {
     /// selbst schickt, und daher idempotent: kommt sie doppelt an, aendert das
     /// am Ergebnis nichts.
     ///
-    /// Nebeneffekt, auf den Verlass ist: Zeilen, die der `FULL OUTER JOIN` nur
+    /// Nebeneffekt, auf den Verlass ist: Zeilen, die der `LEFT JOIN` nur
     /// von der rechten Seite beisteuert, haben `IsActiveEntity IS NULL`. Fuer
     /// sie ist der erste Zweig NULL und der zweite falsch - sie fallen heraus.
-    fn _shadow_predicate(dialect: &dyn Dialect) -> String {
+    fn shadow_predicate(dialect: &dyn Dialect) -> String {
         format!(
             "({is_draft} OR {sibling} IS NULL)",
             is_draft = dialect.bool_predicate(&quote(IS_ACTIVE_COLUMN), false),
@@ -167,9 +167,9 @@ pub mod query {
         /// Blendet aktive Saetze aus, zu denen ein Draft existiert.
         ///
         /// Fuer Sets ohne Draft-Unterstuetzung wirkungslos.
-        pub fn shadow_drafts(self) -> Self {
+        pub fn shadow_drafts(mut self) -> Self {
             if self.set.draft_enabled {
-                // self.raw_filters.push(shadow_predicate(self.dialect));
+                self.raw_filters.push(shadow_predicate(self.dialect));
             }
             self
         }
@@ -397,7 +397,7 @@ pub mod query {
                      d.{is_active} AS {sib_active},
                      d.{admin} AS {sib_admin}
                    FROM {table} AS a
-                   FULL OUTER JOIN {table} AS d
+                   LEFT JOIN {table} AS d
                         ON a.{id} = d.{id} AND a.{is_active} <> d.{is_active}"#,
                 id = quote(ID_COLUMN),
                 is_active = quote(IS_ACTIVE_COLUMN),
@@ -509,14 +509,14 @@ pub mod query {
             let expected = normalize(
                 r#"SELECT "ID", "IsActiveEntity", "HasActiveEntity", "HasDraftEntity", "name"
                    FROM (SELECT *,
-                       CASE WHEN ("SiblingEntity/IsActiveEntity" = 0) OR ("IsActiveEntity" = 0) THEN 1 ELSE 0 END AS "HasDraftEntity",
+                       CASE WHEN "SiblingEntity/IsActiveEntity" = 0 OR IsActiveEntity = 0 THEN 1 ELSE 0 END AS "HasDraftEntity",
                        CASE WHEN "SiblingEntity/IsActiveEntity" = 1 THEN 1 ELSE 0 END AS "HasActiveEntity"
                      FROM (
                        SELECT a.*,
                          d."IsActiveEntity" AS "SiblingEntity/IsActiveEntity",
                          d."DraftAdministrativeData_ID" AS "SiblingEntity/DraftAdministrativeData_ID"
                        FROM "OrderSet" AS a
-                       FULL OUTER JOIN "OrderSet" AS d
+                       LEFT JOIN "OrderSet" AS d
                          ON a."ID" = d."ID" AND a."IsActiveEntity" <> d."IsActiveEntity" ))
                    WHERE (("IsActiveEntity" = ?1) OR ("SiblingEntity/IsActiveEntity" IS NULL))"#,
             );

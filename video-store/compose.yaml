@@ -1,0 +1,66 @@
+# video-store: Migration und Laufzeit als zwei Dienste mit fester Reihenfolge.
+#
+#   migrate  (one-shot)  liest die Produktiv-Datenbank nur lesend, schreibt
+#                        ddic.json und den SQLite-Store in die Volumes und
+#                        beendet sich. Ist die Migration bereits erledigt, endet
+#                        der Dienst sofort.
+#   runtime  (dauerhaft) startet erst, wenn migrate erfolgreich war, und liest
+#                        nur aus den Volumes.
+#
+# Start:
+#   export VIDEO_PG_URL='postgres://USER:PASSWORT@host.docker.internal:5432/video'
+#   docker compose -f video-store/compose.yaml up --build
+#   OData -> http://localhost:3035/Service/$metadata
+#
+# Neue Migration (verwirft den bestehenden Store):
+#   docker compose -f video-store/compose.yaml run --rm migrate --force
+#   docker compose -f video-store/compose.yaml up -d runtime
+#
+# Nur das Ergebnis neu erzeugen? Dann Volumes loeschen:
+#   docker compose -f video-store/compose.yaml down -v
+#
+# Die Zugangsdaten gehoeren in die Umgebung, nicht in diese Datei.
+
+services:
+  migrate:
+    build:
+      context: ..
+      dockerfile: video-store/Dockerfile
+      target: run
+    entrypoint: ["/app/migrate.sh"]
+    environment:
+      VIDEO_PG_URL: ${VIDEO_PG_URL:?VIDEO_PG_URL muss gesetzt sein}
+      DATA_DIR: /app/data
+      EXPORT_DIR: /app/export
+    volumes:
+      - video-data:/app/data
+      - video-export:/app/export
+    # Damit die Produktiv-DB auf dem Host erreichbar ist (Linux braucht das).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: "no"
+
+  runtime:
+    build:
+      context: ..
+      dockerfile: video-store/Dockerfile
+      target: run
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DDIC: /app/export/ddic.json
+      DATA_DIR: /app/data
+      EXPORT_DIR: /app/export
+      PORT: "8080"
+    ports:
+      - "3035:8080"
+    volumes:
+      - video-data:/app/data
+      - video-export:/app/export:ro
+    entrypoint: ["/app/pjl-runtime"]
+    restart: unless-stopped
+
+volumes:
+  video-data:
+  video-export:

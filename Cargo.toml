@@ -11,4 +11,5 @@ members = [
     "sqlite-relational-store",
     "spec",
     "spec-schema",
+    "video-store",
 ]

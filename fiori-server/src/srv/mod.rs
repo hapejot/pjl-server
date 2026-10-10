@@ -22,7 +22,7 @@ use spec::{
 };
 use tracing::*;
 
-use crate::AppState;
+use crate::{export::export_dictionary, AppState};
 mod sample;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1094,7 +1094,7 @@ async fn export(State(state): State<AppState>) -> Response {
         ))
         .into_response();
     }
-    match crate::export::export_dictionary(&state).await {
+    match export_dictionary(&state).await {
         Ok(report) => {
             info!("dictionary exported to {}", report.ddic_path);
             let mut body = json!(report);
@@ -1686,6 +1686,9 @@ fn entity_key(segment: &PathSegment) -> Result<EntityKey, ODataError> {
 
 fn touch_selected_fields(value: &mut Value, query: &ODataQuery) {
     for field in query.select.iter() {
+        if field == "*" {
+            continue;
+        }
         if value[field].is_null() {
             value[field] = json!(format!(""));
         }

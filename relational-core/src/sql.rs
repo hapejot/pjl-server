@@ -73,7 +73,7 @@ pub mod query {
     /// Nebeneffekt, auf den Verlass ist: Zeilen, die der `FULL OUTER JOIN` nur
     /// von der rechten Seite beisteuert, haben `IsActiveEntity IS NULL`. Fuer
     /// sie ist der erste Zweig NULL und der zweite falsch - sie fallen heraus.
-    fn shadow_predicate(dialect: &dyn Dialect) -> String {
+    fn _shadow_predicate(dialect: &dyn Dialect) -> String {
         format!(
             "({is_draft} OR {sibling} IS NULL)",
             is_draft = dialect.bool_predicate(&quote(IS_ACTIVE_COLUMN), false),
@@ -167,7 +167,7 @@ pub mod query {
         /// Blendet aktive Saetze aus, zu denen ein Draft existiert.
         ///
         /// Fuer Sets ohne Draft-Unterstuetzung wirkungslos.
-        pub fn shadow_drafts(mut self) -> Self {
+        pub fn shadow_drafts(self) -> Self {
             if self.set.draft_enabled {
                 // self.raw_filters.push(shadow_predicate(self.dialect));
             }
@@ -344,6 +344,10 @@ pub mod query {
         pub fn select(mut self, arg: &str) -> Self {
             self.select.push(arg.to_string());
             self
+        }
+
+        pub fn select_is_empty(&self) -> bool {
+            self.select.is_empty()
         }
 
         fn build_inner(&self) -> Result<String, StoreError> {

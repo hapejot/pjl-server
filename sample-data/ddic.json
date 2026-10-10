@@ -2,26 +2,23 @@
   "packages": [
     {
       "name": "core"
-    },
-    {
-      "name": "sales"
     }
   ],
   "entities": [
     {
       "name": "Order",
-      "package": "sales",
+      "package": "core",
       "type_name_plural": "Orders",
       "fields": [
         {
           "Atom": {
-            "name": "amount",
-            "label": "Amount",
-            "edm_type": "Edm.Decimal",
+            "name": "name",
+            "label": "name",
+            "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
-            "precision": 15,
-            "scale": 2,
+            "precision": null,
+            "scale": null,
             "computed": false,
             "immutable": false,
             "value_list": null,
@@ -38,13 +35,13 @@
         },
         {
           "Atom": {
-            "name": "amount",
-            "label": "Amount",
-            "edm_type": "Edm.Decimal",
+            "name": "title",
+            "label": "title",
+            "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
-            "precision": 15,
-            "scale": 2,
+            "precision": null,
+            "scale": null,
             "computed": false,
             "immutable": false,
             "value_list": null,
@@ -66,19 +63,134 @@
             "collection": true,
             "owned": false
           }
+        },
+        {
+          "Lookup": {
+            "name": "SoldTo",
+            "entity": "BusinessPartner",
+            "collection": false,
+            "owned": false
+          }
         }
       ]
     },
     {
       "name": "OrderItem",
-      "package": "sales",
+      "package": "core",
       "type_name_plural": "OrderItems",
       "fields": [
         {
+          "Atom": {
+            "name": "name",
+            "label": "name",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": null,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null,
+            "presentation": {
+              "searchable": null,
+              "show_in_list": null,
+              "list_sort_order": null,
+              "list_importance": null,
+              "criticality_path": null,
+              "form_group": null,
+              "lookup": null
+            }
+          }
+        },
+        {
+          "Atom": {
+            "name": "title",
+            "label": "title",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": null,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null,
+            "presentation": {
+              "searchable": null,
+              "show_in_list": null,
+              "list_sort_order": null,
+              "list_importance": null,
+              "criticality_path": null,
+              "form_group": null,
+              "lookup": null
+            }
+          }
+        },
+        {
           "Lookup": {
-            "name": "order",
+            "name": "Order",
             "entity": "Order",
             "collection": false,
+            "owned": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "BusinessPartner",
+      "package": "core",
+      "type_name_plural": "BusinessPartners",
+      "fields": [
+        {
+          "Atom": {
+            "name": "name",
+            "label": "name",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": null,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null,
+            "presentation": {
+              "searchable": null,
+              "show_in_list": null,
+              "list_sort_order": null,
+              "list_importance": null,
+              "criticality_path": null,
+              "form_group": null,
+              "lookup": null
+            }
+          }
+        },
+        {
+          "Atom": {
+            "name": "title",
+            "label": "title",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": null,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null,
+            "presentation": {
+              "searchable": null,
+              "show_in_list": null,
+              "list_sort_order": null,
+              "list_importance": null,
+              "criticality_path": null,
+              "form_group": null,
+              "lookup": null
+            }
+          }
+        },
+        {
+          "Lookup": {
+            "name": "_Orders",
+            "entity": "Order",
+            "collection": true,
             "owned": false
           }
         }
@@ -91,20 +203,29 @@
       "one": "Order",
       "one_field": "_Items",
       "many": "OrderItem",
-      "many_property": "order",
-      "owned": true,
-      "package": "sales"
+      "many_property": "Order",
+      "owned": false,
+      "package": "core"
+    },
+    {
+      "name": "sold_to",
+      "one": "BusinessPartner",
+      "one_field": "_Orders",
+      "many": "Order",
+      "many_property": "SoldTo",
+      "owned": false,
+      "package": "core"
     }
   ],
   "apps": [
     {
-      "name": "orders",
+      "name": "Orders",
       "title": "Orders",
       "main_entity": "Order",
       "subtitle": null,
       "icon": null,
       "package": {
-        "name": "sales"
+        "name": "core"
       }
     }
   ]

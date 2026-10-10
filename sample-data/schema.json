@@ -21,18 +21,41 @@
           "write_policy": "Writable",
           "role": "Key"
         },
-        "amount": {
-          "name": "amount",
+        "name": {
+          "name": "name",
           "data_type": {
-            "Decimal": {
-              "precision": 15,
-              "scale": 2
+            "String": {
+              "max_length": null
             }
           },
           "nullable": true,
           "default": null,
           "write_policy": "Writable",
           "role": "Data"
+        },
+        "title": {
+          "name": "title",
+          "data_type": {
+            "String": {
+              "max_length": null
+            }
+          },
+          "nullable": true,
+          "default": null,
+          "write_policy": "Writable",
+          "role": "Data"
+        },
+        "SoldTo_ID": {
+          "name": "SoldTo_ID",
+          "data_type": "Guid",
+          "nullable": true,
+          "default": null,
+          "write_policy": "Writable",
+          "role": {
+            "ForeignKey": {
+              "target_set": "BusinessPartnerSet"
+            }
+          }
         }
       },
       "associations": {
@@ -40,13 +63,25 @@
           "name": "_Items",
           "target_set": "OrderItemSet",
           "cardinality": "ToMany",
-          "ownership": "Composition",
+          "ownership": "Association",
           "foreign_key": {
             "There": {
-              "column": "order_ID"
+              "column": "Order_ID"
             }
           },
-          "reverse": "order"
+          "reverse": "Order"
+        },
+        "SoldTo": {
+          "name": "SoldTo",
+          "target_set": "BusinessPartnerSet",
+          "cardinality": "ToOne",
+          "ownership": "Association",
+          "foreign_key": {
+            "Here": {
+              "column": "SoldTo_ID"
+            }
+          },
+          "reverse": null
         }
       }
     },
@@ -71,8 +106,32 @@
           "write_policy": "Writable",
           "role": "Key"
         },
-        "order_ID": {
-          "name": "order_ID",
+        "name": {
+          "name": "name",
+          "data_type": {
+            "String": {
+              "max_length": null
+            }
+          },
+          "nullable": true,
+          "default": null,
+          "write_policy": "Writable",
+          "role": "Data"
+        },
+        "title": {
+          "name": "title",
+          "data_type": {
+            "String": {
+              "max_length": null
+            }
+          },
+          "nullable": true,
+          "default": null,
+          "write_policy": "Writable",
+          "role": "Data"
+        },
+        "Order_ID": {
+          "name": "Order_ID",
           "data_type": "Guid",
           "nullable": true,
           "default": null,
@@ -85,17 +144,78 @@
         }
       },
       "associations": {
-        "order": {
-          "name": "order",
+        "Order": {
+          "name": "Order",
           "target_set": "OrderSet",
           "cardinality": "ToOne",
-          "ownership": "Composition",
+          "ownership": "Association",
           "foreign_key": {
             "Here": {
-              "column": "order_ID"
+              "column": "Order_ID"
             }
           },
           "reverse": null
+        }
+      }
+    },
+    "BusinessPartnerSet": {
+      "name": "BusinessPartnerSet",
+      "entity_name": "BusinessPartner",
+      "draft_enabled": true,
+      "columns": {
+        "ID": {
+          "name": "ID",
+          "data_type": "Guid",
+          "nullable": false,
+          "default": null,
+          "write_policy": "Writable",
+          "role": "Key"
+        },
+        "IsActiveEntity": {
+          "name": "IsActiveEntity",
+          "data_type": "Bool",
+          "nullable": false,
+          "default": null,
+          "write_policy": "Writable",
+          "role": "Key"
+        },
+        "name": {
+          "name": "name",
+          "data_type": {
+            "String": {
+              "max_length": null
+            }
+          },
+          "nullable": true,
+          "default": null,
+          "write_policy": "Writable",
+          "role": "Data"
+        },
+        "title": {
+          "name": "title",
+          "data_type": {
+            "String": {
+              "max_length": null
+            }
+          },
+          "nullable": true,
+          "default": null,
+          "write_policy": "Writable",
+          "role": "Data"
+        }
+      },
+      "associations": {
+        "_Orders": {
+          "name": "_Orders",
+          "target_set": "OrderSet",
+          "cardinality": "ToMany",
+          "ownership": "Association",
+          "foreign_key": {
+            "There": {
+              "column": "SoldTo_ID"
+            }
+          },
+          "reverse": "SoldTo"
         }
       }
     }

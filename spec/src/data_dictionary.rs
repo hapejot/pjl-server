@@ -17,7 +17,7 @@ pub struct DataDictionary {
 
 impl DataDictionary {
     pub fn new() -> Self {
-        info!("using default ddic");
+        debug!("using default ddic");
         let _core = Package::new("core");
         let core = Package::new("core");
 
@@ -182,7 +182,7 @@ impl DataDictionary {
                 .iter_mut()
                 .find(|x| &x.name == one.as_ref().unwrap())
             {
-                debug!("adding one {}", relation.name);
+                trace!("adding one {}", relation.name);
                 e.fields.push(FieldSpec::Lookup {
                     name: one_field.clone().unwrap(),
                     entity: many.clone().unwrap(),
@@ -195,7 +195,7 @@ impl DataDictionary {
                 .iter_mut()
                 .find(|x| &x.name == many.as_ref().unwrap())
             {
-                debug!("adding many {}", relation.name);
+                trace!("adding many {}", relation.name);
                 e.fields.push(FieldSpec::Lookup {
                     name: many_property.clone().unwrap(),
                     entity: one.clone().unwrap(),

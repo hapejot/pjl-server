@@ -14,7 +14,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
-use tracing::debug;
+use tracing::{debug, info};
 
 /// Schluesselspalte jedes Entity-Sets.
 pub const ID_COLUMN: &str = "ID";
@@ -458,6 +458,7 @@ impl Schema {
     }
 
     pub fn load(name: impl AsRef<std::path::Path>) -> anyhow::Result<Schema> {
+        info!("loading schema from {:?}", name.as_ref().display());
         let reader = File::open(name)?;
         Ok(serde_json::from_reader::<_, Schema>(reader)?)
     }

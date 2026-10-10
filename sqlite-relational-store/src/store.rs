@@ -465,6 +465,7 @@ impl RelationalStore {
             let mut rows = stmt
                 .query(params_from_iter(params.iter().map(to_sqlite)))
                 .map_err(|e| sql_err!(Metadata, e))?;
+            trace!("query returned");
             while let Some(row) = rows.next().map_err(|e| sql_err!(Metadata, e))? {
                 let mut map = Map::new();
                 for (name, data_type) in &projected {
@@ -475,6 +476,7 @@ impl RelationalStore {
                         .map_err(|e| sql_err!(Metadata, e))?;
                     map.insert(name.clone(), param_to_json(&from_sqlite(value), dt));
                 }
+                debug!("Datenzeile als Json: {:#?}", map);
                 let mut admin_id = None;
                 let mut messages = None;
                 if set.draft_enabled {
@@ -511,6 +513,7 @@ impl RelationalStore {
                 }
                 raw.push((map, admin_id, messages));
             }
+            debug!("raw hat {} Zeilen", raw.len());
         }
 
         raw.into_iter()
@@ -652,7 +655,7 @@ impl RelationalStore {
         query: &ODataQuery,
         strict: bool,
     ) -> Result<(), StoreError> {
-        info!("expanding rows {:?}", query.expand);
+        trace!("expanding rows {:?}", query.expand);
         if query.expand.is_empty() || rows.is_empty() {
             return Ok(());
         }
@@ -768,6 +771,9 @@ impl RelationalStore {
 
 #[async_trait::async_trait]
 impl DataStore for RelationalStore {
+    fn component_info(&self) -> String {
+        format!("RelationalStore {:?}", self.path)
+    }
     /// Metadaten kommen ueber [`SchemaSource`], nicht ueber den Store-Trait.
     fn navigation(&mut self, _single: bool) -> &mut Navigation {
         panic!(
@@ -798,7 +804,9 @@ impl DataStore for RelationalStore {
         for s in query.select.iter() {
             sql = sql.select(s);
         }
-        sql = sql.select("DraftAdministrativeData_ID");
+        if !sql.select_is_empty() {
+            sql = sql.select("DraftAdministrativeData_ID");
+        }
         if let Some(filter) = &query.filter {
             sql = sql.filter(filter);
         }

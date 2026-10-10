@@ -13,6 +13,7 @@ pub mod server;
 pub mod srv;
 
 use config::{ServerConfig, ServerMode};
+use tracing::info;
 
 /// Gemeinsamer Zustand beider Server.
 ///
@@ -91,6 +92,10 @@ impl AppState {
     /// Objekte, die er gerade modelliert.
     pub async fn designed_dictionary(&self) -> DataDictionary {
         let mut ddic = DataDictionary::new();
+        info!(
+            "loading designed dictionary from store: {:?}",
+            self.store.component_info()
+        );
         ddic_loader::load_ddic_from_store(&mut ddic, self.store.as_ref()).await;
         ddic
     }

@@ -4,7 +4,7 @@ use crate::error::StoreError;
 use crate::key::EntityKey;
 use odata::query::ODataQuery;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -300,6 +300,7 @@ impl Navigation {
 
 #[async_trait::async_trait]
 pub trait DataStore: Send + Sync {
+    fn component_info(&self) -> String;
     // -- Collections --
     async fn get_collection(
         &self,

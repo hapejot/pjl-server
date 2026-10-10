@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use spec::data_dictionary::DataDictionary;
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 
 use crate::AppState;
 
@@ -55,6 +55,7 @@ pub struct ExportReport {
 
 /// Modell aus dem Store lesen, filtern und als Dateipaar ablegen.
 pub async fn export_dictionary(state: &AppState) -> Result<ExportReport, ExportError> {
+    info!("starting export of dictionary");
     let designed = state.designed_dictionary().await;
     let (exported, skipped) = if state.config.export_metamodel {
         (designed, 0)
@@ -123,6 +124,7 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), ExportError> {
 fn without_metamodel(source: &DataDictionary) -> (DataDictionary, usize) {
     let meta = DataDictionary::new();
     let meta_entities: Vec<String> = meta.entity_names().map(str::to_string).collect();
+    info!(?meta_entities, "Meta Entities");
     let meta_apps: Vec<String> = meta.apps().map(|a| a.name().to_string()).collect();
     let meta_relations: Vec<String> = meta.relationships().map(|r| r.name().to_string()).collect();
 
@@ -134,6 +136,7 @@ fn without_metamodel(source: &DataDictionary) -> (DataDictionary, usize) {
     }
     for entity in source.entities() {
         if meta_entities.iter().any(|n| n == entity.name()) {
+            trace!("skipping {}", entity.name);
             skipped += 1;
             continue;
         }

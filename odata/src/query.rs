@@ -51,6 +51,11 @@ impl ODataQuery {
         });
         self
     }
+
+    pub fn select(mut self, field: &str) -> Self {
+        self.select.push(field.into());
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

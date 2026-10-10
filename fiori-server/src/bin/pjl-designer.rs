@@ -15,7 +15,7 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     tracing_subscriber::registry()
-        .with(fmt::layer())
+        .with(fmt::layer().with_file(true).with_line_number(true))
         .with(EnvFilter::from_default_env())
         .init();
 

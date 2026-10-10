@@ -3,11 +3,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
-use data_store::nav::{NavLink, composition_parent, nav_links};
+use data_store::nav::{composition_parent, nav_links, NavLink};
 use data_store::query::{apply_query, count_query};
 use data_store::{DataRecord, DataStore, DraftDataStore, EntityKey, Navigation, StoreError};
 use odata::query::{Expr, ODataQuery};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tracing::{debug, trace};
 use uuid::Uuid;
 
@@ -114,7 +114,10 @@ impl YamlStore {
 
     fn nav_links(&self, entity_set: &str) -> HashMap<String, NavLink> {
         nav_links(
-            self.navigations.read().expect("navigations lock").as_slice(),
+            self.navigations
+                .read()
+                .expect("navigations lock")
+                .as_slice(),
             entity_set,
         )
     }
@@ -196,12 +199,12 @@ impl YamlStore {
     ) -> Result<(), StoreError> {
         if !link.single {
             let q = ODataQuery::new().filter(Expr::equals_guid(row.id(), &link.to_field));
-            row[field] = json!(
-                self.get_collection(&link.to_set, &q).await?
-                    .iter()
-                    .map(|x| x.core_json())
-                    .collect::<Vec<_>>()
-            );
+            row[field] = json!(self
+                .get_collection(&link.to_set, &q)
+                .await?
+                .iter()
+                .map(|x| x.core_json())
+                .collect::<Vec<_>>());
             return Ok(());
         }
 
@@ -218,7 +221,8 @@ impl YamlStore {
         };
         let q = ODataQuery::new().filter(Expr::equals_value(&from_id, "ID"));
         let subrows = self
-            .get_collection(&link.to_set, &q).await?
+            .get_collection(&link.to_set, &q)
+            .await?
             .iter()
             .map(|x| x.core_json())
             .collect::<Vec<_>>();
@@ -250,7 +254,8 @@ impl YamlStore {
             match links.get(&item.navigation_property) {
                 Some(link) => {
                     for row in rows.iter_mut() {
-                        self.expand_single_row(row, &item.navigation_property, link).await?;
+                        self.expand_single_row(row, &item.navigation_property, link)
+                            .await?;
                     }
                 }
                 None if strict => {
@@ -281,54 +286,16 @@ fn load_record_from_file(path: &Path) -> Result<DataRecord, StoreError> {
 
 #[async_trait::async_trait]
 impl DataStore for YamlStore {
-    fn navigation(&mut self, single: bool) -> &mut Navigation {
-        let navigations = self.navigations.get_mut().expect("navigations lock");
-        navigations.push(Navigation::new(single));
-        navigations.last_mut().expect("last navigation")
+    fn component_info(&self) -> String {
+        format!("YamlStore: {}", self.root.display())
     }
-
-    fn set_navigations(&self, navigations: Vec<Navigation>) {
-        *self.navigations.write().expect("navigations lock") = navigations;
-    }
-
-    async fn get_collection(
-        &self,
-        set_name: &str,
-        query: &ODataQuery,
-    ) -> Result<Vec<DataRecord>, StoreError> {
-        debug!("get collection {set_name} {:?}", query);
-        let mut records: Vec<DataRecord> = self
-            .load_records(set_name)?
-            .into_iter()
-            .map(|mut r| {
-                for s in query.select.iter() {
-                    r.touch(s);
-                }
-                r
-            })
-            .collect();
-
-        self.expand_rows(set_name, &mut records, query, false).await?;
-        apply_query(&mut records, query);
-        Ok(records)
-    }
+    async fn commit(&self) {}
 
     async fn count(&self, set_name: &str, query: &ODataQuery) -> usize {
-        self.get_collection(set_name, &count_query(query)).await
+        self.get_collection(set_name, &count_query(query))
+            .await
             .map(|x| x.len())
             .unwrap_or(0)
-    }
-
-    async fn read_entity(
-        &self,
-        set_name: &str,
-        key: &EntityKey,
-        query: &ODataQuery,
-    ) -> Result<DataRecord, StoreError> {
-        let mut row = [self.load_entity_record(key, set_name)?];
-        self.expand_rows(set_name, &mut row, query, true).await?;
-        let [row] = row;
-        Ok(row)
     }
 
     async fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
@@ -358,6 +325,64 @@ impl DataStore for YamlStore {
         Ok(rec)
     }
 
+    async fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
+        self.delete_entity_tree(set_name, key)?;
+        if !key.is_active_entity {
+            // Draft verwerfen heisst auch: den zugehoerigen aktiven Baum loeschen.
+            self.delete_entity_tree(set_name, &key.sibling())?;
+        }
+        Ok(())
+    }
+
+    async fn delete_entity_tree_only(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+    ) -> Result<(), StoreError> {
+        self.delete_entity_tree(set_name, key)
+    }
+
+    async fn get_collection(
+        &self,
+        set_name: &str,
+        query: &ODataQuery,
+    ) -> Result<Vec<DataRecord>, StoreError> {
+        debug!("get collection {set_name} {:?}", query);
+        let mut records: Vec<DataRecord> = self
+            .load_records(set_name)?
+            .into_iter()
+            .map(|mut r| {
+                for s in query.select.iter() {
+                    r.touch(s);
+                }
+                r
+            })
+            .collect();
+
+        self.expand_rows(set_name, &mut records, query, false)
+            .await?;
+        apply_query(&mut records, query);
+        Ok(records)
+    }
+
+    async fn get_property(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+        property: &str,
+    ) -> Result<Value, StoreError> {
+        self.read_entity(set_name, key, &ODataQuery::new())
+            .await?
+            .get(property)
+            .ok_or_else(|| StoreError::PropertyNotFound(property.into()))
+    }
+
+    fn navigation(&mut self, single: bool) -> &mut Navigation {
+        let navigations = self.navigations.get_mut().expect("navigations lock");
+        navigations.push(Navigation::new(single));
+        navigations.last_mut().expect("last navigation")
+    }
+
     async fn patch_entity(
         &self,
         set_name: &str,
@@ -370,17 +395,16 @@ impl DataStore for YamlStore {
         Ok(patch.clone())
     }
 
-    async fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
-        self.delete_entity_tree(set_name, key)?;
-        if !key.is_active_entity {
-            // Draft verwerfen heisst auch: den zugehoerigen aktiven Baum loeschen.
-            self.delete_entity_tree(set_name, &key.sibling())?;
-        }
-        Ok(())
-    }
-
-    async fn delete_entity_tree_only(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
-        self.delete_entity_tree(set_name, key)
+    async fn read_entity(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+        query: &ODataQuery,
+    ) -> Result<DataRecord, StoreError> {
+        let mut row = [self.load_entity_record(key, set_name)?];
+        self.expand_rows(set_name, &mut row, query, true).await?;
+        let [row] = row;
+        Ok(row)
     }
 
     async fn read_sibling_entity(
@@ -391,23 +415,18 @@ impl DataStore for YamlStore {
         self.load_entity_record(&key.sibling(), set_name)
     }
 
-    async fn get_property(
-        &self,
-        set_name: &str,
-        key: &EntityKey,
-        property: &str,
-    ) -> Result<Value, StoreError> {
-        self.read_entity(set_name, key, &ODataQuery::new()).await?
-            .get(property)
-            .ok_or_else(|| StoreError::PropertyNotFound(property.into()))
+    fn set_navigations(&self, navigations: Vec<Navigation>) {
+        *self.navigations.write().expect("navigations lock") = navigations;
     }
-
-    async fn commit(&self) {}
 }
 
 #[async_trait::async_trait]
 impl DraftDataStore for YamlStore {
-    async fn draft_edit(&self, set_name: &str, active_key: &EntityKey) -> Result<Value, StoreError> {
+    async fn draft_edit(
+        &self,
+        set_name: &str,
+        active_key: &EntityKey,
+    ) -> Result<Value, StoreError> {
         if !active_key.is_active_entity {
             return Err(StoreError::InvalidState);
         }
@@ -417,7 +436,8 @@ impl DraftDataStore for YamlStore {
         // Ein Kind darf nur bearbeitet werden, wenn der Parent schon im Draft ist.
         if let Some((parent_set, parent_key)) = self.extract_parent(set_name, &draft_data)? {
             if self
-                .read_entity(&parent_set, &parent_key.sibling(), &q).await
+                .read_entity(&parent_set, &parent_key.sibling(), &q)
+                .await
                 .is_err()
             {
                 return Err(StoreError::InvalidState);

@@ -33,6 +33,7 @@ pub struct SqliteStore {
     conn: Mutex<Connection>,
     navigations: RwLock<Vec<Navigation>>,
     current_change: RwLock<Option<Uuid>>,
+    file: Option<String>,
 }
 
 fn sql_err(e: rusqlite::Error) -> StoreError {
@@ -44,22 +45,24 @@ impl SqliteStore {
     pub fn open(root: impl Into<PathBuf>) -> Result<Self, StoreError> {
         let root = root.into();
         std::fs::create_dir_all(&root)?;
-        let conn = Connection::open(root.join("data.sqlite")).map_err(sql_err)?;
-        Self::from_connection(conn)
+        let file = root.join("data.sqlite");
+        let conn = Connection::open(&file).map_err(sql_err)?;
+        Self::from_connection(conn, Some(file.display().to_string()))
     }
 
     /// Fluechtiger Store - vor allem fuer Tests.
     pub fn open_in_memory() -> Result<Self, StoreError> {
-        Self::from_connection(Connection::open_in_memory().map_err(sql_err)?)
+        Self::from_connection(Connection::open_in_memory().map_err(sql_err)?, None)
     }
 
-    fn from_connection(conn: Connection) -> Result<Self, StoreError> {
+    fn from_connection(conn: Connection, file: Option<String>) -> Result<Self, StoreError> {
         conn.execute_batch(SCHEMA).map_err(sql_err)?;
         conn.pragma_update(None, "journal_mode", "WAL").ok();
         Ok(Self {
             conn: Mutex::new(conn),
             navigations: RwLock::new(vec![]),
             current_change: RwLock::new(None),
+            file,
         })
     }
 
@@ -281,7 +284,8 @@ impl SqliteStore {
         if !link.single {
             let q = ODataQuery::new().filter(Expr::equals_guid(row.id(), &link.to_field));
             row[field] = json!(self
-                .get_collection(&link.to_set, &q).await?
+                .get_collection(&link.to_set, &q)
+                .await?
                 .iter()
                 .map(|x| x.core_json())
                 .collect::<Vec<_>>());
@@ -301,7 +305,8 @@ impl SqliteStore {
         };
         let q = ODataQuery::new().filter(Expr::equals_value(&from_id, "ID"));
         let subrows = self
-            .get_collection(&link.to_set, &q).await?
+            .get_collection(&link.to_set, &q)
+            .await?
             .iter()
             .map(|x| x.core_json())
             .collect::<Vec<_>>();
@@ -333,7 +338,8 @@ impl SqliteStore {
             match links.get(&item.navigation_property) {
                 Some(link) => {
                     for row in rows.iter_mut() {
-                        self.expand_single_row(row, &item.navigation_property, link).await?;
+                        self.expand_single_row(row, &item.navigation_property, link)
+                            .await?;
                     }
                 }
                 None if strict => {
@@ -362,6 +368,9 @@ fn parse_record(payload: &str) -> Result<DataRecord, StoreError> {
 
 #[async_trait::async_trait]
 impl DataStore for SqliteStore {
+    fn component_info(&self) -> String {
+        format!("SqliteStore file: {:?}", self.file)
+    }
     fn navigation(&mut self, single: bool) -> &mut Navigation {
         let navigations = self.navigations.get_mut().expect("navigations lock");
         navigations.push(Navigation::new(single));
@@ -389,13 +398,15 @@ impl DataStore for SqliteStore {
             })
             .collect();
 
-        self.expand_rows(set_name, &mut records, query, false).await?;
+        self.expand_rows(set_name, &mut records, query, false)
+            .await?;
         apply_query(&mut records, query);
         Ok(records)
     }
 
     async fn count(&self, set_name: &str, query: &ODataQuery) -> usize {
-        self.get_collection(set_name, &count_query(query)).await
+        self.get_collection(set_name, &count_query(query))
+            .await
             .map(|x| x.len())
             .unwrap_or(0)
     }
@@ -460,7 +471,11 @@ impl DataStore for SqliteStore {
         Ok(())
     }
 
-    async fn delete_entity_tree_only(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
+    async fn delete_entity_tree_only(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+    ) -> Result<(), StoreError> {
         self.delete_entity_tree(set_name, key)
     }
 
@@ -478,7 +493,8 @@ impl DataStore for SqliteStore {
         key: &EntityKey,
         property: &str,
     ) -> Result<Value, StoreError> {
-        self.read_entity(set_name, key, &ODataQuery::new()).await?
+        self.read_entity(set_name, key, &ODataQuery::new())
+            .await?
             .get(property)
             .ok_or_else(|| StoreError::PropertyNotFound(property.into()))
     }
@@ -488,7 +504,11 @@ impl DataStore for SqliteStore {
 
 #[async_trait::async_trait]
 impl DraftDataStore for SqliteStore {
-    async fn draft_edit(&self, set_name: &str, active_key: &EntityKey) -> Result<Value, StoreError> {
+    async fn draft_edit(
+        &self,
+        set_name: &str,
+        active_key: &EntityKey,
+    ) -> Result<Value, StoreError> {
         if !active_key.is_active_entity {
             return Err(StoreError::InvalidState);
         }
@@ -498,7 +518,8 @@ impl DraftDataStore for SqliteStore {
         // Ein Kind darf nur bearbeitet werden, wenn der Parent schon im Draft ist.
         if let Some((parent_set, parent_key)) = self.extract_parent(set_name, &draft_data)? {
             if self
-                .read_entity(&parent_set, &parent_key.sibling(), &q).await
+                .read_entity(&parent_set, &parent_key.sibling(), &q)
+                .await
                 .is_err()
             {
                 return Err(StoreError::InvalidState);

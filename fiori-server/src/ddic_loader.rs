@@ -11,7 +11,7 @@ use spec::{
     app::App, data_dictionary::DataDictionary, package::Package, EntitySpec, FieldSpec,
     Relationship,
 };
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 const DEFAULT_PACKAGE: &str = "core";
 
@@ -47,7 +47,10 @@ pub fn navigations_from_ddic(ddic: &DataDictionary) -> Vec<Navigation> {
     }
 }
 
-async fn load_packages(ddic: &mut DataDictionary, store: &dyn DataStore) -> HashMap<String, String> {
+async fn load_packages(
+    ddic: &mut DataDictionary,
+    store: &dyn DataStore,
+) -> HashMap<String, String> {
     let mut by_id = HashMap::new();
     for record in read_set(store, "PackageSet").await {
         let Some(name) = text(&record, "name") else {
@@ -68,7 +71,11 @@ async fn load_entities(
     let mut by_id = HashMap::new();
     for record in read_set(store, "EntitySet").await {
         let Some(name) = text(&record, "name") else {
-            warn!("entity record {} without name - skipped", record.id());
+            warn!(
+                "entity record {} without name - skipped: {:#?}",
+                record.id(),
+                record
+            );
             continue;
         };
         let plural = text(&record, "plural").unwrap_or_else(|| format!("{name}s"));
@@ -170,7 +177,7 @@ async fn load_apps(
 ) {
     for record in read_set(store, "AppSet").await {
         let Some(name) = text(&record, "name") else {
-            warn!("app record {} without name - skipped", record.id());
+            warn!("app record {:?} without name - skipped", record);
             continue;
         };
         // Ein unbekanntes Hauptentity laesst `App::main_entity` spaeter panicken.
@@ -198,7 +205,7 @@ async fn load_apps(
 async fn read_set(store: &dyn DataStore, set: &str) -> Vec<DataRecord> {
     match store.get_collection(set, &ODataQuery::new()).await {
         Ok(records) => {
-            info!("loaded {} records from {set}", records.len());
+            debug!("loaded {} records from {set}", records.len());
             records
         }
         Err(e) => {
@@ -305,21 +312,24 @@ mod tests {
             .create_entity(
                 "PackageSet",
                 &json!({ "ID": PACKAGE_ID, "IsActiveEntity": true, "name": "sales" }),
-            ).await
+            )
+            .await
             .unwrap();
         store
             .create_entity(
                 "EntitySet",
                 &json!({ "ID": ORDER_ID, "IsActiveEntity": true,
                          "name": "Order", "plural": "Orders", "package_ID": PACKAGE_ID }),
-            ).await
+            )
+            .await
             .unwrap();
         store
             .create_entity(
                 "EntitySet",
                 &json!({ "ID": ITEM_ID, "IsActiveEntity": true,
                          "name": "Item", "plural": "Items", "package_ID": PACKAGE_ID }),
-            ).await
+            )
+            .await
             .unwrap();
         store
             .create_entity(
@@ -327,7 +337,8 @@ mod tests {
                 &json!({ "IsActiveEntity": true, "entity_ID": ORDER_ID,
                          "name": "status", "label": "Status", "type": "Edm.String",
                          "max_length": 20, "immutable": true }),
-            ).await
+            )
+            .await
             .unwrap();
         (dir, store)
     }
@@ -366,7 +377,8 @@ mod tests {
                 &json!({ "IsActiveEntity": true, "name": "order_items",
                          "one_ID": ORDER_ID, "source_field": "_Items",
                          "many_ID": ITEM_ID, "target_field": "order" }),
-            ).await
+            )
+            .await
             .unwrap();
         let ddic = loaded(&store).await;
 
@@ -404,14 +416,16 @@ mod tests {
                 &json!({ "IsActiveEntity": true, "name": "by_name",
                          "source": "Order", "source_field": "_Positions",
                          "target": "Item", "target_field": "head" }),
-            ).await
+            )
+            .await
             .unwrap();
         store
             .create_entity(
                 "RelationSet",
                 &json!({ "IsActiveEntity": true, "name": "junk",
                          "source": "S", "target": "T" }),
-            ).await
+            )
+            .await
             .unwrap();
         let ddic = loaded(&store).await;
 
@@ -428,13 +442,15 @@ mod tests {
                 &json!({ "IsActiveEntity": true, "name": "orders", "title": "Orders",
                          "subtitle": "Sales orders", "icon": "sap-icon://cart",
                          "main_entity_ID": ORDER_ID, "package_ID": PACKAGE_ID }),
-            ).await
+            )
+            .await
             .unwrap();
         store
             .create_entity(
                 "AppSet",
                 &json!({ "IsActiveEntity": true, "name": "broken", "main_entity": "Nope" }),
-            ).await
+            )
+            .await
             .unwrap();
         let ddic = loaded(&store).await;
 

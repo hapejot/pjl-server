@@ -129,10 +129,13 @@ impl DraftDataStore for Extender {
     ) -> Result<serde_json::Value, StoreError> {
         let mut value = Self::key_value(key);
         self.hook
-            .before(self, set_name, Operation::DraftEdit, &mut value).await?;
+            .before(self, set_name, Operation::DraftEdit, &mut value)
+            .await?;
         let result = self.inner.draft_edit(set_name, key).await?;
         let mut record = DataRecord::from_json(&result)?;
-        self.hook.after(self, set_name, Operation::DraftEdit, &mut record).await?;
+        self.hook
+            .after(self, set_name, Operation::DraftEdit, &mut record)
+            .await?;
         Ok(result)
     }
 
@@ -143,10 +146,13 @@ impl DraftDataStore for Extender {
     ) -> Result<serde_json::Value, StoreError> {
         let mut value = Self::key_value(key);
         self.hook
-            .before(self, set_name, Operation::DraftActivate, &mut value).await?;
+            .before(self, set_name, Operation::DraftActivate, &mut value)
+            .await?;
         let result = self.inner.draft_activate(set_name, key).await?;
         let mut record = DataRecord::from_json(&result)?;
-        self.hook.after(self, set_name, Operation::DraftActivate, &mut record).await?;
+        self.hook
+            .after(self, set_name, Operation::DraftActivate, &mut record)
+            .await?;
         Ok(result)
     }
 
@@ -157,16 +163,23 @@ impl DraftDataStore for Extender {
     ) -> Result<serde_json::Value, StoreError> {
         let mut value = Self::key_value(key);
         self.hook
-            .before(self, set_name, Operation::DraftPrepare, &mut value).await?;
+            .before(self, set_name, Operation::DraftPrepare, &mut value)
+            .await?;
         let result = self.inner.draft_prepare(set_name, key).await?;
         let mut record = DataRecord::from_json(&result)?;
-        self.hook.after(self, set_name, Operation::DraftPrepare, &mut record).await?;
+        self.hook
+            .after(self, set_name, Operation::DraftPrepare, &mut record)
+            .await?;
         Ok(result)
     }
 }
 
 #[async_trait::async_trait]
 impl DataStore for Extender {
+    fn component_info(&self) -> String {
+        format!("Extender -> {}", self.inner.component_info())
+    }
+
     async fn get_collection(
         &self,
         set_name: &str,
@@ -188,16 +201,15 @@ impl DataStore for Extender {
         self.inner.read_entity(set_name, key, query).await
     }
 
-    async fn create_entity(
-        &self,
-        set_name: &str,
-        data: &Value,
-    ) -> Result<DataRecord, StoreError> {
+    async fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
         let mut value = data.clone();
         self.hook
-            .before(self, set_name, Operation::Create, &mut value).await?;
+            .before(self, set_name, Operation::Create, &mut value)
+            .await?;
         let mut r = self.inner.create_entity(set_name, data).await?;
-        self.hook.after(self, set_name, Operation::Create, &mut r).await?;
+        self.hook
+            .after(self, set_name, Operation::Create, &mut r)
+            .await?;
         Ok(r)
     }
 
@@ -209,23 +221,30 @@ impl DataStore for Extender {
     ) -> Result<Value, StoreError> {
         let mut value = patch.clone();
         self.hook
-            .before(self, set_name, Operation::Patch, &mut value).await?;
+            .before(self, set_name, Operation::Patch, &mut value)
+            .await?;
         let result = self.inner.patch_entity(set_name, key, patch).await?;
         let mut record = self
             .inner
-            .read_entity(set_name, key, &odata::query::ODataQuery::new()).await?;
-        self.hook.after(self, set_name, Operation::Patch, &mut record).await?;
+            .read_entity(set_name, key, &odata::query::ODataQuery::new())
+            .await?;
+        self.hook
+            .after(self, set_name, Operation::Patch, &mut record)
+            .await?;
         Ok(result)
     }
 
     async fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
         let mut value = Self::key_value(key);
         self.hook
-            .before(self, set_name, Operation::Delete, &mut value).await?;
+            .before(self, set_name, Operation::Delete, &mut value)
+            .await?;
         let result = self.inner.delete_entity(set_name, key).await;
         result?;
         let mut record = Self::key_record(key);
-        self.hook.after(self, set_name, Operation::Delete, &mut record).await?;
+        self.hook
+            .after(self, set_name, Operation::Delete, &mut record)
+            .await?;
         Ok(())
     }
 
@@ -236,11 +255,14 @@ impl DataStore for Extender {
     ) -> Result<(), StoreError> {
         let mut value = Self::key_value(key);
         self.hook
-            .before(self, set_name, Operation::Delete, &mut value).await?;
+            .before(self, set_name, Operation::Delete, &mut value)
+            .await?;
         let result = self.inner.delete_entity_tree_only(set_name, key).await;
         result?;
         let mut record = Self::key_record(key);
-        self.hook.after(self, set_name, Operation::Delete, &mut record).await?;
+        self.hook
+            .after(self, set_name, Operation::Delete, &mut record)
+            .await?;
         Ok(())
     }
 
@@ -352,14 +374,16 @@ impl Hook for EntityDefaultsHook {
         let parent_id = value.id().to_string();
         let is_active = value.is_active_entity();
         for field_name in Self::DEFAULT_FIELDS {
-            store.create_entity(
-                Self::CHILD_SET,
-                &json!({
-                    "name": field_name,
-                    Self::CHILD_FK: parent_id,
-                    "IsActiveEntity": is_active,
-                }),
-            ).await?;
+            store
+                .create_entity(
+                    Self::CHILD_SET,
+                    &json!({
+                        "name": field_name,
+                        Self::CHILD_FK: parent_id,
+                        "IsActiveEntity": is_active,
+                    }),
+                )
+                .await?;
         }
         Ok(())
     }
@@ -402,13 +426,14 @@ mod test {
             value: &mut DataRecord,
         ) -> Result<(), HookError> {
             debug!(?op, ?value);
-            
+
             // Track whether we need to create an OrderItem
             let should_create_item = {
-                let mut w = self.inner.try_write().map_err(|_| {
-                    HookError::Hook("Failed to acquire write lock".to_string())
-                })?;
-                
+                let mut w = self
+                    .inner
+                    .try_write()
+                    .map_err(|_| HookError::Hook("Failed to acquire write lock".to_string()))?;
+
                 match set_name {
                     "OrderSet" => match op {
                         Operation::Create => {
@@ -419,20 +444,22 @@ mod test {
                             w.activated += 1;
                             false
                         }
-                        _ => false
+                        _ => false,
                     },
-                    _ => false
+                    _ => false,
                 }
             }; // Lock is released here
-            
+
             // Create OrderItem outside the lock
             if should_create_item {
-                store.create_entity(
-                    "OrderItemSet",
-                    &json!({"Pos": "10", "Order_ID": value.id()}),
-                ).await?;
+                store
+                    .create_entity(
+                        "OrderItemSet",
+                        &json!({"Pos": "10", "Order_ID": value.id()}),
+                    )
+                    .await?;
             }
-            
+
             Ok(())
         }
     }
@@ -445,7 +472,9 @@ mod test {
         let ystore = Arc::new(YamlStore::open("testdata")?);
         let hook = Arc::new(ExampleHook::default());
         let store = Extender::new(ystore, hook.clone())?;
-        store.create_entity("OrderSet", &json!({"SoldTo": "Peter"})).await?;
+        store
+            .create_entity("OrderSet", &json!({"SoldTo": "Peter"}))
+            .await?;
         assert_eq!(hook.create_count(), 1);
         Ok(())
     }

@@ -6,28 +6,49 @@
 
 use std::cmp::Ordering;
 
-use odata::query::{BinOp, Expr};
+use odata::query::{BinOp, Expr, LambdaKind};
 use serde_json::{Number, Value};
 use tracing::trace;
 
 use crate::datastore::DataRecord;
 
 pub fn resolve_property(record: &DataRecord, path: &str) -> Value {
-    resolve_path(record, path.split('/'))
+    resolve_in(record, &[], &path.split('/').collect::<Vec<_>>())
 }
 
-fn resolve_path<'a>(record: &DataRecord, mut parts: impl Iterator<Item = &'a str>) -> Value {
-    let Some(head) = parts.next() else {
+/// Lambda-Variablen mit ihrem aktuellen Element, innerste zuletzt.
+type Scope = [(String, Value)];
+
+/// Loest den Pfad auf; ein Kopf, der einer Lambda-Variable entspricht, bezeichnet das Element.
+fn resolve_in(record: &DataRecord, scope: &Scope, parts: &[&str]) -> Value {
+    let Some((head, rest)) = parts.split_first() else {
         return Value::Null;
     };
-    let mut current = record.get(head).unwrap_or(Value::Null);
-    for part in parts {
-        match current.get(part) {
-            Some(v) => current = v.clone(),
-            None => return Value::Null,
+    let start = match scope.iter().rev().find(|(var, _)| var.as_str() == *head) {
+        Some((_, item)) => item.clone(),
+        None => record.get(head).unwrap_or(Value::Null),
+    };
+    rest.iter()
+        .try_fold(start, |current, part| current.get(*part).cloned())
+        .unwrap_or(Value::Null)
+}
+
+/// Unbekannt, wenn kein Element entscheidet und mindestens eines unbekannt ist.
+fn quantify(kind: LambdaKind, results: impl Iterator<Item = Value>) -> Value {
+    let mut unknown = false;
+    for result in results {
+        match (kind, result) {
+            (LambdaKind::Any, Value::Bool(true)) => return Value::Bool(true),
+            (LambdaKind::All, Value::Bool(false)) => return Value::Bool(false),
+            (_, Value::Bool(_)) => {}
+            _ => unknown = true,
         }
     }
-    current
+    match (unknown, kind) {
+        (true, _) => Value::Null,
+        (false, LambdaKind::Any) => Value::Bool(false),
+        (false, LambdaKind::All) => Value::Bool(true),
+    }
 }
 
 fn as_str(v: &Value) -> String {
@@ -111,25 +132,50 @@ fn call_function(name: &str, args: &[Value]) -> Value {
 }
 
 pub fn evaluate(record: &DataRecord, expr: &Expr) -> Value {
+    eval(record, &[], expr)
+}
+
+fn eval(record: &DataRecord, scope: &Scope, expr: &Expr) -> Value {
     let v = match expr {
-        Expr::Identifier(id) => resolve_path(record, id.split('/')),
-        Expr::Path(items) => resolve_path(record, items.iter().map(|s| s.as_str())),
+        Expr::Identifier(id) => resolve_in(record, scope, &id.split('/').collect::<Vec<_>>()),
+        Expr::Path(items) => {
+            resolve_in(record, scope, &items.iter().map(String::as_str).collect::<Vec<_>>())
+        }
         Expr::String(s) => Value::String(s.clone()),
         Expr::Number(n) => number(*n),
         Expr::Bool(b) => Value::Bool(*b),
         Expr::Guid(g) => Value::String(g.to_string()),
         Expr::Null => Value::Null,
         Expr::FunctionCall { name, args } => {
-            let args: Vec<Value> = args.iter().map(|a| evaluate(record, a)).collect();
+            let args: Vec<Value> = args.iter().map(|a| eval(record, scope, a)).collect();
             call_function(name, &args)
         }
-        Expr::UnaryNot(inner) => match evaluate(record, inner) {
+        Expr::UnaryNot(inner) => match eval(record, scope, inner) {
             Value::Bool(b) => Value::Bool(!b),
             _ => Value::Null,
         },
+        Expr::Lambda {
+            kind,
+            collection,
+            var,
+            predicate,
+        } => {
+            let parts: Vec<&str> = collection.iter().map(String::as_str).collect();
+            match resolve_in(record, scope, &parts) {
+                Value::Array(items) => quantify(
+                    *kind,
+                    items.into_iter().map(|item| {
+                        let mut inner = scope.to_vec();
+                        inner.push((var.clone(), item));
+                        eval(record, &inner, predicate)
+                    }),
+                ),
+                _ => Value::Null,
+            }
+        }
         Expr::BinaryOp { op, left, right } => {
-            let left = evaluate(record, left);
-            let right = evaluate(record, right);
+            let left = eval(record, scope, left);
+            let right = eval(record, scope, right);
             match op {
                 BinOp::And => match (&left, &right) {
                     (Value::Bool(a), Value::Bool(b)) => Value::Bool(*a && *b),
@@ -263,5 +309,87 @@ mod tests {
             args: vec![],
         };
         assert_eq!(evaluate(&record(), &e), Value::Null);
+    }
+
+    fn video_record(tags: Value) -> DataRecord {
+        DataRecord::from_json(&json!({
+            "ID": "00000000-0000-0000-0000-000000000002",
+            "IsActiveEntity": true,
+            "_VideoTags": tags,
+        }))
+        .unwrap()
+    }
+
+    fn tags() -> Value {
+        json!([
+            { "tag": { "name": "Karolynesyera" } },
+            { "tag": { "name": "Other" } },
+        ])
+    }
+
+    fn lambda(kind: LambdaKind, predicate: Expr) -> Expr {
+        Expr::Lambda {
+            kind,
+            collection: vec!["_VideoTags".into()],
+            var: "vt".into(),
+            predicate: Box::new(predicate),
+        }
+    }
+
+    fn tag_name(op: BinOp, name: &str) -> Expr {
+        bin(
+            op,
+            Expr::Path(vec!["vt".into(), "tag".into(), "name".into()]),
+            Expr::String(name.into()),
+        )
+    }
+
+    #[test]
+    fn any_is_true_when_one_item_matches() {
+        let e = lambda(LambdaKind::Any, tag_name(BinOp::Eq, "Karolynesyera"));
+        assert_eq!(evaluate(&video_record(tags()), &e), json!(true));
+    }
+
+    #[test]
+    fn any_is_false_when_no_item_matches() {
+        let e = lambda(LambdaKind::Any, tag_name(BinOp::Eq, "Nope"));
+        assert_eq!(evaluate(&video_record(tags()), &e), json!(false));
+    }
+
+    #[test]
+    fn all_requires_every_item_to_match() {
+        let e = lambda(LambdaKind::All, tag_name(BinOp::Eq, "Karolynesyera"));
+        assert_eq!(evaluate(&video_record(tags()), &e), json!(false));
+        let e = lambda(LambdaKind::All, tag_name(BinOp::Ne, "Nope"));
+        assert_eq!(evaluate(&video_record(tags()), &e), json!(true));
+    }
+
+    #[test]
+    fn empty_collection_any_is_false_all_is_true() {
+        let r = video_record(json!([]));
+        let any = lambda(LambdaKind::Any, tag_name(BinOp::Eq, "x"));
+        let all = lambda(LambdaKind::All, tag_name(BinOp::Eq, "x"));
+        assert_eq!(evaluate(&r, &any), json!(false));
+        assert_eq!(evaluate(&r, &all), json!(true));
+    }
+
+    #[test]
+    fn missing_collection_is_null() {
+        let r = DataRecord::from_json(&json!({ "ID": "00000000-0000-0000-0000-000000000003", "IsActiveEntity": true })).unwrap();
+        let e = lambda(LambdaKind::Any, tag_name(BinOp::Eq, "x"));
+        assert_eq!(evaluate(&r, &e), Value::Null);
+    }
+
+    #[test]
+    fn unknown_item_results_make_any_null() {
+        let r = video_record(json!([{ "other": 1 }]));
+        let e = lambda(LambdaKind::Any, tag_name(BinOp::Gt, "a"));
+        assert_eq!(evaluate(&r, &e), Value::Null);
+    }
+
+    #[test]
+    fn parsed_request_filter_evaluates() {
+        let e = Expr::parse("_VideoTags/any(vt:vt/tag/name eq 'Karolynesyera')").unwrap();
+        assert_eq!(evaluate(&video_record(tags()), &e), json!(true));
     }
 }

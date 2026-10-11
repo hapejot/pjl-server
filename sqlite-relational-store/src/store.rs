@@ -800,7 +800,9 @@ impl DataStore for RelationalStore {
         // Sibling-Join hat den Zustand des Zwillings bereits in der Zeile.
         // Sie ist wortgleich mit dem Draft-Filter, den Fiori Elements selbst
         // schickt, und damit idempotent.
-        let mut sql = Translator::new(set, self.dialect()).shadow_drafts();
+        let mut sql = Translator::new(set, self.dialect())
+            .with_schema(&schema)
+            .shadow_drafts();
         for s in query.select.iter() {
             sql = sql.select(s);
         }

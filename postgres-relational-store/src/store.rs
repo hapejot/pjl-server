@@ -780,7 +780,9 @@ impl DataStore for PostgresStore {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
 
-        let mut sql = Translator::new(set, self.dialect()).shadow_drafts();
+        let mut sql = Translator::new(set, self.dialect())
+            .with_schema(&schema)
+            .shadow_drafts();
         for s in query.select.iter() {
             sql = sql.select(s);
         }

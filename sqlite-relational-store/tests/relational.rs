@@ -135,6 +135,82 @@ async fn path_expressions_in_filter_are_rejected() {
     assert!(store.get_collection(ORDERS, &query).await.is_err());
 }
 
+fn lambda_query(filter: &str) -> ODataQuery {
+    ODataQuery::new().filter(Expr::parse(filter).expect("parst"))
+}
+
+#[tokio::test]
+async fn any_lambda_selects_parents_with_a_matching_child() {
+    let store = seeded().await;
+    let hit = lambda_query("_Items/any(i: i/Material eq 'M-100')");
+    assert_eq!(store.get_collection(ORDERS, &hit).await.unwrap().len(), 1);
+    let miss = lambda_query("_Items/any(i: i/Material eq 'M-999')");
+    assert_eq!(store.get_collection(ORDERS, &miss).await.unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn all_lambda_requires_every_child_to_match() {
+    let store = seeded().await;
+    let all_qty_one = lambda_query("_Items/all(i: i/Qty eq 1)");
+    assert_eq!(store.get_collection(ORDERS, &all_qty_one).await.unwrap().len(), 1);
+    let all_m100 = lambda_query("_Items/all(i: i/Material eq 'M-100')");
+    assert_eq!(store.get_collection(ORDERS, &all_m100).await.unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn lambda_over_empty_collection_any_false_all_true() {
+    let store = seeded().await;
+    store
+        .create_entity(
+            ORDERS,
+            &json!({"ID": uuid(2), "IsActiveEntity": true, "Customer_ID": uuid(100),
+                    "Amount": 5, "Status": "Open"}),
+        ).await
+        .unwrap();
+    // Auftrag 2 hat keine Positionen.
+    let any = lambda_query("_Items/any(i: i/Qty eq 1)");
+    assert_eq!(store.get_collection(ORDERS, &any).await.unwrap().len(), 1);
+    let all = lambda_query("_Items/all(i: i/Qty eq 1)");
+    assert_eq!(store.get_collection(ORDERS, &all).await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn lambda_predicate_can_follow_to_one_navigations() {
+    let store = seeded().await;
+    let query = lambda_query("_Items/any(i: i/Order/Customer/Name eq 'Mueller GmbH')");
+    assert_eq!(store.get_collection(ORDERS, &query).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn sibling_lambdas_are_anded_on_the_same_parent() {
+    let store = seeded().await;
+    store
+        .create_entity(
+            ORDERS,
+            &json!({"ID": uuid(2), "IsActiveEntity": true, "Customer_ID": uuid(100),
+                    "Amount": 5, "Status": "Open"}),
+        ).await
+        .unwrap();
+    store
+        .create_entity(
+            ITEMS,
+            &json!({"ID": uuid(12), "IsActiveEntity": true, "Order_ID": uuid(2),
+                    "Material": "M-100", "Qty": 1}),
+        ).await
+        .unwrap();
+    // Auftrag 1 hat M-100 und M-200, Auftrag 2 nur M-100.
+    let both = lambda_query(
+        "_Items/any(i: i/Material eq 'M-100') and _Items/any(j: j/Material eq 'M-200')",
+    );
+    assert_eq!(store.get_collection(ORDERS, &both).await.unwrap().len(), 1);
+    let same_var = lambda_query(
+        "_Items/any(i: i/Material eq 'M-100') and _Items/any(i: i/Material eq 'M-200')",
+    );
+    assert_eq!(store.get_collection(ORDERS, &same_var).await.unwrap().len(), 1);
+    let one = lambda_query("_Items/any(i: i/Material eq 'M-100')");
+    assert_eq!(store.get_collection(ORDERS, &one).await.unwrap().len(), 2);
+}
+
 #[tokio::test]
 async fn string_functions_translate_to_sql() {
     let store = seeded().await;

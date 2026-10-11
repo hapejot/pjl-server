@@ -49,9 +49,11 @@ pub fn param(value: &serde_json::Value) -> SqlParam {
 pub mod query {
     use super::unsupported;
     use super::Sql;
-    use data_store::schema::{EntitySet, ID_COLUMN, IS_ACTIVE_COLUMN};
+    use data_store::schema::{
+        Cardinality, EntitySet, ForeignKeySide, Schema, ID_COLUMN, IS_ACTIVE_COLUMN,
+    };
     use data_store::{SqlParam, StoreError};
-    use odata::query::{BinOp, Expr, ODataQuery};
+    use odata::query::{BinOp, Expr, LambdaKind, ODataQuery};
 
     use crate::ddl::{quote, DRAFT_ADMIN_COLUMN};
     use crate::dialect::Dialect;
@@ -60,6 +62,18 @@ pub mod query {
     pub const SIBLING_IS_ACTIVE: &str = "SiblingEntity/IsActiveEntity";
     /// Draft-Verwaltungsdaten des Zwillings.
     pub const SIBLING_DRAFT_ADMIN: &str = "SiblingEntity/DraftAdministrativeData_ID";
+    /// Alias der aeusseren Zeile. Lambda-Ausdrucke verweisen darauf korreliert;
+    /// der Alias steht nur im SQL, wenn ein Lambda ihn tatsaechlich braucht.
+    const ROOT_ALIAS: &str = "root";
+
+    /// Lambda-Variable: ihr Name, der Alias des Elements in der Unterabfrage
+    /// und das Set, zu dem das Element gehoert.
+    #[derive(Debug, Clone)]
+    struct LambdaScope<'a> {
+        var: String,
+        alias: String,
+        set: &'a EntitySet,
+    }
 
     /// Sichtbarkeitsregel des Draft-Modells: ein Draft verdeckt seinen aktiven
     /// Zwilling.
@@ -85,10 +99,16 @@ pub mod query {
     pub struct Translator<'a> {
         set: &'a EntitySet,
         dialect: &'a dyn Dialect,
+        /// Noetig, um Navigationen in Lambda-Ausdruecken aufzuloesen.
+        schema: Option<&'a Schema>,
         params: Vec<SqlParam>,
         filter: Vec<Expr>,
         raw_filters: Vec<String>,
         select: Vec<String>,
+        /// Innerhalb eines Lambda-Ausdrucks gesetzt.
+        scope: Option<LambdaScope<'a>>,
+        aliases: usize,
+        root_referenced: bool,
     }
 
     impl<'a> Translator<'a> {
@@ -96,11 +116,21 @@ pub mod query {
             Self {
                 set,
                 dialect,
+                schema: None,
                 params: vec![],
                 filter: vec![],
                 raw_filters: vec![],
                 select: vec![],
+                scope: None,
+                aliases: 0,
+                root_referenced: false,
             }
+        }
+
+        /// Schema bereitstellen. Ohne Schema werden Lambda-Ausdruecke abgelehnt.
+        pub fn with_schema(mut self, schema: &'a Schema) -> Self {
+            self.schema = Some(schema);
+            self
         }
 
         pub fn build(mut self) -> Result<Sql, StoreError> {
@@ -125,12 +155,17 @@ pub mod query {
             };
             let inner_sql = self.build_inner()?;
 
+            let root_alias = if self.root_referenced {
+                format!(" AS {}", quote(ROOT_ALIAS))
+            } else {
+                String::new()
+            };
             let stmt_sql = if condition_sql.is_empty() {
-                format!("SELECT {} FROM ({})", fields_sql, inner_sql)
+                format!("SELECT {} FROM ({}){}", fields_sql, inner_sql, root_alias)
             } else {
                 format!(
-                    "SELECT {} FROM ({}) WHERE {}",
-                    fields_sql, inner_sql, condition_sql
+                    "SELECT {} FROM ({}){} WHERE {}",
+                    fields_sql, inner_sql, root_alias, condition_sql
                 )
             }
             .split_whitespace()
@@ -183,6 +218,178 @@ pub mod query {
             Ok(quote(name))
         }
 
+        fn require_schema(&self) -> Result<&'a Schema, StoreError> {
+            self.schema
+                .ok_or_else(|| unsupported("Lambda-Ausdruck ohne Schema".to_string()))
+        }
+
+        fn fresh_alias(&mut self) -> String {
+            self.aliases += 1;
+            format!("l{}", self.aliases)
+        }
+
+        /// Feld eines Ausdrucks. Innerhalb eines Lambda-Ausdrucks beginnt ein
+        /// Pfad mit der Lambda-Variable beim Element, alles andere gehoert zur
+        /// aeusseren Zeile.
+        fn field(&mut self, parts: &[String]) -> Result<String, StoreError> {
+            if let Some(scope) = self.scope.clone() {
+                if let Some((head, rest)) = parts.split_first() {
+                    if *head == scope.var {
+                        return self.element_value(&scope.alias, scope.set, rest);
+                    }
+                }
+            }
+            let plain = match parts {
+                [name] => self.column(name)?,
+                _ => self.sibling_column(parts)?,
+            };
+            if self.scope.is_some() {
+                self.root_referenced = true;
+                return Ok(format!("{}.{}", quote(ROOT_ALIAS), plain));
+            }
+            Ok(plain)
+        }
+
+        /// Wert eines Lambda-Elements entlang eines Pfads. Jede to-one-Navigation
+        /// wird zu einer korrelierten Skalar-Unterabfrage.
+        fn element_value(
+            &mut self,
+            alias: &str,
+            set: &'a EntitySet,
+            path: &[String],
+        ) -> Result<String, StoreError> {
+            let (head, rest) = path
+                .split_first()
+                .ok_or_else(|| unsupported("Lambda-Variable ohne Feld".to_string()))?;
+            if rest.is_empty() {
+                set.get_column(head)
+                    .map_err(|e| StoreError::Metadata(e.to_string()))?;
+                return Ok(format!("{}.{}", quote(alias), quote(head)));
+            }
+            let assoc = set
+                .get_association(head)
+                .map_err(|e| StoreError::Metadata(e.to_string()))?;
+            if assoc.cardinality != Cardinality::ToOne {
+                return Err(unsupported(format!("Pfad ueber Collection {head}")));
+            }
+            let ForeignKeySide::Here { column } = &assoc.foreign_key else {
+                return Err(unsupported(format!(
+                    "Navigation {head} ohne lokalen Fremdschluessel"
+                )));
+            };
+            let target = self
+                .require_schema()?
+                .set(&assoc.target_set)
+                .map_err(|e| StoreError::Metadata(e.to_string()))?;
+
+            let target_alias = self.fresh_alias();
+            let value = self.element_value(&target_alias, target, rest)?;
+            let mut join = format!(
+                "{}.{} = {}.{}",
+                quote(&target_alias),
+                quote(ID_COLUMN),
+                quote(alias),
+                quote(column)
+            );
+            if target.draft_enabled && set.draft_enabled {
+                join.push_str(&format!(
+                    " AND {}.{} = {}.{}",
+                    quote(&target_alias),
+                    quote(IS_ACTIVE_COLUMN),
+                    quote(alias),
+                    quote(IS_ACTIVE_COLUMN)
+                ));
+            }
+            Ok(format!(
+                "(SELECT {value} FROM {} AS {} WHERE {join})",
+                quote(&target.name),
+                quote(&target_alias)
+            ))
+        }
+
+        /// `kind` ueber die Kinder einer to-many-Navigation als Korrelation.
+        ///
+        /// Dreiwertig wie der Referenzevaluator: `any` ist wahr, sobald ein Kind
+        /// wahr ist; sonst unbekannt, sobald ein Kind unbekannt ist; sonst falsch.
+        /// `all` spiegelbildlich. Leere Kindmenge: `any` falsch, `all` wahr.
+        fn lambda(
+            &mut self,
+            kind: LambdaKind,
+            collection: &[String],
+            var: &str,
+            predicate: &Expr,
+        ) -> Result<String, StoreError> {
+            if self.scope.is_some() {
+                return Err(unsupported("verschachtelte Lambda-Ausdruecke".to_string()));
+            }
+            let [nav] = collection else {
+                return Err(unsupported(format!(
+                    "Lambda ueber Pfad {}",
+                    collection.join("/")
+                )));
+            };
+            let set = self.set;
+            let assoc = set
+                .get_association(nav)
+                .map_err(|e| StoreError::Metadata(e.to_string()))?;
+            if assoc.cardinality != Cardinality::ToMany {
+                return Err(unsupported(format!("Lambda ueber to-one Navigation {nav}")));
+            }
+            let ForeignKeySide::There { column } = &assoc.foreign_key else {
+                return Err(unsupported(format!(
+                    "Collection {nav} ohne Fremdschluessel im Kind"
+                )));
+            };
+            let child = self
+                .require_schema()?
+                .set(&assoc.target_set)
+                .map_err(|e| StoreError::Metadata(e.to_string()))?;
+
+            let alias = self.fresh_alias();
+            self.root_referenced = true;
+            let root = quote(ROOT_ALIAS);
+            let mut join = format!(
+                "{}.{} = {}.{}",
+                quote(&alias),
+                quote(column),
+                root,
+                quote(ID_COLUMN)
+            );
+            if child.draft_enabled && set.draft_enabled {
+                join.push_str(&format!(
+                    " AND {}.{} = {}.{}",
+                    quote(&alias),
+                    quote(IS_ACTIVE_COLUMN),
+                    root,
+                    quote(IS_ACTIVE_COLUMN)
+                ));
+            }
+            let from = format!("{} AS {}", quote(&child.name), quote(&alias));
+
+            self.scope = Some(LambdaScope {
+                var: var.to_string(),
+                alias: alias.clone(),
+                set: child,
+            });
+            let body = self.predicate(predicate);
+            self.scope = None;
+            let body = body?;
+
+            let true_lit = self.dialect.bool_constant(true);
+            let false_lit = self.dialect.bool_constant(false);
+            let unknown = format!("EXISTS (SELECT 1 FROM {from} WHERE {join} AND ({body}) IS NULL)");
+            Ok(match kind {
+                LambdaKind::Any => {
+                    let hit = format!("EXISTS (SELECT 1 FROM {from} WHERE {join} AND ({body}))");
+                    format!("CASE WHEN {hit} THEN {true_lit} WHEN {unknown} THEN NULL ELSE {false_lit} END")
+                }
+                LambdaKind::All => {
+                    let miss = format!("EXISTS (SELECT 1 FROM {from} WHERE {join} AND NOT ({body}))");
+                    format!("CASE WHEN {miss} THEN {false_lit} WHEN {unknown} THEN NULL ELSE {true_lit} END")
+                }
+            })
+        }
+
         fn push(&mut self, value: SqlParam) -> String {
             self.params.push(value);
             self.dialect.placeholder(self.params.len())
@@ -191,8 +398,8 @@ pub mod query {
         /// Skalarer Ausdruck (Spalte, Literal, Funktion).
         fn scalar(&mut self, expr: &Expr) -> Result<String, StoreError> {
             Ok(match expr {
-                Expr::Identifier(name) => self.column(name)?,
-                Expr::Path(parts) => self.sibling_column(parts)?,
+                Expr::Identifier(name) => self.field(std::slice::from_ref(name))?,
+                Expr::Path(parts) => self.field(parts)?,
                 Expr::String(s) => self.push(SqlParam::Text(s.clone())),
                 Expr::Guid(g) => self.push(SqlParam::Text(g.clone())),
                 Expr::Number(n) => {
@@ -206,6 +413,7 @@ pub mod query {
                 Expr::Null => "NULL".to_string(),
                 Expr::FunctionCall { name, args } => self.function(name, args)?,
                 Expr::UnaryNot(_) | Expr::BinaryOp { .. } => self.predicate(expr)?,
+                Expr::Lambda { .. } => return Err(unsupported("Lambda-Ausdruck".to_string())),
             })
         }
 
@@ -336,7 +544,16 @@ pub mod query {
                 Expr::UnaryNot(inner) => format!("(NOT {})", self.predicate(inner)?),
                 Expr::Bool(b) => self.dialect.bool_constant(*b),
                 Expr::FunctionCall { name, args } => self.function(name, args)?,
-                Expr::Identifier(name) => self.dialect.bool_predicate(&self.column(name)?, true),
+                Expr::Identifier(name) => {
+                    let column = self.field(std::slice::from_ref(name))?;
+                    self.dialect.bool_predicate(&column, true)
+                }
+                Expr::Lambda {
+                    kind,
+                    collection,
+                    var,
+                    predicate,
+                } => self.lambda(*kind, collection, var, predicate)?,
                 other => return Err(unsupported(format!("{other:?}"))),
             })
         }
@@ -441,9 +658,9 @@ pub mod query {
 
     /// `ORDER BY`-Klausel. Leere Sortierung ergibt `None`.
     ///
-    /// Die Spalten werden ohne Tabellenalias referenziert: die Klausel haengt
-    /// am aeusseren `SELECT ... FROM (...)` des Translators, und das hat
-    /// keinen Alias.
+    /// Die Spalten werden ohne Tabellenalias referenziert. Das bleibt auch
+    /// richtig, wenn das aeussere `SELECT ... FROM (...)` einen Alias traegt
+    /// (bei Lambda-Ausdruecken): die Klausel hat nur diese eine Quelle.
     pub fn order_by_clause(
         set: &EntitySet,
         dialect: &dyn Dialect,

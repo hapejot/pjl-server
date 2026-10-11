@@ -175,6 +175,7 @@ pub enum Token {
     RParen,
     Comma,
     Slash,
+    Colon,
 }
 
 #[derive(Debug)]
@@ -193,6 +194,7 @@ static TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| {
         r"|(?P<rparen>\))",
         r"|(?P<comma>,)",
         r"|(?P<slash>/)",
+        r"|(?P<colon>:)",
         r"|(?P<ident>[A-Za-z_][A-Za-z0-9_]*)",
     ))
     .expect("gültige Token-Regex")
@@ -242,6 +244,8 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
             tokens.push(Token::Comma);
         } else if caps.name("slash").is_some() {
             tokens.push(Token::Slash);
+        } else if caps.name("colon").is_some() {
+            tokens.push(Token::Colon);
         } else if let Some(m) = caps.name("ident") {
             tokens.push(classify_ident(m.as_str()));
         }
@@ -288,6 +292,28 @@ pub enum Expr {
         left: Box<Expr>,
         right: Box<Expr>,
     },
+    Lambda {
+        kind: LambdaKind,
+        collection: Vec<String>,
+        var: String,
+        predicate: Box<Expr>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum LambdaKind {
+    Any,
+    All,
+}
+
+impl LambdaKind {
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "any" => Some(LambdaKind::Any),
+            "all" => Some(LambdaKind::All),
+            _ => None,
+        }
+    }
 }
 
 impl Expr {
@@ -489,6 +515,11 @@ impl Parser {
                     match self.peek().cloned() {
                         Some(Token::Identifier(next)) => {
                             self.advance();
+                            if let Some(kind) = LambdaKind::from_name(&next) {
+                                if self.check(&Token::LParen) {
+                                    return self.parse_lambda(kind, segments);
+                                }
+                            }
                             segments.push(next);
                         }
                         other => {
@@ -507,6 +538,31 @@ impl Parser {
             }
             other => Err(self.error(&format!("Unerwartetes Token: {other:?}"))),
         }
+    }
+
+    // lambda := "(" identifier ":" or ")"
+    fn parse_lambda(&mut self, kind: LambdaKind, collection: Vec<String>) -> Result<Expr, ParseError> {
+        self.expect(&Token::LParen)?;
+        let var = match self.peek().cloned() {
+            Some(Token::Identifier(v)) => {
+                self.advance();
+                v
+            }
+            other => {
+                return Err(self.error(&format!(
+                    "Erwartete Lambda-Variable, gefunden: {other:?}"
+                )));
+            }
+        };
+        self.expect(&Token::Colon)?;
+        let predicate = self.parse_or()?;
+        self.expect(&Token::RParen)?;
+        Ok(Expr::Lambda {
+            kind,
+            collection,
+            var,
+            predicate: Box::new(predicate),
+        })
     }
 
     // args := (or ("," or)*)?

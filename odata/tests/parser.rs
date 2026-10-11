@@ -202,3 +202,21 @@ fn error_on_trailing_garbage() {
     let result = parse_filter("A eq 1 )");
     assert!(result.is_err());
 }
+
+#[test]
+fn parses_any_lambda_over_collection() {
+    let expr = parse_filter("_VideoTags/any(vt:vt/tag/name eq 'Karolynesyera')").unwrap();
+    assert_eq!(
+        expr,
+        Expr::Lambda {
+            kind: LambdaKind::Any,
+            collection: vec!["_VideoTags".into()],
+            var: "vt".into(),
+            predicate: Box::new(Expr::BinaryOp {
+                op: BinOp::Eq,
+                left: Box::new(Expr::Path(vec!["vt".into(), "tag".into(), "name".into()])),
+                right: Box::new(Expr::String("Karolynesyera".into())),
+            }),
+        }
+    );
+}

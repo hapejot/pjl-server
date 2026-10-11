@@ -24,6 +24,20 @@ impl ToSql for PgParam<'_> {
         ty: &Type,
         out: &mut tokio_postgres::types::private::BytesMut,
     ) -> Result<IsNull, Box<dyn Error + Sync + Send>> {
+        // Textspalten (Guid, String, Decimal, Datum) speichern alles als TEXT.
+        // Ein Vergleich wie `Betrag eq 5` bringt aber eine Zahl mit. SQLite
+        // gleicht das ueber die Spaltenaffinitaet aus; Postgres verlangt hier
+        // eine Zeichenkette.
+        if is_text(ty) {
+            return match self.0 {
+                SqlParam::Null => Ok(IsNull::Yes),
+                SqlParam::Text(s) => s.as_str().to_sql(ty, out),
+                SqlParam::Bool(b) => b.to_string().as_str().to_sql(ty, out),
+                SqlParam::Int(i) => i.to_string().as_str().to_sql(ty, out),
+                SqlParam::Real(f) => f.to_string().as_str().to_sql(ty, out),
+                SqlParam::Blob(_) => Err("BLOB kann nicht an eine Textspalte gebunden werden".into()),
+            };
+        }
         match self.0 {
             SqlParam::Null => Ok(IsNull::Yes),
             SqlParam::Bool(b) => b.to_sql(ty, out),
@@ -51,6 +65,11 @@ impl ToSql for PgParam<'_> {
     }
 
     to_sql_checked!();
+}
+
+/// Spaltentypen, die Postgres als Text fuehrt.
+fn is_text(ty: &Type) -> bool {
+    matches!(*ty, Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME)
 }
 
 /// Liest eine Spalte in die backend-unabhaengige Darstellung.

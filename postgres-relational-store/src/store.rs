@@ -2,7 +2,8 @@
 //!
 //! Der Zusammenbau der Abfragen kommt vollstaendig aus `relational-core`;
 //! hier steht nur, was der Treiber selbst betrifft - Verbindung, Binden der
-//! Parameter, Lesen der Zeilen, Transaktionen.
+//! Parameter, Lesen der Zeilen, Transaktionen. Ablauf und Semantik sind die
+//! des `sqlite-relational-store`.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -38,6 +39,25 @@ macro_rules! sql_err {
     };
 }
 
+/// Meldungstext eines Treiberfehlers.
+///
+/// `Display` liefert bei Datenbankfehlern nur `db error`. Die eigentliche
+/// Ursache (Meldung, Fehlercode, Detail) steht in [`tokio_postgres::DbError`]
+/// und wird hier ausgepackt, sonst ist ein fehlgeschlagenes SQL nicht
+/// diagnostizierbar.
+fn pg(e: &tokio_postgres::Error) -> String {
+    match e.as_db_error() {
+        Some(db) => {
+            let mut text = format!("{} [{}]", db.message(), db.code().code());
+            if let Some(detail) = db.detail() {
+                text.push_str(&format!(" - {detail}"));
+            }
+            text
+        }
+        None => e.to_string(),
+    }
+}
+
 /// Eine Verbindung aus dem Pool.
 ///
 /// Anders als bei SQLite gibt es keinen Mutex auf einer einzelnen Verbindung:
@@ -57,16 +77,19 @@ macro_rules! conn {
 ///
 /// Anders als bei SQLite, wo ein Mutex die Zugriffe ohnehin serialisiert,
 /// laufen hier echte Nebenlaeufer gegen dieselbe Datenbank. Ein abgebrochener
-/// Schreibvorgang darf keinen halben Zustand hinterlassen.
+/// Schreibvorgang darf keinen halben Zustand hinterlassen: scheitert `body`,
+/// wird die Transaktion beim Verlassen des Blocks verworfen.
 macro_rules! in_transaction {
     ($self:expr, |$tx:ident| $body:block) => {{
         let mut connection = conn!($self);
         let $tx = connection
             .transaction()
             .await
-            .map_err(|e| sql_err!(Conversion, e))?;
+            .map_err(|e| sql_err!(Conversion, pg(&e)))?;
         let result = async { $body }.await?;
-        $tx.commit().await.map_err(|e| sql_err!(Conversion, e))?;
+        $tx.commit()
+            .await
+            .map_err(|e| sql_err!(Conversion, pg(&e)))?;
         result
     }};
 }
@@ -151,6 +174,7 @@ impl PostgresStore {
         ddl::pending_destructive_changes(&PostgresCatalog::new(&client), &POSTGRES, &schema).await
     }
 
+    /// Der SQL-Dialekt dieses Stores.
     fn dialect(&self) -> &'static dyn Dialect {
         &POSTGRES
     }
@@ -233,7 +257,7 @@ impl PostgresStore {
                 &[&draft_uuid],
             )
             .await
-            .map_err(|e| sql_err!(Metadata, e))?;
+            .map_err(|e| sql_err!(Metadata, pg(&e)))?;
         let Some(row) = rows.first() else {
             return Ok(None);
         };
@@ -276,7 +300,7 @@ impl PostgresStore {
             ],
         )
         .await
-        .map_err(|e| sql_err!(Metadata, e))?;
+        .map_err(|e| sql_err!(Metadata, pg(&e)))?;
         Ok(Some(uuid))
     }
 
@@ -338,7 +362,7 @@ impl PostgresStore {
         let bound = bind(&values);
         conn.execute(&sql, &as_refs(&bound))
             .await
-            .map_err(|e| sql_err!(Metadata, e))?;
+            .map_err(|e| sql_err!(Metadata, pg(&e)))?;
         Ok(())
     }
 
@@ -424,7 +448,7 @@ impl PostgresStore {
         let rows = conn
             .query(&sql, &as_refs(&bound))
             .await
-            .map_err(|e| sql_err!(Metadata, format!("{e} in {sql}")))?;
+            .map_err(|e| sql_err!(Metadata, format!("{} in {sql}", pg(&e))))?;
 
         // Nur die tatsaechlich projizierten Spalten materialisieren: $select
         // verkleinert die SELECT-Liste, also ist der Result-Set die Wahrheit.
@@ -501,7 +525,7 @@ impl PostgresStore {
             let rows = conn
                 .query(&sql, &as_refs(&bound))
                 .await
-                .map_err(|e| sql_err!(Metadata, e))?;
+                .map_err(|e| sql_err!(Metadata, pg(&e)))?;
             for row in rows {
                 let id: String = row.get(0);
                 let uuid = Uuid::parse_str(&id).map_err(|e| StoreError::Conflict(e.to_string()))?;
@@ -535,7 +559,7 @@ impl PostgresStore {
         let bound = bind(&params);
         conn.execute(&sql, &as_refs(&bound))
             .await
-            .map_err(|e| sql_err!(Metadata, e))?;
+            .map_err(|e| sql_err!(Metadata, pg(&e)))?;
         Ok(())
     }
 
@@ -725,7 +749,7 @@ async fn apply_schema(
         client
             .batch_execute(&statement)
             .await
-            .map_err(|e| sql_err!(Conversion, format!("{e} in {statement}")))?;
+            .map_err(|e| sql_err!(Conversion, format!("{} in {statement}", pg(&e))))?;
     }
     Ok(())
 }
@@ -746,18 +770,18 @@ async fn set_applied_revision(
     client
         .execute(&ddl::revision_delete_sql(), &[])
         .await
-        .map_err(|e| sql_err!(Conversion, e))?;
+        .map_err(|e| sql_err!(Conversion, pg(&e)))?;
     client
         .execute(&ddl::revision_insert_sql(dialect), &[&(revision as i64)])
         .await
-        .map_err(|e| sql_err!(Conversion, e))?;
+        .map_err(|e| sql_err!(Conversion, pg(&e)))?;
     Ok(())
 }
 
 #[async_trait::async_trait]
 impl DataStore for PostgresStore {
     fn component_info(&self) -> String {
-        format!("PostgresStore")
+        "PostgresStore".to_string()
     }
 
     /// Metadaten kommen ueber [`SchemaSource`], nicht ueber den Store-Trait.
@@ -780,11 +804,17 @@ impl DataStore for PostgresStore {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
 
+        // Ein Draft verdeckt seinen aktiven Zwilling (siehe Translator).
         let mut sql = Translator::new(set, self.dialect())
             .with_schema(&schema)
             .shadow_drafts();
         for s in query.select.iter() {
             sql = sql.select(s);
+        }
+        // Wie beim SQLite-Store: ohne die Draft-Verwaltungsspalte fehlt bei
+        // einem $select die Zuordnung zu DraftAdministrativeData.
+        if !sql.select_is_empty() {
+            sql = sql.select(DRAFT_ADMIN_COLUMN);
         }
         if let Some(filter) = &query.filter {
             sql = sql.filter(filter);
@@ -863,6 +893,8 @@ impl DataStore for PostgresStore {
             }
         }
 
+        // Pruefung des Parents und das Schreiben gehoeren zusammen: sonst
+        // koennte der Parent dazwischen aktiviert oder geloescht werden.
         in_transaction!(self, |tx| {
             if let Some(parent) = set.composition_parent() {
                 let parent_set = schema
@@ -917,6 +949,8 @@ impl DataStore for PostgresStore {
                 }
             }
         }
+        // Lesen, Zusammenfuehren und Schreiben sind ein Vorgang - sonst
+        // ueberschreibt der spaetere Patch die Aenderung des frueheren.
         in_transaction!(self, |tx| {
             let mut record = self.load_one(&tx, set, key).await?;
             record.merge(patch);
@@ -929,6 +963,8 @@ impl DataStore for PostgresStore {
     async fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
+        // Ein Draft verwirft immer auch seinen aktiven Zwilling; beide
+        // Loeschungen gelten gemeinsam oder gar nicht.
         in_transaction!(self, |tx| {
             self.delete_row(&tx, set, key).await?;
             if !key.is_active_entity {
@@ -988,6 +1024,7 @@ impl DraftDataStore for PostgresStore {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
 
+        // Der ganze Teilbaum geht gemeinsam in den Draft.
         let record = in_transaction!(self, |tx| {
             let mut record = self.load_one(&tx, set, key).await?;
 
@@ -1025,10 +1062,14 @@ impl DraftDataStore for PostgresStore {
         Ok(json!(record))
     }
 
+    /// Draft Datensatz aktivieren und die potenziellen Kinder auch aktivieren.
     async fn draft_activate(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
         if key.is_active_entity {
             return Err(StoreError::InvalidState);
         }
+        // Eine Aktivierung ist entweder vollstaendig oder gar nicht
+        // geschehen. Scheitert ein Kind, darf der Parent nicht aktiv
+        // zurueckbleiben.
         Ok(in_transaction!(self, |tx| {
             self.draft_activate_tree(&tx, set_name, key).await
         }))

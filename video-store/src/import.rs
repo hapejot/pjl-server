@@ -51,6 +51,10 @@ pub async fn import_all<S: DataStore>(
 }
 
 /// Schreibt die Zeilen einer Tabelle. Der Aufrufer haelt die Reihenfolge ein.
+///
+/// Eine abgelehnte Zeile bricht den Import nicht sofort ab, wird aber gezaehlt
+/// und am Ende als Fehler gemeldet. Sonst fehlten Daten stillschweigend - und
+/// PostgreSQL lehnt mehr ab als die frueher verwendete SQLite-Ablage.
 pub async fn write_rows<S: DataStore>(
     store: &S,
     model: &Model,
@@ -58,17 +62,21 @@ pub async fn write_rows<S: DataStore>(
     rows: &[Map<String, Value>],
 ) -> anyhow::Result<usize> {
     let records = records_for_table(model, table, rows)?;
+    let mut rejected = 0usize;
     for record in &records {
-        match store
+        if let Err(e) = store
             .create_entity(&table.set, record)
             .await
             .with_context(|| format!("{}: Zeile {} wurde abgelehnt", table.table, record["ID"]))
         {
-            Ok(_) => {}
-            Err(e) => error!("create entity: {e}"),
+            error!("create entity: {e:#}");
+            rejected += 1;
         }
     }
-    info!("{}: {} rows", table.table, records.len());
+    info!("{}: {} rows, {rejected} rejected", table.table, records.len());
+    if rejected > 0 {
+        anyhow::bail!("{}: {rejected} von {} Zeilen abgelehnt", table.table, records.len());
+    }
     Ok(records.len())
 }
 

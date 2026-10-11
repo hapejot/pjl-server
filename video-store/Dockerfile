@@ -1,4 +1,4 @@
-# Ein Image fuer beide Phasen von video-store:
+# Ein Image fuer beide Phasen von video-store (Store: PostgreSQL ueber STORE_PG_URL):
 #   /app/migrate.sh      Migration (one-shot), siehe docker/migrate.sh
 #   /app/video-runtime   OData-Laufzeitserver (pjl-runtime + Video-Erweiterungen)
 #
@@ -35,11 +35,10 @@ COPY --from=build /out/ /app/
 COPY video-store/docker/migrate.sh /app/migrate.sh
 COPY web /app/web
 
-RUN mkdir -p /app/data /app/export && chown -R appuser /app/data /app/export
+RUN mkdir -p /app/export && chown -R appuser /app/export
 
 USER appuser
 ENV PORT=8080 \
-    DATA_DIR=/app/data \
     EXPORT_DIR=/app/export \
     WEB_ROOT=/app/web
 EXPOSE 8080

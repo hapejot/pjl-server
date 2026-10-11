@@ -1,14 +1,16 @@
 //! `video-store`: Ein-Schuss-Migration der Video-Datenbank (Postgres) in ein
-//! PJL-Modell mit SQLite-Speicher, serviert als OData v4 (CRUD mit Drafts).
+//! PJL-Modell mit PostgreSQL-Speicher, serviert als OData v4 (CRUD mit Drafts).
 //!
 //! # Ablauf
 //!
 //! 1. `video-ddic`   liest den Katalog und schreibt `ddic.json`.
-//! 2. `video-import` baut dasselbe Modell aus der Datenbank und schreibt die
-//!    Zeilen in den `RelationalStore` (Parent vor Kind).
-//! 3. `pjl-runtime --ddic ddic.json --data-dir <dir>` serviert das Ergebnis.
+//! 2. `video-import` baut dasselbe Modell aus der Quelldatenbank und schreibt die
+//!    Zeilen in den `PostgresStore` der Zieldatenbank (Parent vor Kind).
+//! 3. `video-runtime` serviert das Ergebnis aus derselben Zieldatenbank
+//!    (`STORE_PG_URL`).
 //!
-//! Die Quelldatenbank wird nur lesend benutzt.
+//! Die Quelldatenbank wird nur lesend benutzt. Ziel ist eine eigene
+//! PostgreSQL-Instanz, siehe `video-store/compose.yaml`.
 //!
 //! # Abbildung
 //!
@@ -35,10 +37,10 @@
 //! * Eindeutigkeit bei zusammengesetzten und fehlenden Schluesseln.
 //! * `$apply`/Aggregation und sinnvolles `$search` existieren in diesem Repo nicht.
 //!
-//! # Pg-Backend (spaeter)
+//! # Typen im Ziel
 //!
-//! Die Markierung `TODO(pg-backend)` steht bei den Typabbildungen, die nur
-//! wegen des SQLite-Textspeichers flach sind (jsonb, Enums, vector).
+//! Die Markierung `TODO(pg-backend)` steht bei den Typabbildungen, die im
+//! Store als Text liegen (Dezimal, jsonb, Enums, vector).
 
 pub mod import;
 pub mod introspect;

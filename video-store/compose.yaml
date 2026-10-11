@@ -1,27 +1,46 @@
-# video-store: Migration und Laufzeit als zwei Dienste mit fester Reihenfolge.
+# video-store: eigene PostgreSQL-Instanz fuer den Store, Migration und Laufzeit.
 #
-#   migrate  (one-shot)  liest die Produktiv-Datenbank nur lesend, schreibt
-#                        ddic.json und den SQLite-Store in die Volumes und
-#                        beendet sich. Ist die Migration bereits erledigt, endet
-#                        der Dienst sofort.
-#   runtime  (dauerhaft) startet erst, wenn migrate erfolgreich war, und liest
-#                        nur aus den Volumes.
+#   db       (dauerhaft)  PostgreSQL 17 nur fuer die Video-Anwendung. Laeuft in
+#                         einem eigenen Container, NICHT auf dem Host.
+#   migrate  (one-shot)   liest die bestehende Video-Datenbank nur lesend und
+#                         schreibt ddic.json und die Daten in `db`. Ist die
+#                         Migration bereits erledigt, endet der Dienst sofort.
+#   runtime  (dauerhaft)  startet erst, wenn `db` gesund und migrate erfolgreich
+#                         war. Liest und schreibt nur in `db`.
 #
 # Start:
 #   export VIDEO_PG_URL='postgres://USER:PASSWORT@host.docker.internal:5432/video'
+#   export VIDEO_DB_PASSWORD='ein-geheimes-passwort'
 #   docker compose -f video-store/compose.yaml up --build
 #   OData -> http://localhost:3035/Service/$metadata
 #
-# Neue Migration (verwirft den bestehenden Store):
+# Neue Migration (verwirft den bestehenden Store in `db`):
 #   docker compose -f video-store/compose.yaml run --rm migrate --force
 #   docker compose -f video-store/compose.yaml up -d runtime
 #
-# Nur das Ergebnis neu erzeugen? Dann Volumes loeschen:
+# Komplett neu aufsetzen (inkl. Datenbank-Volume):
 #   docker compose -f video-store/compose.yaml down -v
 #
 # Die Zugangsdaten gehoeren in die Umgebung, nicht in diese Datei.
 
 services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: video
+      POSTGRES_PASSWORD: ${VIDEO_DB_PASSWORD:?VIDEO_DB_PASSWORD muss gesetzt sein}
+      POSTGRES_DB: video
+    volumes:
+      - video-db:/var/lib/postgresql/data
+    # Kein Port nach aussen: der Store ist nur fuer die Dienste dieses
+    # Compose-Projekts erreichbar.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U video -d video"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   migrate:
     build:
       context: ..
@@ -30,13 +49,15 @@ services:
     entrypoint: ["/app/migrate.sh"]
     environment:
       VIDEO_PG_URL: ${VIDEO_PG_URL:?VIDEO_PG_URL muss gesetzt sein}
-      DATA_DIR: /app/data
-      RUST_BACKTRACE: 1
+      STORE_PG_URL: postgres://video:${VIDEO_DB_PASSWORD}@db:5432/video
       EXPORT_DIR: /app/export
+      RUST_BACKTRACE: 1
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
-      - video-data:/app/data
       - video-export:/app/export
-    # Damit die Produktiv-DB auf dem Host erreichbar ist (Linux braucht das).
+    # Damit die Quelldatenbank auf dem Host erreichbar ist (Linux braucht das).
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: "no"
@@ -47,22 +68,23 @@ services:
       dockerfile: video-store/Dockerfile
       target: run
     depends_on:
+      db:
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     environment:
       DDIC: /app/export/ddic.json
-      DATA_DIR: /app/data
+      STORE_PG_URL: postgres://video:${VIDEO_DB_PASSWORD}@db:5432/video
       EXPORT_DIR: /app/export
       PORT: "8080"
       RUST_LOG: info
     ports:
       - "3035:8080"
     volumes:
-      - video-data:/app/data
       - video-export:/app/export:ro
     entrypoint: ["/app/video-runtime"]
     restart: unless-stopped
 
 volumes:
-  video-data:
+  video-db:
   video-export:

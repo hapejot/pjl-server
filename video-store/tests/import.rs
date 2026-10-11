@@ -1,14 +1,82 @@
 mod common;
 
+#[cfg(feature = "docker-tests")]
 use data_store::DataStore;
+#[cfg(feature = "docker-tests")]
 use odata::query::ODataQuery;
 use serde_json::{Map, Value, json};
-use sqlite_relational_store::RelationalStore;
+#[cfg(feature = "docker-tests")]
 use std::sync::Arc;
 use video_store::{import, map};
 
+/// Postgres-Testschema fuer den Import (siehe `docker-tests`).
+#[cfg(feature = "docker-tests")]
+mod pg_test {
+    use std::sync::Arc;
+
+    use data_store::SchemaSource;
+    use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
+    use postgres_relational_store::PostgresStore;
+    use tokio_postgres::NoTls;
+
+    fn url() -> String {
+        std::env::var("PJL_TEST_POSTGRES")
+            .unwrap_or_else(|_| "postgres://pjl:pjl@localhost:5433/pjl".into())
+    }
+
+    pub struct Fresh {
+        pub schema: String,
+        pub store: PostgresStore,
+    }
+
+    /// Eigenes Schema je Lauf; wird im `Drop` wieder entfernt.
+    pub async fn fresh_store(source: Arc<dyn SchemaSource>) -> Fresh {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let schema = format!("imp_{nanos}");
+        let (client, connection) = tokio_postgres::connect(&url(), NoTls).await.unwrap();
+        tokio::spawn(connection);
+        client
+            .batch_execute(&format!("CREATE SCHEMA \"{schema}\""))
+            .await
+            .unwrap();
+
+        let mut config: tokio_postgres::Config = url().parse().unwrap();
+        config.options(&format!("-c search_path=\"{schema}\""));
+        let manager = Manager::from_config(
+            config,
+            NoTls,
+            ManagerConfig {
+                recycling_method: RecyclingMethod::Fast,
+            },
+        );
+        let pool = Pool::builder(manager).max_size(4).build().unwrap();
+        let store = PostgresStore::from_pool(pool, source).await.unwrap();
+        Fresh { schema, store }
+    }
+
+    impl Drop for Fresh {
+        fn drop(&mut self) {
+            let schema = self.schema.clone();
+            tokio::spawn(async move {
+                let Ok((client, connection)) = tokio_postgres::connect(&url(), NoTls).await else {
+                    return;
+                };
+                tokio::spawn(connection);
+                let _ = client
+                    .batch_execute(&format!("DROP SCHEMA IF EXISTS \"{schema}\" CASCADE"))
+                    .await;
+            });
+        }
+    }
+}
+
+
 const AGENT: &str = "11111111-1111-4111-8111-111111111111";
 const VIDEO: &str = "22222222-2222-4222-8222-222222222222";
+#[cfg(feature = "docker-tests")]
 const TAG: &str = "33333333-3333-4333-8333-333333333333";
 
 fn obj(v: Value) -> Map<String, Value> {
@@ -113,14 +181,13 @@ fn label_category_fk_targets_the_non_uuid_key() {
     assert_eq!(opt[0]["category_ID"], cat[0]["ID"]);
 }
 
+#[cfg(feature = "docker-tests")]
 #[tokio::test]
-async fn full_write_in_parent_first_order_into_sqlite() {
+async fn full_write_in_parent_first_order_into_postgres() {
     let m = model();
-    let dir = tempfile::tempdir().unwrap();
     let source = spec_schema::DdicSchemaSource::new(&m.activated()).unwrap();
-    let store = RelationalStore::open(dir.path().join("db"), Arc::new(source))
-        .await
-        .unwrap();
+    let pg = pg_test::fresh_store(Arc::new(source)).await;
+    let store = &pg.store;
 
     let fixtures: Vec<(&str, Value)> = vec![
         ("agents", json!([{"id": AGENT, "name": "a", "status": "online"}])),
@@ -145,7 +212,7 @@ async fn full_write_in_parent_first_order_into_sqlite() {
         if table == "video_tags" {
             expected_video_tags = rows.len();
         }
-        import::write_rows(&store, &m, set, &rows).await.unwrap();
+        import::write_rows(store, &m, set, &rows).await.unwrap();
     }
 
     // Hinweis: get_collection ohne Filter liefert im aktuellen HEAD zusaetzlich
@@ -176,6 +243,7 @@ async fn full_write_in_parent_first_order_into_sqlite() {
     assert_eq!(store.get_collection("VideoSet", &by_tag("Karolynesyera")).await.unwrap().len(), 0);
 }
 
+#[cfg(feature = "docker-tests")]
 fn active_only() -> ODataQuery {
     ODataQuery {
         filter: Some(odata::query::Expr::parse("IsActiveEntity eq true").unwrap()),
@@ -189,6 +257,7 @@ fn records_of(m: &map::Model, table: &str, rows: Value) -> Vec<Value> {
 }
 
 /// Schreibreihenfolge wie im Import: Parents zuerst.
+#[cfg(feature = "docker-tests")]
 fn store_order(m: &map::Model) -> Vec<String> {
     let schema = m.schema().unwrap();
     schema

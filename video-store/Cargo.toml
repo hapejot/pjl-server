@@ -2,7 +2,7 @@
 name = "video-store"
 version = "0.1.0"
 edition = "2021"
-description = "One-shot migration of the video Postgres database into a PJL DDIC model (SQLite store, OData via pjl-runtime)."
+description = "One-shot migration of the video Postgres database into a PJL DDIC model (PostgreSQL store, OData via pjl-runtime)."
 
 [dependencies]
 anyhow = "1.0.104"
@@ -16,15 +16,22 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 serde_json = "1"
 spec = { version = "0.1.0", path = "../spec" }
 spec-schema = { version = "0.1.0", path = "../spec-schema" }
-sqlite-relational-store = { version = "0.1.0", path = "../sqlite-relational-store" }
+postgres-relational-store = { version = "0.1.0", path = "../postgres-relational-store" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tokio-postgres = "0.7"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 uuid = { version = "1", features = ["v5"] }
 
+[features]
+# Der Import-Test braucht eine laufende Postgres-Datenbank (wie beim Store):
+#   docker compose --profile dev up -d postgres
+#   cargo test -p video-store --features docker-tests
+docker-tests = []
+
 [dev-dependencies]
 async-trait = "0.1"
+deadpool-postgres = "0.14"
 tempfile = "=3.10.1"
 odata = { version = "0.1.0", path = "../odata" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

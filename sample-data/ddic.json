@@ -21,16 +21,7 @@
             "scale": null,
             "computed": false,
             "immutable": false,
-            "value_list": null,
-            "presentation": {
-              "searchable": null,
-              "show_in_list": null,
-              "list_sort_order": null,
-              "list_importance": null,
-              "criticality_path": null,
-              "form_group": null,
-              "lookup": null
-            }
+            "value_list": null
           }
         },
         {
@@ -44,16 +35,7 @@
             "scale": null,
             "computed": false,
             "immutable": false,
-            "value_list": null,
-            "presentation": {
-              "searchable": null,
-              "show_in_list": null,
-              "list_sort_order": null,
-              "list_importance": null,
-              "criticality_path": null,
-              "form_group": null,
-              "lookup": null
-            }
+            "value_list": null
           }
         },
         {
@@ -90,16 +72,7 @@
             "scale": null,
             "computed": false,
             "immutable": false,
-            "value_list": null,
-            "presentation": {
-              "searchable": null,
-              "show_in_list": null,
-              "list_sort_order": null,
-              "list_importance": null,
-              "criticality_path": null,
-              "form_group": null,
-              "lookup": null
-            }
+            "value_list": null
           }
         },
         {
@@ -113,16 +86,7 @@
             "scale": null,
             "computed": false,
             "immutable": false,
-            "value_list": null,
-            "presentation": {
-              "searchable": null,
-              "show_in_list": null,
-              "list_sort_order": null,
-              "list_importance": null,
-              "criticality_path": null,
-              "form_group": null,
-              "lookup": null
-            }
+            "value_list": null
           }
         },
         {
@@ -151,16 +115,7 @@
             "scale": null,
             "computed": false,
             "immutable": false,
-            "value_list": null,
-            "presentation": {
-              "searchable": null,
-              "show_in_list": null,
-              "list_sort_order": null,
-              "list_importance": null,
-              "criticality_path": null,
-              "form_group": null,
-              "lookup": null
-            }
+            "value_list": null
           }
         },
         {
@@ -174,16 +129,7 @@
             "scale": null,
             "computed": false,
             "immutable": false,
-            "value_list": null,
-            "presentation": {
-              "searchable": null,
-              "show_in_list": null,
-              "list_sort_order": null,
-              "list_importance": null,
-              "criticality_path": null,
-              "form_group": null,
-              "lookup": null
-            }
+            "value_list": null
           }
         },
         {

@@ -7,6 +7,7 @@ pub mod batch;
 pub mod config;
 pub mod ddic_loader;
 pub mod export;
+pub mod extension;
 pub mod flp;
 pub mod hook;
 pub mod server;
@@ -29,6 +30,8 @@ pub struct AppState {
     /// damit `activate()` die Lookups nicht mehrfach anhaengt.
     base: Arc<DataDictionary>,
     ddic: Arc<RwLock<Arc<DataDictionary>>>,
+    /// Eingereichte Erweiterungen (Routen, UI5-Pfade, Object-Page-Beitraege).
+    pub extensions: Arc<Vec<Arc<dyn extension::Extension>>>,
 }
 
 impl AppState {
@@ -49,7 +52,14 @@ impl AppState {
             config,
             base,
             ddic: Arc::new(RwLock::new(Arc::new(active))),
+            extensions: Arc::new(Vec::new()),
         }
+    }
+
+    /// Erweiterungen setzen; ersetzt die bisherigen.
+    pub fn with_extensions(mut self, extensions: extension::Extensions) -> Self {
+        self.extensions = Arc::new(extensions);
+        self
     }
 
     pub fn mode(&self) -> ServerMode {

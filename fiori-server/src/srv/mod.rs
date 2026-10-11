@@ -416,13 +416,7 @@ impl Annotations {
             ),
         );
 
-        main_annotations
-            .annotations
-            .push(
-                Annotation::new("UI.LineItem").collection(Collection::new().add_record(
-                    Record::new("UI.DataField").add(PropertyValue::new("Value").path("name")),
-                )),
-            );
+        main_annotations.annotations.extend(line_item_annotations(x));
         main_annotations.annotations.push(
             Annotation::new("Common.SemanticKey")
                 .collection(Collection::new().add_property_path("ID")),
@@ -475,7 +469,6 @@ impl Annotations {
                 computed: false,
                 immutable: false,
                 value_list: None,
-                presentation: Default::default(),
             },
         ));
         for f in x.fields() {
@@ -566,6 +559,77 @@ impl Annotations {
             annotations,
         }
     }
+}
+
+/// Listenannotationen einer Entitaet.
+///
+/// * Ohne `list_views`: unqualifiziertes `UI.LineItem` mit `name` (bisheriges Verhalten).
+/// * Mit `list_views`: je Ansicht ein `UI.LineItem` (Qualifier = Ansichtsname, die
+///   Ansicht `default` ist unqualifiziert). Zu jeder Ansicht ein
+///   `UI.PresentationVariant` mit `Visualizations` auf das LineItem; die Varianten
+///   sind die Auswahlpunkte in der ListReport-Ansicht (siehe `flp.rs`).
+/// * Eine fehlende `default`-Ansicht wird durch `name` ersetzt, weil Fiori Elements
+///   ein unqualifiziertes LineItem fuer die Standardtabelle braucht.
+fn line_item_annotations(x: &EntitySpec) -> Vec<Annotation> {
+    let views = x.list_views();
+    if views.is_empty() {
+        return vec![line_item(None, &["name".to_string()], x)];
+    }
+
+    let mut out = Vec::new();
+    let default_cols: Vec<String> = views
+        .iter()
+        .find(|v| v.is_default())
+        .map(|v| v.columns.clone())
+        .unwrap_or_else(|| vec!["name".to_string()]);
+    out.push(line_item(None, &default_cols, x));
+
+    for view in views {
+        if !view.is_default() {
+            out.push(line_item(Some(&view.name), &view.columns, x));
+        }
+        out.push(presentation_variant(&view.name));
+    }
+    out
+}
+
+/// Ein `UI.LineItem`. Spalten sind Atome (`Value = name`) oder einwertige
+/// Navigationen (`Value = nav/name`, Anzeige des Zieltextes).
+fn line_item(qualifier: Option<&str>, columns: &[String], x: &EntitySpec) -> Annotation {
+    let mut coll = Collection::new();
+    for col in columns {
+        let is_nav = x.fields().any(|f| {
+            matches!(f, spec::FieldSpec::Lookup { name, collection: false, .. } if name == col)
+        });
+        let path = if is_nav { format!("{col}/name") } else { col.clone() };
+        coll = coll.add_record(
+            Record::new("UI.DataField").add(PropertyValue::new("Value").path(path)),
+        );
+    }
+    let mut ann = Annotation::new("UI.LineItem").collection(coll);
+    ann.qualifier = qualifier.map(str::to_string);
+    ann
+}
+
+/// `UI.PresentationVariant` fuer eine Listenansicht. Die Ansicht `default`
+/// ist unqualifiziert, alle anderen tragen `#<name>`.
+fn presentation_variant(view_name: &str) -> Annotation {
+    let (qualifier, line_item_path) = if view_name == spec::ListView::DEFAULT {
+        (None, "@UI.LineItem".to_string())
+    } else {
+        (
+            Some(view_name.to_string()),
+            format!("@UI.LineItem#{view_name}"),
+        )
+    };
+    let visualizations = Collection::new().add_annotation_path(line_item_path);
+    let mut ann = Annotation::new("UI.PresentationVariant").record(
+        Record::new("UI.PresentationVariantType")
+            .add(PropertyValue::new("Text").string(view_name))
+            .add(PropertyValue::new("Visualizations").collection(visualizations)),
+    );
+    ann.qualifier = qualifier;
+    ann
 }
 
 /// One top-level `UI.ReferenceFacet` section per to-many navigation, pointing at
@@ -803,6 +867,13 @@ pub struct Collection {
     )]
     pub property_paths: Vec<String>,
 
+    #[serde(
+        rename = "AnnotationPath",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub annotation_paths: Vec<String>,
+
     #[serde(rename = "Record", default, skip_serializing_if = "Vec::is_empty")]
     pub records: Vec<Record>,
 }
@@ -811,8 +882,14 @@ impl Collection {
     pub fn new() -> Self {
         Self {
             property_paths: Vec::new(),
+            annotation_paths: Vec::new(),
             records: Vec::new(),
         }
+    }
+
+    pub fn add_annotation_path(mut self, path: impl Into<String>) -> Self {
+        self.annotation_paths.push(path.into());
+        self
     }
 
     pub fn add_property_path(mut self, path: impl Into<String>) -> Self {
@@ -2397,7 +2474,6 @@ mod tests {
             scale: Some(2),
             unit_field: "currency".into(),
             kind: MeasureKind::Currency,
-            presentation: Default::default(),
         };
         let measure_annotations = Annotations::from_field("Invoice", &measure);
 
@@ -2476,5 +2552,139 @@ mod tests {
         declared.sort();
         actual.sort();
         assert_eq!(declared, actual);
+    }
+}
+
+#[cfg(test)]
+mod list_view_annotation_tests {
+    use super::*;
+    use spec::{FieldSpec, ListView, Relationship};
+
+    fn atom(name: &str) -> FieldSpec {
+        FieldSpec::Atom {
+            name: name.into(),
+            label: name.into(),
+            edm_type: "Edm.String".into(),
+            package: None,
+            max_length: None,
+            precision: None,
+            scale: None,
+            computed: false,
+            immutable: false,
+            value_list: None,
+        }
+    }
+
+    fn active_video(views: Vec<ListView>) -> spec::EntitySpec {
+        let mut ddic = spec::data_dictionary::DataDictionary::empty();
+        ddic.add_package(spec::package::Package::new("core"));
+        ddic.add_entity(spec::EntitySpec::new("Agent", "core", "Agents").field(atom("name")));
+        let mut video = spec::EntitySpec::new("Video", "core", "Videos")
+            .field(atom("name"))
+            .field(atom("title"));
+        for v in views {
+            video = video.list_view(v);
+        }
+        ddic.add_entity(video);
+        ddic.add_relationship(
+            Relationship::new("videos_agent_id", "core")
+                .with_one("Agent", "_Videos")
+                .with_many("Video", "agent"),
+        );
+        ddic.validate_list_views().expect("valid list views");
+        ddic.activate();
+        ddic.active_entity("Video").unwrap().clone()
+    }
+
+    fn find<'a>(anns: &'a [Annotation], term: &str, qualifier: Option<&str>) -> &'a Annotation {
+        anns.iter()
+            .find(|a| a.term == term && a.qualifier.as_deref() == qualifier)
+            .unwrap_or_else(|| panic!("{term} qualifier={qualifier:?} fehlt"))
+    }
+
+    fn datafield_paths(a: &Annotation) -> Vec<String> {
+        a.collection
+            .as_ref()
+            .unwrap()
+            .records
+            .iter()
+            .map(|r| {
+                r.property_values
+                    .iter()
+                    .find(|p| p.property == "Value")
+                    .and_then(|p| p.path.clone())
+                    .unwrap()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn without_views_line_item_shows_name_only() {
+        let e = active_video(vec![]);
+        let anns = line_item_annotations(&e);
+        assert_eq!(anns.len(), 1);
+        assert_eq!(anns[0].qualifier, None);
+        assert_eq!(datafield_paths(&anns[0]), vec!["name"]);
+    }
+
+    #[test]
+    fn default_and_named_views_get_qualifiers_and_navigation_paths() {
+        let e = active_video(vec![
+            ListView::new("default", &["name", "agent", "title"]),
+            ListView::new("review", &["title"]),
+        ]);
+        let anns = line_item_annotations(&e);
+
+        let default = find(&anns, "UI.LineItem", None);
+        assert_eq!(datafield_paths(default), vec!["name", "agent/name", "title"]);
+
+        let review = find(&anns, "UI.LineItem", Some("review"));
+        assert_eq!(datafield_paths(review), vec!["title"]);
+
+        let pv_default = find(&anns, "UI.PresentationVariant", None);
+        let vis = pv_default
+            .record
+            .as_ref()
+            .unwrap()
+            .property_values
+            .iter()
+            .find(|p| p.property == "Visualizations")
+            .unwrap()
+            .collection
+            .as_ref()
+            .unwrap();
+        assert_eq!(vis.annotation_paths, vec!["@UI.LineItem"]);
+
+        let pv_review = find(&anns, "UI.PresentationVariant", Some("review"));
+        let vis = pv_review
+            .record
+            .as_ref()
+            .unwrap()
+            .property_values
+            .iter()
+            .find(|p| p.property == "Visualizations")
+            .unwrap()
+            .collection
+            .as_ref()
+            .unwrap();
+        assert_eq!(vis.annotation_paths, vec!["@UI.LineItem#review"]);
+    }
+
+    #[test]
+    fn views_settings_only_with_more_than_one_view() {
+        let single = active_video(vec![ListView::new("default", &["name"])]);
+        assert!(crate::flp::list_views_settings(&single).is_empty());
+
+        let multi = active_video(vec![
+            ListView::new("review", &["title"]),
+            ListView::new("default", &["name"]),
+        ]);
+        let settings = crate::flp::list_views_settings(&multi);
+        let paths = settings["views"]["paths"].as_array().unwrap();
+        assert_eq!(paths[0]["key"], "default");
+        assert_eq!(
+            paths[1]["annotationPath"],
+            "com.sap.vocabularies.UI.v1.PresentationVariant#review"
+        );
     }
 }

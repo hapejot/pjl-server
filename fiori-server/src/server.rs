@@ -26,16 +26,25 @@ use crate::config::{ServerConfig, ServerMode};
 use crate::hook::{EntityDefaultsHook, Extender};
 use crate::{batch, flp, srv, AppState};
 
-/// Server nach Konfiguration aufbauen und bis zum Abbruch bedienen.
+/// Server ohne Erweiterungen starten.
 pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
+    run_with(config, Vec::new()).await
+}
+
+/// Server mit Erweiterungen (siehe `extension::Extension`) aufbauen und bis zum Abbruch bedienen.
+pub async fn run_with(
+    config: ServerConfig,
+    extensions: crate::extension::Extensions,
+) -> anyhow::Result<()> {
     let config = Arc::new(config);
     info!("starting {} server", config.mode.label());
 
     let base = load_dictionary(&config)?;
     let schema_source = schema_source(&config, &base)?;
-    let store = open_store(&config, schema_source).await?;
+    let relational = open_store(&config, schema_source).await?;
+    let store = wrap_store(&config, relational.clone())?;
 
-    let state = AppState::new(store, config.clone(), base);
+    let state = AppState::new(store, config.clone(), base).with_extensions(extensions);
     state.reload();
 
     let app = router(state, &config);
@@ -45,8 +54,40 @@ pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
         .await
         .with_context(|| format!("cannot bind {addr}"))?;
     info!("{} listening on http://{addr}", config.mode.label());
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
+
+    // Der Store laeuft nur im Speicher. Nach dem Stopp der Anfragen wird der
+    // Stand auf die Platte geschrieben, bevor der Prozess endet.
+    relational
+        .persist()
+        .context("cannot persist store on shutdown")?;
+    info!("store persisted to '{}'", config.data_dir.display());
     Ok(())
+}
+
+/// Wartet auf SIGINT (Ctrl+C) oder SIGTERM (z. B. `docker stop`).
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sig) => {
+                sig.recv().await;
+            }
+            Err(_) => std::future::pending::<()>().await,
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => info!("shutdown: SIGINT"),
+        _ = terminate => info!("shutdown: SIGTERM"),
+    }
 }
 
 /// Ausgangs-Dictionary bestimmen.
@@ -67,6 +108,9 @@ fn load_dictionary(config: &ServerConfig) -> anyhow::Result<DataDictionary> {
             info!("loading ddic from {}", path.display());
             let ddic: DataDictionary = serde_json::from_reader(std::io::BufReader::new(file))
                 .with_context(|| format!("'{}' is not a valid data dictionary", path.display()))?;
+            ddic.validate_list_views().map_err(|e| {
+                anyhow::anyhow!("'{}': ungueltige Listenansicht: {e}", path.display())
+            })?;
             info!(
                 "dictionary '{}': {} entities, {} apps",
                 path.display(),
@@ -113,16 +157,21 @@ fn schema_source(
 async fn open_store(
     config: &ServerConfig,
     schema: Arc<dyn SchemaSource>,
-) -> anyhow::Result<Arc<dyn DraftDataStore>> {
+) -> anyhow::Result<Arc<RelationalStore>> {
     std::fs::create_dir_all(&config.data_dir)
         .with_context(|| format!("cannot create data dir '{}'", config.data_dir.display()))?;
-    let store = Arc::new(
-        RelationalStore::open(config.data_dir.clone(), schema)
-            .await
-            .with_context(|| format!("cannot open store '{}'", config.data_dir.display()))?,
-    );
-    info!("store at '{}'", config.data_dir.display());
+    let store = RelationalStore::open(config.data_dir.clone(), schema)
+        .await
+        .with_context(|| format!("cannot open store '{}'", config.data_dir.display()))?;
+    info!("store at '{}' (in-memory, persisted on shutdown)", config.data_dir.display());
+    Ok(Arc::new(store))
+}
 
+/// Haengt die modusabhaengigen Wrapper um den Store.
+fn wrap_store(
+    config: &ServerConfig,
+    store: Arc<RelationalStore>,
+) -> anyhow::Result<Arc<dyn DraftDataStore>> {
     match config.mode {
         // Nur beim Modellieren sinnvoll: eine neue Entitaet bekommt sofort
         // die Felder `name` und `title`. In der Laufzeit waere das ein
@@ -133,14 +182,21 @@ async fn open_store(
 }
 
 fn router(state: AppState, config: &ServerConfig) -> Router {
-    Router::new()
+    let mut app = Router::new()
         .nest("/Service/", batch::router(srv::router(), state.clone()))
         .nest("/flp/", flp::router())
         .route("/apps/{app}/Component.js", get(flp::app_component_handler))
         .route("/apps/{app}/manifest.json", get(flp::app_manifest_handler))
+        .route(
+            "/apps/{app}/Component-preload.js",
+            get(flp::component_preload_handler),
+        )
         .route("/apps/{app}/ext/Publish.js", get(flp::publish_ext_handler))
         .route("/", get(flp::index))
-        .fallback_service(ServeDir::new(&config.web_root))
+        .with_state(state.clone());
+    for ext in state.extensions.iter() {
+        app = app.merge(ext.routes(state.clone()));
+    }
+    app.fallback_service(ServeDir::new(&config.web_root))
         .layer(TraceLayer::new_for_http())
-        .with_state(state)
 }

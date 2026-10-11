@@ -9,6 +9,7 @@ use axum::{
 };
 use serde_json::{json, Value};
 use spec::app::App;
+use spec::EntitySpec;
 use tracing::{debug, info};
 
 use crate::AppState;
@@ -198,6 +199,22 @@ async fn init() -> impl IntoResponse {
     )
 }
 
+/// `sap.ui.loader.config`-Aufrufe fuer die UI5-Pfade der Erweiterungen.
+fn ui5_path_config(state: &AppState) -> String {
+    state
+        .extensions
+        .iter()
+        .flat_map(|ext| ext.ui5_paths())
+        .map(|(ns, url)| {
+            format!(
+                "sap.ui.loader.config({{ paths: {{ \"{}\": \"{}\" }} }});\n",
+                ns.replace('.', "/"),
+                url
+            )
+        })
+        .collect()
+}
+
 pub async fn app_component_handler(
     Path(app): Path<String>,
     State(_state): State<AppState>,
@@ -217,12 +234,29 @@ pub async fn app_component_handler(
         )],
         format!(
             r##"
+// Namespace der App auf ihr Verzeichnis abbilden, damit UI5 Modul- und Preload-Pfade findet.
+sap.ui.loader.config({{ paths: {{ "{cmp}": "/apps/{main}" }} }});
+{ui5_paths}
 sap.ui.define(["sap/fe/core/AppComponent"], function (AppComponent) {{
     "use strict";
 	return AppComponent.extend("{cmp}.Component", {{ metadata: {{ manifest: "json" }} }});
 }}); "##,
-            cmp = a.name()
+            cmp = a.name(),
+            main = a.main_entity(&ddic).name(),
+            ui5_paths = ui5_path_config(&_state)
         ),
+    )
+}
+
+/// Kein Preload-Bundle vorhanden: leere Antwort statt 404, damit UI5 nicht
+/// fehlschlaegt. Die Komponente laedt ihre Module einzeln.
+pub async fn component_preload_handler() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        "// no preload bundle\n",
     )
 }
 
@@ -277,7 +311,7 @@ pub async fn app_manifest_handler(
               "entitySet": main_set.clone(),
               "contextPath": format!("/{}", &main_set),
               "initialLoad": "Enabled",
-              "controlConfiguration": list_control_configuration(&_state, a.name()),
+              "controlConfiguration": list_control_configuration_with_extensions(&_state, a.name(), &main_name),
               "navigation": {
                 main_set.clone(): {
                   "detail": {
@@ -290,6 +324,16 @@ pub async fn app_manifest_handler(
           },
         }),
     );
+    // Listenansichten (View-Leiste) in die ListReport-Settings einhaengen.
+    if let Some(settings) = targets
+        .get_mut(&list_target)
+        .and_then(|t| t.get_mut("options"))
+        .and_then(|o| o.get_mut("settings"))
+        .and_then(|s| s.as_object_mut())
+    {
+        settings.extend(list_views_settings(&main_entity));
+    }
+
     let mut object_navigation: serde_json::Map<String, Value> = serde_json::Map::new();
 
     // Every to-many navigation of the main entity becomes a section (table) on the
@@ -368,6 +412,18 @@ pub async fn app_manifest_handler(
             },
         }),
     );
+
+    // Erweiterungen (Custom Sections, ausgeblendete Facets) in die Object Page.
+    if let Some(content) = crate::extension::object_page_content(&_state.extensions, &main_name) {
+        if let Some(settings) = targets
+            .get_mut(&object_target)
+            .and_then(|t| t.get_mut("options"))
+            .and_then(|o| o.get_mut("settings"))
+            .and_then(|s| s.as_object_mut())
+        {
+            settings.insert("content".into(), content);
+        }
+    }
 
     let sem = format!("{}-{}", a.main_entity(&ddic).name(), a.action());
     let sap_app = json!({
@@ -453,6 +509,54 @@ pub async fn app_manifest_handler(
     });
 
     Ok(Json(r))
+}
+
+/// Ansichten der ListReport-Seite aus den Listenansichten der Hauptentitaet.
+///
+/// Nur bei mehr als einer Ansicht: dann erscheint die Auswahl (View-Leiste) und
+/// jede Ansicht zeigt ihr `UI.PresentationVariant#<name>` (bzw. unqualifiziert
+/// fuer `default`). Mit einer oder keiner Ansicht bleibt die Seite unveraendert.
+pub(crate) fn list_views_settings(entity: &EntitySpec) -> serde_json::Map<String, Value> {
+    let mut out = serde_json::Map::new();
+    let views = entity.list_views();
+    if views.len() <= 1 {
+        return out;
+    }
+    let mut ordered: Vec<&spec::ListView> = views.iter().filter(|v| v.is_default()).collect();
+    ordered.extend(views.iter().filter(|v| !v.is_default()));
+    let paths: Vec<Value> = ordered
+        .iter()
+        .map(|v| {
+            let annotation_path = if v.is_default() {
+                "com.sap.vocabularies.UI.v1.PresentationVariant".to_string()
+            } else {
+                format!("com.sap.vocabularies.UI.v1.PresentationVariant#{}", v.name)
+            };
+            json!({ "key": v.name, "annotationPath": annotation_path })
+        })
+        .collect();
+    out.insert("views".into(), json!({ "paths": paths }));
+    out
+}
+
+/// Designer-Konfiguration plus Spalten aus den Erweiterungen (`Extension::list_columns`).
+fn list_control_configuration_with_extensions(
+    state: &AppState,
+    app_id: &str,
+    entity: &str,
+) -> Value {
+    let mut config = list_control_configuration(state, app_id);
+    if let Some(columns) = crate::extension::list_columns(&state.extensions, entity) {
+        let line_item = config
+            .as_object_mut()
+            .expect("controlConfiguration ist ein Objekt")
+            .entry("@com.sap.vocabularies.UI.v1.LineItem")
+            .or_insert_with(|| json!({}));
+        if let Some(obj) = line_item.as_object_mut() {
+            obj.insert("columns".into(), columns);
+        }
+    }
+    config
 }
 
 /// Zusatzkonfiguration der ListReport-Tabelle.

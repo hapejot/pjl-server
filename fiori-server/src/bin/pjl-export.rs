@@ -27,9 +27,11 @@ async fn main() -> anyhow::Result<()> {
     // let schema = Schema::load(".")?;
     let source = DdicSchemaSource::new(&ddic)?;
     let store = Arc::new(RelationalStore::open(source_dir, Arc::new(source)).await?);
-    let state = AppState::new(store, Arc::new(config), DataDictionary::new());
+    let state = AppState::new(store.clone(), Arc::new(config), DataDictionary::new());
     state.reload();
     let report = export_dictionary(&state).await?;
     info!(?report);
+    // Betrieb nur im Speicher: Schema-Migration und evtl. Schreibvorgaenge persistieren.
+    store.persist()?;
     Ok(())
 }

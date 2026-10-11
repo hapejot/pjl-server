@@ -37,6 +37,7 @@ async fn main() -> anyhow::Result<()> {
         &json!({"ID": cust_schmidt, "Name": "Schmidt AG"}),
     ).await?;
     store.draft_activate(CUSTOMERS, &EntityKey::new(cust_schmidt, false)).await?;
+    store.persist()?;
 
     store.create_entity(
         ORDERS,

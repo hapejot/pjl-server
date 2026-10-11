@@ -40,6 +40,8 @@ impl Harness for RelationalHarness {
     }
 
     async fn reopen(&self) -> Option<Self::Store> {
+        // Betrieb nur im Speicher: der Stand muss vor dem Neuoeffnen auf die Platte.
+        self.store.persist().expect("persist vor reopen");
         Some(open(self.dir.path()).await)
     }
 }

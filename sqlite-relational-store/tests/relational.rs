@@ -377,6 +377,7 @@ async fn additive_migration_adds_columns_and_keeps_data() {
                 &json!({"ID": uuid(1), "IsActiveEntity": true, "Name": "alt"}),
             ).await
             .unwrap();
+        store.persist().unwrap();
     }
 
     let store = RelationalStore::open(
@@ -400,8 +401,9 @@ async fn additive_migration_adds_columns_and_keeps_data() {
 async fn destructive_changes_are_reported_not_applied() {
     let dir = TempDir::new().unwrap();
     {
-        RelationalStore::open(dir.path(), Arc::new(StaticSchema::with_revision(schema_v2(), 2))).await
+        let store = RelationalStore::open(dir.path(), Arc::new(StaticSchema::with_revision(schema_v2(), 2))).await
             .expect("v2");
+        store.persist().unwrap();
     }
     // Zurueck auf v1: 'Note' ist im Schema weg, in der Datenbank noch da.
     let store =

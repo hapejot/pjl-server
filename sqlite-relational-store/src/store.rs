@@ -18,7 +18,7 @@ use rusqlite::backup::Backup;
 use rusqlite::{params_from_iter, Connection};
 use serde_json::{json, Map, Value};
 use std::backtrace::Backtrace;
-use tracing::{debug, info, trace};
+use tracing::*;
 use uuid::Uuid;
 
 use crate::catalog::SqliteCatalog;
@@ -108,18 +108,6 @@ pub struct RelationalStore {
     path: Option<PathBuf>,
 }
 
-impl Drop for RelationalStore {
-    fn drop(&mut self) {
-        if let Err(e) = self.persist() {
-            // Drop kann keinen Fehler zurückgeben -> loggen
-            eprintln!(
-                "RelationalStore: Persistieren nach {:?} fehlgeschlagen: {e}",
-                self.path
-            );
-        }
-    }
-}
-
 impl RelationalStore {
     /// Oeffnet `<root>/data.sqlite` und bringt die Datenbank auf den Stand des
     /// Schemas.
@@ -132,12 +120,14 @@ impl RelationalStore {
         let path = root.join("data.sqlite");
         // let conn = Connection::open(&path).map_err(|e| sql_err!(Metadata, e))?;
         let mut conn = Connection::open_in_memory().map_err(|e| sql_err!(Metadata, e))?;
+        info!("created in-memory database");
         if path.exists() {
             let disk = Connection::open(&path).map_err(|e| sql_err!(Metadata, e))?;
             let backup = Backup::new(&disk, &mut conn).map_err(|e| sql_err!(Metadata, e))?;
             backup
                 .run_to_completion(256, Duration::ZERO, None)
                 .map_err(|e| sql_err!(Metadata, e))?;
+            info!("loaded backup from {} into memory", path.display());
         }
         Self::from_connection(conn, schema_source, Some(path)).await
     }
@@ -791,20 +781,34 @@ impl RelationalStore {
         Ok(())
     }
 
-    fn persist(&self) -> anyhow::Result<()> {
-        // Erst in Temp-Datei, dann atomar umbenennen -> keine halbe Datei bei Absturz
-        if let Some(path) = &self.path {
-            let tmp = path.with_extension("db.tmp");
-            let conn = self.conn.try_lock().unwrap();
+    /// Schreibt den In-Memory-Stand auf die Platte (`<root>/data.sqlite`).
+    ///
+    /// Der Betrieb laeuft ausschliesslich im Speicher; diese Funktion ist der
+    /// einzige Weg, Aenderungen dauerhaft zu machen. Aufrufer (Shutdown,
+    /// Import) muessen sie selbst ausfuehren. Ohne Dateipfad ist sie ein No-op.
+    ///
+    /// Die Datei wird zuerst als `data.sqlite.tmp` geschrieben und dann atomar
+    /// umbenannt, damit ein Abbruch keine halbe Datenbank hinterlaesst.
+    pub fn persist(&self) -> anyhow::Result<()> {
+        let Some(path) = &self.path else {
+            warn!("no path specified for persisting the database");
+            return Ok(());
+        };
+        let tmp = path.with_extension("sqlite.tmp");
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow::anyhow!("store lock poisoned"))?;
+        // Alte Temp-Datei aus einem abgebrochenen Lauf entfernen.
+        let _ = fs::remove_file(&tmp);
+        {
             let mut disk = Connection::open(&tmp)?;
-            {
-                let backup = Backup::new(&*conn, &mut disk)?;
-                backup.run_to_completion(256, Duration::ZERO, None)?;
-            }
-            drop(disk);
-            fs::rename(&tmp, &path)
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+            let backup = Backup::new(&*conn, &mut disk)?;
+            backup.run_to_completion(256, Duration::ZERO, None)?;
+            info!("memory database persisted to {}", tmp.display());
         }
+        fs::rename(&tmp, path)?;
+        info!("file {} renamed from ", path.display());
         Ok(())
     }
 }

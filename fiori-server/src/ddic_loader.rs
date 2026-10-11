@@ -11,7 +11,7 @@ use spec::{
     app::App, data_dictionary::DataDictionary, package::Package, EntitySpec, FieldSpec,
     Relationship,
 };
-use tracing::{debug, info, warn};
+use tracing::*;
 
 const DEFAULT_PACKAGE: &str = "core";
 

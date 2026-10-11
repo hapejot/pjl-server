@@ -101,6 +101,11 @@ pub struct Cli {
     /// Entwicklung ohne Proxy moeglich bleibt.
     #[arg(long, env = "AUTH_REQUIRED")]
     pub auth_required: bool,
+
+    /// PostgreSQL-Verbindung fuer den Store (`postgres://user:pw@host/db`).
+    /// Ohne Angabe laeuft der SQLite-Store in `DATA_DIR`.
+    #[arg(long, env = "STORE_PG_URL")]
+    pub store_pg_url: Option<String>,
 }
 
 impl Cli {
@@ -125,6 +130,7 @@ impl Cli {
             export_metamodel: self.export_metamodel,
             auth_user_header: self.auth_user_header,
             auth_required: self.auth_required,
+            store_pg_url: self.store_pg_url,
         }
     }
 }
@@ -144,6 +150,8 @@ pub struct ServerConfig {
     pub export_metamodel: bool,
     pub auth_user_header: String,
     pub auth_required: bool,
+    /// Ziel-Datenbank des Stores. `None`: SQLite in `data_dir`.
+    pub store_pg_url: Option<String>,
 }
 
 impl ServerConfig {
@@ -170,6 +178,7 @@ impl ServerConfig {
             export_metamodel: false,
             auth_user_header: "X-Forwarded-User".into(),
             auth_required: false,
+            store_pg_url: None,
         }
     }
 }

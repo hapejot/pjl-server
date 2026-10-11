@@ -19,6 +19,7 @@ use data_store::{DraftDataStore, Schema, SchemaSource, StaticSchema};
 use spec::data_dictionary::DataDictionary;
 use spec_schema::DdicSchemaSource;
 use sqlite_relational_store::RelationalStore;
+use postgres_relational_store::PostgresStore;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::info;
 
@@ -41,8 +42,8 @@ pub async fn run_with(
 
     let base = load_dictionary(&config)?;
     let schema_source = schema_source(&config, &base)?;
-    let relational = open_store(&config, schema_source).await?;
-    let store = wrap_store(&config, relational.clone())?;
+    let (inner, sqlite) = open_store(&config, schema_source).await?;
+    let store = wrap_store(&config, inner)?;
 
     let state = AppState::new(store, config.clone(), base).with_extensions(extensions);
     state.reload();
@@ -58,12 +59,15 @@ pub async fn run_with(
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 
-    // Der Store laeuft nur im Speicher. Nach dem Stopp der Anfragen wird der
-    // Stand auf die Platte geschrieben, bevor der Prozess endet.
-    relational
-        .persist()
-        .context("cannot persist store on shutdown")?;
-    info!("store persisted to '{}'", config.data_dir.display());
+    // Der SQLite-Store laeuft nur im Speicher. Nach dem Stopp der Anfragen
+    // wird der Stand auf die Platte geschrieben, bevor der Prozess endet.
+    // Postgres ist dauerhaft und braucht diesen Schritt nicht.
+    if let Some(sqlite) = sqlite {
+        sqlite
+            .persist()
+            .context("cannot persist store on shutdown")?;
+        info!("store persisted to '{}'", config.data_dir.display());
+    }
     Ok(())
 }
 
@@ -154,23 +158,36 @@ fn schema_source(
     Ok(Arc::new(source))
 }
 
+/// Oeffnet den Store. Ist `STORE_PG_URL` gesetzt, laeuft er in PostgreSQL;
+/// sonst im SQLite-Speicher unter `DATA_DIR`.
+///
+/// Der zweite Rueckgabewert ist nur beim SQLite-Store gesetzt, weil nur der
+/// den Stand beim Beenden auf die Platte schreiben muss.
 async fn open_store(
     config: &ServerConfig,
     schema: Arc<dyn SchemaSource>,
-) -> anyhow::Result<Arc<RelationalStore>> {
+) -> anyhow::Result<(Arc<dyn DraftDataStore>, Option<Arc<RelationalStore>>)> {
+    if let Some(url) = &config.store_pg_url {
+        let store = PostgresStore::connect(url, schema)
+            .await
+            .context("cannot open postgres store (STORE_PG_URL)")?;
+        info!("store in PostgreSQL (persistent, no local file)");
+        return Ok((Arc::new(store), None));
+    }
     std::fs::create_dir_all(&config.data_dir)
         .with_context(|| format!("cannot create data dir '{}'", config.data_dir.display()))?;
     let store = RelationalStore::open(config.data_dir.clone(), schema)
         .await
         .with_context(|| format!("cannot open store '{}'", config.data_dir.display()))?;
     info!("store at '{}' (in-memory, persisted on shutdown)", config.data_dir.display());
-    Ok(Arc::new(store))
+    let store = Arc::new(store);
+    Ok((store.clone(), Some(store)))
 }
 
 /// Haengt die modusabhaengigen Wrapper um den Store.
 fn wrap_store(
     config: &ServerConfig,
-    store: Arc<RelationalStore>,
+    store: Arc<dyn DraftDataStore>,
 ) -> anyhow::Result<Arc<dyn DraftDataStore>> {
     match config.mode {
         // Nur beim Modellieren sinnvoll: eine neue Entitaet bekommt sofort

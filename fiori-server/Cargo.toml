@@ -14,6 +14,7 @@ handlebars = "6.3"
 multer = "3.1.0"
 odata = { version = "0.1.0", path = "../odata" }
 odata_yaml_store = { version = "0.1.0", path = "../odata-yaml-store" }
+postgres-relational-store = { version = "0.1.0", path = "../postgres-relational-store" }
 quick-xml = { version = "0.41.0", features = ["serde", "serialize"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"

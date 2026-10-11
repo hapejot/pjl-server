@@ -390,6 +390,48 @@ impl DataDictionary {
             self.active.insert(active.name.clone(), active);
         }
     }
+    /// Prueft die Listenansichten aller Entitaeten gegen den aktivierten Stand.
+    ///
+    /// Regeln: Ansichtsnamen eindeutig pro Entitaet, ohne `#` und Leerzeichen;
+    /// mindestens eine Spalte; keine doppelten Spalten; jede Spalte ist ein
+    /// Atom oder eine einwertige Navigation, deren Ziel ein Feld `name` hat.
+    /// Sammelnavigationen sind als Spalte nicht zulaessig.
+    pub fn validate_list_views(&self) -> Result<(), String> {
+        let mut active = self.clone();
+        active.activate();
+
+        for entity in &self.entities {
+            let mut seen_names: Vec<&str> = Vec::new();
+            for view in entity.list_views() {
+                let ctx = format!("{}.list_views['{}']", entity.name(), view.name);
+                if view.name.trim().is_empty()
+                    || view.name.contains('#')
+                    || view.name.chars().any(char::is_whitespace)
+                {
+                    return Err(format!("{ctx}: ungueltiger Ansichtsname"));
+                }
+                if seen_names.contains(&view.name.as_str()) {
+                    return Err(format!("{ctx}: Ansichtsname doppelt"));
+                }
+                seen_names.push(&view.name);
+                if view.columns.is_empty() {
+                    return Err(format!("{ctx}: keine Spalten"));
+                }
+
+                let mut seen_cols: Vec<&str> = Vec::new();
+                for col in &view.columns {
+                    if seen_cols.contains(&col.as_str()) {
+                        return Err(format!("{ctx}: Spalte '{col}' doppelt"));
+                    }
+                    seen_cols.push(col);
+                    check_list_column(&active, entity.name(), col)
+                        .map_err(|e| format!("{ctx}: {e}"))?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn dump(&self) {
         println!("==== Apps ===================================");
         for app in self.apps.iter() {
@@ -499,3 +541,128 @@ mod tests {
         );
     }
 }
+
+/// Prueft eine Listenspalte `col` der Entitaet `entity` (aktivierter Stand).
+fn check_list_column(active: &DataDictionary, entity: &str, col: &str) -> Result<(), String> {
+    let e = active
+        .active_entity(entity)
+        .ok_or_else(|| format!("Entitaet '{entity}' nicht aktiv"))?;
+    let field = e
+        .fields()
+        .find(|f| f.name() == col)
+        .ok_or_else(|| format!("Feld '{col}' existiert nicht"))?;
+    match field {
+        FieldSpec::Atom { .. } => Ok(()),
+        FieldSpec::Lookup {
+            entity: target,
+            collection: false,
+            ..
+        } => {
+            let has_name = active
+                .active_entity(target)
+                .is_some_and(|t| t.fields().any(|f| f.name() == "name"));
+            if has_name {
+                Ok(())
+            } else {
+                Err(format!("Ziel '{target}' von '{col}' hat kein Feld 'name'"))
+            }
+        }
+        FieldSpec::Lookup { .. } => Err(format!(
+            "'{col}' ist eine Sammelnavigation und kann keine Listenspalte sein"
+        )),
+        FieldSpec::Measure { .. } => Err(format!("Measure '{col}' wird nicht als Spalte unterstuetzt")),
+    }
+}
+
+#[cfg(test)]
+mod list_view_tests {
+    use super::*;
+    use crate::package::Package;
+    use crate::ListView;
+
+    fn atom(name: &str) -> FieldSpec {
+        FieldSpec::Atom {
+            name: name.into(),
+            label: name.into(),
+            edm_type: "Edm.String".into(),
+            package: None,
+            max_length: None,
+            precision: None,
+            scale: None,
+            computed: false,
+            immutable: false,
+            value_list: None,
+        }
+    }
+
+    /// Agent 1:n Video (Video.agent einwertig), Video 1:n Tag (Video._Tags Sammelnavigation).
+    fn ddic(views: Vec<ListView>) -> DataDictionary {
+        let mut ddic = DataDictionary::empty();
+        ddic.add_package(Package::new("core"));
+        ddic.add_entity(EntitySpec::new("Agent", "core", "Agents").field(atom("name")));
+        let mut video = EntitySpec::new("Video", "core", "Videos")
+            .field(atom("name"))
+            .field(atom("file_size"));
+        for v in views {
+            video = video.list_view(v);
+        }
+        ddic.add_entity(video);
+        ddic.add_entity(EntitySpec::new("Tag", "core", "Tags").field(atom("name")));
+        ddic.add_relationship(
+            Relationship::new("videos_agent_id", "core")
+                .with_one("Agent", "_Videos")
+                .with_many("Video", "agent"),
+        );
+        ddic.add_relationship(
+            Relationship::new("tags_video_id", "core")
+                .with_one("Video", "_Tags")
+                .with_many("Tag", "video"),
+        );
+        ddic
+    }
+
+    #[test]
+    fn valid_views_pass() {
+        let d = ddic(vec![
+            ListView::new("default", &["name", "agent", "file_size"]),
+            ListView::new("review", &["file_size"]),
+        ]);
+        assert!(d.validate_list_views().is_ok());
+    }
+
+    #[test]
+    fn unknown_column_is_rejected() {
+        let d = ddic(vec![ListView::new("default", &["nope"])]);
+        let err = d.validate_list_views().unwrap_err();
+        assert!(err.contains("'nope' existiert nicht"), "{err}");
+    }
+
+    #[test]
+    fn to_many_navigation_is_rejected_as_column() {
+        let d = ddic(vec![ListView::new("default", &["_Tags"])]);
+        let err = d.validate_list_views().unwrap_err();
+        assert!(err.contains("Sammelnavigation"), "{err}");
+    }
+
+    #[test]
+    fn duplicate_view_name_and_column_are_rejected() {
+        let d = ddic(vec![
+            ListView::new("default", &["name"]),
+            ListView::new("default", &["name"]),
+        ]);
+        assert!(d.validate_list_views().unwrap_err().contains("doppelt"));
+
+        let d = ddic(vec![ListView::new("x", &["name", "name"])]);
+        assert!(d.validate_list_views().unwrap_err().contains("doppelt"));
+    }
+
+    #[test]
+    fn invalid_name_and_empty_columns_are_rejected() {
+        let d = ddic(vec![ListView::new("a#b", &["name"])]);
+        assert!(d.validate_list_views().unwrap_err().contains("Ansichtsname"));
+
+        let d = ddic(vec![ListView::new("x", &[])]);
+        assert!(d.validate_list_views().unwrap_err().contains("keine Spalten"));
+    }
+}
+

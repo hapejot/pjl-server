@@ -96,27 +96,6 @@ impl AtomValueList {
     }
 }
 
-/// Presentation overrides for a field. All fields are optional — `None` means
-/// "use smart defaults" (non-computed non-Guid fields visible in list & form,
-/// form_group defaults to "General", list order follows definition order).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct PresentationOverrides {
-    /// Field appears as filter control in the list header bar.
-    pub searchable: Option<bool>,
-    /// Field appears as a column in the list/table view.
-    pub show_in_list: Option<bool>,
-    /// Column order in the list (ascending).
-    pub list_sort_order: Option<u32>,
-    /// Responsive table priority ("High", "Medium", "Low").
-    pub list_importance: Option<String>,
-    /// Path to a criticality indicator field (e.g. "StatusCriticality").
-    pub criticality_path: Option<String>,
-    /// FieldGroup qualifier — groups this field into a form section.
-    pub form_group: Option<String>,
-    /// Lookup
-    pub lookup: Option<String>,
-}
-
 /// Suffix appended to a field name when a synthetic single-value / key alias is needed
 /// (e.g. a many-to-one relationship's local key field `Order_ID`). One authoritative
 /// source so no caller hard-codes the string.
@@ -150,8 +129,6 @@ pub enum FieldSpec {
         immutable: bool,
         /// Optional value help (dropdown/dialog).
         value_list: Option<AtomValueList>,
-        /// UI presentation overrides.
-        presentation: PresentationOverrides,
     },
     /// Amount/quantity with a unit/currency companion field.
     /// Generates `Org.OData.Measures.V1.ISOCurrency` or `.Unit` annotation.
@@ -166,8 +143,6 @@ pub enum FieldSpec {
         unit_field: String,
         /// Whether this is a currency amount or a physical quantity.
         kind: MeasureKind,
-        /// UI presentation overrides.
-        presentation: PresentationOverrides,
     },
 }
 impl std::fmt::Display for FieldSpec {
@@ -202,7 +177,6 @@ impl FieldSpec {
             computed: false,
             immutable: false,
             value_list: None,
-            presentation: PresentationOverrides::default(),
         }
     }
 
@@ -218,7 +192,6 @@ impl FieldSpec {
             computed: false,
             immutable: false,
             value_list: None,
-            presentation: PresentationOverrides::default(),
         }
     }
 
@@ -242,7 +215,6 @@ impl FieldSpec {
             computed: false,
             immutable: false,
             value_list: None,
-            presentation: PresentationOverrides::default(),
         }
     }
 
@@ -255,7 +227,6 @@ impl FieldSpec {
             scale: None,
             unit_field: unit_field.into(),
             kind,
-            presentation: PresentationOverrides::default(),
         }
     }
 
@@ -271,33 +242,6 @@ impl FieldSpec {
     pub fn immutable(mut self) -> Self {
         if let FieldSpec::Atom { immutable, .. } = &mut self {
             *immutable = true;
-        }
-        self
-    }
-
-    pub fn form_group(mut self, group: &str) -> Self {
-        match &mut self {
-            FieldSpec::Atom { presentation, .. } => presentation.form_group = Some(group.into()),
-            FieldSpec::Measure { presentation, .. } => presentation.form_group = Some(group.into()),
-            _ => todo!(),
-        }
-        self
-    }
-
-    pub fn searchable(mut self) -> Self {
-        match &mut self {
-            FieldSpec::Atom { presentation, .. } => presentation.searchable = Some(true),
-            FieldSpec::Measure { presentation, .. } => presentation.searchable = Some(true),
-            _ => todo!(),
-        }
-        self
-    }
-
-    pub fn show_in_list(mut self) -> Self {
-        match &mut self {
-            FieldSpec::Atom { presentation, .. } => presentation.show_in_list = Some(true),
-            FieldSpec::Measure { presentation, .. } => presentation.show_in_list = Some(true),
-            _ => todo!(),
         }
         self
     }
@@ -355,33 +299,6 @@ impl FieldSpec {
             FieldSpec::Lookup { .. } => "Edm.Guid",
         }
     }
-
-    /// Returns the presentation overrides regardless of variant.
-    pub fn presentation(&self) -> &PresentationOverrides {
-        match self {
-            FieldSpec::Atom { presentation, .. } => presentation,
-            FieldSpec::Measure { presentation, .. } => presentation,
-            _ => todo!(),
-        }
-    }
-
-    pub fn lookup(&mut self, arg: &str) {
-        match self {
-            FieldSpec::Atom { presentation, .. } => {
-                *presentation = PresentationOverrides {
-                    searchable: None,
-                    show_in_list: None,
-                    list_sort_order: None,
-                    list_importance: None,
-                    criticality_path: None,
-                    form_group: None,
-                    lookup: Some(arg.into()),
-                }
-            }
-            FieldSpec::Measure { .. } => todo!(),
-            _ => todo!(),
-        }
-    }
 }
 
 /// Application-level entity specification — describes an entity's own fields and header layout.
@@ -403,6 +320,41 @@ pub struct EntitySpec {
     /// The entity's own fields (leaves). FK fields from Relationships are auto-generated
     /// and should NOT be declared here.
     pub fields: Vec<FieldSpec>,
+
+    /// Benannte Listenansichten (Spaltenauswahl). Leer = Standard (nur `name`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub list_views: Vec<ListView>,
+}
+
+/// Eine benannte Listenansicht einer Entitaet.
+///
+/// `name = "default"` ist die Standardansicht (`UI.LineItem` ohne Qualifier).
+/// Jede andere Ansicht erzeugt `UI.LineItem#<name>` und `UI.PresentationVariant#<name>`.
+/// `role` ist vorbereitet fuer eine rollenbasierte Auswahl; heute ohne Wirkung.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ListView {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    /// Geordnete Spalten. Eintraege sind Feldnamen: Atome (`file_size`) oder
+    /// einwertige Navigationen (`agent`, dargestellt als `agent/name`).
+    pub columns: Vec<String>,
+}
+
+impl ListView {
+    pub const DEFAULT: &'static str = "default";
+
+    pub fn new(name: impl Into<String>, columns: &[&str]) -> Self {
+        Self {
+            name: name.into(),
+            role: None,
+            columns: columns.iter().map(|c| c.to_string()).collect(),
+        }
+    }
+
+    pub fn is_default(&self) -> bool {
+        self.name == Self::DEFAULT
+    }
 }
 
 /// An explicit facet section for the Object Page.
@@ -433,7 +385,17 @@ impl EntitySpec {
             package: package.into(),
             type_name_plural: type_name_plural.into(),
             fields: vec![],
+            list_views: vec![],
         }
+    }
+
+    pub fn list_view(mut self, view: ListView) -> Self {
+        self.list_views.push(view);
+        self
+    }
+
+    pub fn list_views(&self) -> &[ListView] {
+        &self.list_views
     }
 
     pub fn field(mut self, fld: FieldSpec) -> Self {

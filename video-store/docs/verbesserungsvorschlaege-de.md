@@ -112,6 +112,17 @@ für Schreibzugriffe übernehmen.
 - **Vorschlag**: Generisch im Store bzw. Import-Schicht des fiori-server anbieten, sobald ein
   zweiter Anwendungsfall entsteht. Dann muss nicht jede Erweiterung das Problem neu lösen.
 
+### 3.6 `$expand` liefert in Abfragen inkonsistent `null` (Priorität hoch, Aufwand M)
+
+- **Beleg**: `VideoTagSet?$expand=tag($select=name)&$select=ID` lieferte `tag: null`, obwohl der
+  Tag existiert. Dieselbe Navigation mit `$select=ID,tag_ID,name` funktioniert. Auch
+  `VideoSet/_VideoTags` mit verschachteltem Expand lieferte Zeilen mit `IsActiveEntity: false`
+  trotz `IsActiveEntity eq true`-Filter.
+- **Wirkung**: Anzeige-Spalten über Navigationen (z. B. Tag-Name in der Object Page) können leer
+  bleiben. Der `$filter` auf `IsActiveEntity` wird offenbar nicht konsistent angewendet.
+- **Vorschlag**: Den Expand-Pfad im Server mit Tests absichern (Draft und aktiv, mit und ohne
+  `$select`), bevor Filter- und Anzeigelogik darauf aufsetzen.
+
 ### 3.5 Zeitstempel-Typ als Feldattribut (Priorität niedrig, Aufwand M)
 
 - **Vorschlag**: Mikrosekunden bleiben im Store erhalten, die Anzeige kürzt. Heute gehen sie

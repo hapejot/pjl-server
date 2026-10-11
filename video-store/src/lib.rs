@@ -43,4 +43,6 @@
 pub mod import;
 pub mod introspect;
 pub mod map;
+pub mod tag_index;
+pub mod tags;
 pub mod thumbnails;

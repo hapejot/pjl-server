@@ -62,11 +62,11 @@ pub const NAME_SOURCE: &[(&str, &str)] = &[("videos", "file_name"), ("scenes", "
 /// Feldnamen des Modells (Atome oder einwertige Navigationen). Die Ansicht
 /// `default` ist die Standardtabelle. Pflege hier, nicht in `ddic.json`: die Datei
 /// wird bei jeder Migration neu erzeugt.
-pub const LIST_VIEWS: &[(&str, &str, &[&str])] = &[(
-    "videos",
-    "default",
-    &["name", "file_size", "scene", "agent"],
-)];
+pub const LIST_VIEWS: &[(&str, &str, &[&str])] = &[
+    ("videos", "default", &["name", "file_size", "scene", "agent"]),
+    // Tag-Zuordnungen zeigen den Tag-Namen (Navigation `tag` -> `tag/name`) statt der IDs.
+    ("video_tags", "default", &["tag", "source"]),
+];
 
 /// Wie der Primaerschluessel einer Quelltabelle in die Store-ID uebergeht.
 #[derive(Debug, Clone, PartialEq, Eq)]

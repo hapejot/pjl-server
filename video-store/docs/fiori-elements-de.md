@@ -634,6 +634,35 @@ Zellen-Fragment `fragments/PreviewColumn.fragment.xml`:
   sonst kann ein Client die Identität selbst vorgeben. Die Runtime darf außerdem nur über den
   Proxy erreichbar sein (kein direkter Port nach außen).
 
+### 10.13 Tag-Facetten (Index)
+
+* `video-store/src/tag_index.rs`: In-Memory-Index. Pro Tag eine sortierte Video-Liste, pro Video
+  eine sortierte Tag-Liste. Die Auswahl ist UND-verknüpft. Facetten sind nur Tags mit mindestens
+  einem Treffer zur Auswahl, absteigend nach Trefferzahl.
+* `video-store/src/tags.rs`: Endpunkt `GET /ext/video/tags/facets?selected=<id>,<id>&top=20`.
+  Antwort `{ "matches": n, "tags": [{ "id", "name", "count" }] }`. `503` solange der Index lädt,
+  `400` bei unbekannter Tag-ID.
+* Tags mit `visible = false` werden beim Aufbau ausgeschlossen, samt ihren Zuordnungen. Sie
+  erscheinen nicht als Facette und sind nicht wählbar (`400`). Fehlt das Feld, gilt der Tag als sichtbar.
+* Der Index wird beim Start im Hintergrund aus `VideoTagSet` und `TagSet` aufgebaut. Änderungen
+  an Tag-Zuordnungen wirken erst nach Neustart.
+* Lasttest (100.000 Videos, 1,5 Mio Zuordnungen, Release): Aufbau ca. 2 s; Facetten ohne Auswahl
+  aus der vorberechneten Rangliste unter 1 ms; eine Auswahl ca. 10 ms; zwei Auswahl unter 1 ms.
+  Ausführen mit `cargo test -p video-store --release benchmark_production_scale -- --ignored --nocapture`.
+
+### 10.14 Tag-Suche (eigene Seite)
+
+* Seite: `/ext/video/tagsearch/` (`video-store/tagsearch/index.html`, `App.js`). Eigenständige
+  UI5-Anwendung mit sap.m, lädt UI5 vom CDN (`1.139.0`).
+* Tag-Auswahl (MultiComboBox) mit den Top-20-Facetten. Gewählte Tags bleiben sichtbar.
+  Die Auswahl ist UND-verknüpft. Jede Änderung lädt Facetten und Trefferliste neu.
+* Trefferliste über `GET /ext/video/tags/videos?selected=<ids>&skip=0&top=100`. Sortiert nach Name,
+  seitenweise (Button "Weitere Videos laden"). Vorschau je Zeile über `/ext/video/thumbnail/<ID>/0`.
+* **Warum nicht OData-Filter**: `_VideoTags/any(...)` läuft im Store ohne Index über ca. 1,6 Mio
+  Zuordnungen. Lokaler Test mit 2 Tags: über 120 s ohne Antwort. Deshalb liefert der Index die Liste.
+* Konsistenz: Trefferzahl der Liste und `matches` der Facetten kommen aus derselben Berechnung.
+* Die Seite ist vorerst nicht im Launchpad. Verlinkung ist ein offener Punkt.
+
 ### 10.11 Grenzen
 
 * Fragmente und Routen sind zur Compile-Zeit eingebettet. Änderungen erfordern einen Rebuild.

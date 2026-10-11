@@ -5,6 +5,7 @@ use fiori_server::config::{ServerConfig, ServerMode};
 use fiori_server::server;
 use tracing::{error, info};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use video_store::tags::VideoTagFacets;
 use video_store::thumbnails::VideoThumbnails;
 
 #[tokio::main]
@@ -16,7 +17,10 @@ async fn main() -> std::process::ExitCode {
 
     let config = ServerConfig::parse(ServerMode::Runtime);
     let extensions: fiori_server::extension::Extensions =
-        vec![std::sync::Arc::new(VideoThumbnails::from_env())];
+        vec![
+            std::sync::Arc::new(VideoThumbnails::from_env()),
+            std::sync::Arc::new(VideoTagFacets::new()),
+        ];
     match server::run_with(config, extensions).await {
         Ok(()) => {
             info!("runtime finished");

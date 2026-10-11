@@ -8,8 +8,9 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use anyhow::{Context, bail};
+use anyhow::{bail, Context};
 use data_store::Schema;
+use spec::app::App;
 use spec::data_dictionary::DataDictionary;
 use spec::package::Package;
 use spec::{EntitySpec, FieldSpec, Relationship};
@@ -178,6 +179,15 @@ pub fn build_model(catalog: &PgCatalog) -> anyhow::Result<Model> {
         }
     }
 
+    ddic.add_app(App::new(
+        "videos".into(),
+        "Videos".into(),
+        "Video".into(),
+        Some("List Videos".into()),
+        None,
+        Package::new(PACKAGE),
+    ));
+
     let model = Model { ddic, tables };
     // Validierung: ein Modell, das hier nicht als Schema gilt, wird nie gestartet.
     model.schema().context("Modell wird validiert")?;
@@ -262,9 +272,7 @@ fn choose_compositions(
             .filter(|f| {
                 f.on_delete == 'c'
                     && !forced_assoc.contains(&(table.name.as_str(), f.child_col.as_str()))
-                    && table
-                        .column(&f.child_col)
-                        .is_some_and(|c| !c.nullable)
+                    && table.column(&f.child_col).is_some_and(|c| !c.nullable)
             })
             .collect();
         candidates.sort_by_key(|f| table.position(&f.child_col));
@@ -336,7 +344,11 @@ fn table_map(
 
     for atom in &atoms {
         if is_reserved(&atom.name) {
-            bail!("'{}.{}' kollidiert mit einem reservierten Feld", table.name, atom.name);
+            bail!(
+                "'{}.{}' kollidiert mit einem reservierten Feld",
+                table.name,
+                atom.name
+            );
         }
     }
 
@@ -344,7 +356,9 @@ fn table_map(
     let mut navs: HashSet<String> = HashSet::new();
     for fk in fks.iter().filter(|f| f.child == table.name) {
         let nav = nav_name(&fk.child_col);
-        if !navs.insert(nav.to_lowercase()) || atoms.iter().any(|a| a.name.eq_ignore_ascii_case(&nav)) {
+        if !navs.insert(nav.to_lowercase())
+            || atoms.iter().any(|a| a.name.eq_ignore_ascii_case(&nav))
+        {
             bail!("Navigation '{nav}' auf '{}' ist mehrdeutig", table.name);
         }
         refs.push(RefMap {
@@ -380,7 +394,10 @@ fn name_source(table: &PgTable, dropped: &HashSet<String>) -> anyhow::Result<Opt
         .find(|(t, _)| *t == table.name)
         .map(|(_, c)| *c);
     let source = match (table.column("name").is_some(), override_col) {
-        (true, Some(_)) => bail!("'{}' hat eine Spalte 'name' und zusaetzlich einen NAME_SOURCE-Eintrag", table.name),
+        (true, Some(_)) => bail!(
+            "'{}' hat eine Spalte 'name' und zusaetzlich einen NAME_SOURCE-Eintrag",
+            table.name
+        ),
         (true, None) => "name",
         (false, Some(col)) => col,
         (false, None) => return Ok(None),
@@ -389,7 +406,10 @@ fn name_source(table: &PgTable, dropped: &HashSet<String>) -> anyhow::Result<Opt
         bail!("'{}': Namensquelle '{source}' fehlt", table.name);
     }
     if dropped.contains(source) {
-        bail!("'{}': Namensquelle '{source}' ist Schluessel oder Fremdschluessel", table.name);
+        bail!(
+            "'{}': Namensquelle '{source}' ist Schluessel oder Fremdschluessel",
+            table.name
+        );
     }
     Ok(Some(source.to_string()))
 }
@@ -399,12 +419,18 @@ fn key_mode(table: &PgTable) -> KeyMode {
         [single] => {
             let uuid = table.column(single).is_some_and(|c| c.udt == "uuid");
             if uuid {
-                KeyMode::Uuid { column: single.clone() }
+                KeyMode::Uuid {
+                    column: single.clone(),
+                }
             } else {
-                KeyMode::Legacy { column: single.clone() }
+                KeyMode::Legacy {
+                    column: single.clone(),
+                }
             }
         }
-        many => KeyMode::Synth { columns: many.to_vec() },
+        many => KeyMode::Synth {
+            columns: many.to_vec(),
+        },
     }
 }
 
@@ -479,10 +505,10 @@ pub fn singular(table: &str) -> String {
     };
     let last = if let Some(stem) = last.strip_suffix("ies") {
         format!("{stem}y")
-    } else if let Some(stem) = ["ches", "shes", "xes", "sses"]
-        .iter()
-        .find_map(|suffix| last.strip_suffix(suffix).map(|s| s.to_string() + &suffix[..suffix.len() - 2]))
-    {
+    } else if let Some(stem) = ["ches", "shes", "xes", "sses"].iter().find_map(|suffix| {
+        last.strip_suffix(suffix)
+            .map(|s| s.to_string() + &suffix[..suffix.len() - 2])
+    }) {
         stem
     } else if last.ends_with("ss") {
         last.to_string()

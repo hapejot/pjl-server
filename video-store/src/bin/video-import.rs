@@ -43,6 +43,8 @@ async fn main() -> anyhow::Result<()> {
     let store = RelationalStore::open(cli.data_dir.clone(), Arc::new(source)).await?;
 
     let report = import::import_all(&client, &store, &model).await?;
+    // Betrieb nur im Speicher: ohne diesen Schritt ist der Import nicht auf der Platte.
+    store.persist()?;
     let total: usize = report.written.iter().map(|(_, n)| n).sum();
     println!("imported {total} rows into {} sets", report.written.len());
     Ok(())

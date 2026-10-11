@@ -95,6 +95,8 @@ pub fn records_for_table(
                 hex_to_base64(raw)?
             } else if atom.edm == "Edm.String" {
                 as_text(raw)
+            } else if atom.edm == "Edm.DateTimeOffset" {
+                datetime_offset(raw)
             } else {
                 raw
             };
@@ -217,6 +219,115 @@ fn as_text(raw: Value) -> Value {
     match raw {
         Value::Null | Value::String(_) => raw,
         other => Value::String(other.to_string()),
+    }
+}
+
+/// `Edm.DateTimeOffset` fuer die UI5-Fiori-Elements-Oberflaeche: Postgres liefert
+/// Mikrosekunden (`2026-05-30T16:52:22.271179+02:00`), UI5 erwartet hoechstens
+/// Millisekunden. Der Bruchteil wird auf 3 Stellen gekuerzt bzw. aufgefuellt, der
+/// Offset auf `+hh:mm` gebracht. Leere Strings werden zu `null`.
+fn datetime_offset(raw: Value) -> Value {
+    let Value::String(s) = &raw else {
+        return raw;
+    };
+    let s = s.trim();
+    if s.is_empty() {
+        return Value::Null;
+    }
+    let Some(t_pos) = s.find('T') else {
+        return Value::String(s.to_string());
+    };
+    let date = &s[..t_pos];
+    let rest = &s[t_pos + 1..];
+    // Zeitteil: HH:MM:SS, optional .fraction, dann Offset (Z, +hh, +hh:mm, -hh:mm).
+    let frac_start = rest.find('.');
+    let (clock, after_clock) = match frac_start {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => {
+            let cut = rest
+                .find(|c: char| c == '+' || c == '-' || c == 'Z')
+                .unwrap_or(rest.len());
+            (&rest[..cut], &rest[cut..])
+        }
+    };
+    let (fraction, offset) = match after_clock.strip_prefix('.') {
+        Some(frac_and_rest) => {
+            let digits = frac_and_rest
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(frac_and_rest.len());
+            (&frac_and_rest[..digits], &frac_and_rest[digits..])
+        }
+        None => ("", after_clock),
+    };
+    let millis: String = if fraction.is_empty() {
+        String::new()
+    } else {
+        let mut m: String = fraction.chars().take(3).collect();
+        while m.len() < 3 {
+            m.push('0');
+        }
+        format!(".{m}")
+    };
+    let offset = normalize_offset(offset);
+    Value::String(format!("{date}T{clock}{millis}{offset}"))
+}
+
+#[cfg(test)]
+mod datetime_tests {
+    use super::*;
+
+    fn norm(s: &str) -> Value {
+        datetime_offset(Value::String(s.into()))
+    }
+
+    #[test]
+    fn microseconds_are_cut_to_millis() {
+        assert_eq!(
+            norm("2026-05-30T16:52:22.271179+02:00"),
+            Value::String("2026-05-30T16:52:22.271+02:00".into())
+        );
+    }
+
+    #[test]
+    fn short_fraction_is_padded() {
+        assert_eq!(
+            norm("2026-05-30T16:52:22.5+02:00"),
+            Value::String("2026-05-30T16:52:22.500+02:00".into())
+        );
+    }
+
+    #[test]
+    fn short_offset_is_extended() {
+        assert_eq!(
+            norm("2026-05-30T16:52:22.271179+02"),
+            Value::String("2026-05-30T16:52:22.271+02:00".into())
+        );
+    }
+
+    #[test]
+    fn utc_and_no_fraction_are_kept() {
+        assert_eq!(norm("2026-05-30T16:52:22Z"), Value::String("2026-05-30T16:52:22Z".into()));
+        assert_eq!(
+            norm("2026-05-30T16:52:22+01:00"),
+            Value::String("2026-05-30T16:52:22+01:00".into())
+        );
+    }
+
+    #[test]
+    fn empty_becomes_null() {
+        assert_eq!(norm(""), Value::Null);
+        assert_eq!(norm("   "), Value::Null);
+        assert_eq!(datetime_offset(Value::Null), Value::Null);
+    }
+}
+
+/// `+02` -> `+02:00`, `Z` bleibt, `+02:00` bleibt.
+fn normalize_offset(offset: &str) -> String {
+    match offset {
+        "" => String::new(),
+        "Z" => "Z".into(),
+        o if o.len() == 3 && (o.starts_with('+') || o.starts_with('-')) => format!("{o}:00"),
+        o => o.to_string(),
     }
 }
 

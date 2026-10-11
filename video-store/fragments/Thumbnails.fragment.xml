@@ -1,0 +1,31 @@
+<core:FragmentDefinition
+	xmlns="sap.m"
+	xmlns:core="sap.ui.core">
+	<!--
+		Thumbnail-Flow fuer die Video-Object-Page (Custom Section der Erweiterung
+		video-store, siehe src/thumbnails.rs). Die Bilder laden ueber den
+		same-origin Proxy /ext/video/thumbnail/<video_ID>/<thumbnail_index>; der
+		Proxy ermittelt die Agent-ID und holt das Bild vom Thumbnail-Dienst.
+		FlexBox mit wrap: Kacheln fliessen, keine feste Zeilenordnung.
+	-->
+	<FlexBox
+		id="videoThumbnailFlow"
+		wrap="Wrap"
+		alignItems="Start"
+		justifyContent="Start"
+		class="sapUiSmallMargin"
+		items="{
+			path: '_VideoThumbnails',
+			parameters: {
+				$orderby: 'thumbnail_index'
+			},
+			templateShareable: false
+		}">
+		<Image
+			src="{= '/ext/video/thumbnail/' + ${video_ID} + '/' + ${thumbnail_index} }"
+			alt="{= 'Thumbnail ' + ${thumbnail_index} }"
+			width="200px"
+			densityAware="false"
+			class="sapUiTinyMargin" />
+	</FlexBox>
+</core:FragmentDefinition>

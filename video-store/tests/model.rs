@@ -133,3 +133,15 @@ fn ddic_round_trips_through_json() {
     assert_eq!(back.relationships().count(), m.ddic.relationships().count());
     spec_schema::schema_from_ddic(&back).unwrap();
 }
+
+#[test]
+fn list_views_from_constant_reach_the_video_entity() {
+    let model = model();
+    let video = model.ddic.entities().into_iter().find(|e| e.name() == "Video").unwrap();
+    let views = video.list_views();
+    assert_eq!(views.len(), 1);
+    assert_eq!(views[0].name, "default");
+    assert_eq!(views[0].columns, vec!["name", "file_size", "scene", "agent"]);
+    // Die Konstante ist gegen das aktivierte Modell validiert.
+    model.ddic.validate_list_views().expect("LIST_VIEWS valide");
+}

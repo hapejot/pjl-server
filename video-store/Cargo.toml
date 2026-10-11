@@ -6,9 +6,13 @@ description = "One-shot migration of the video Postgres database into a PJL DDIC
 
 [dependencies]
 anyhow = "1.0.104"
+axum = "0.8.9"
 base64 = "0.22"
 clap = { version = "4.5", features = ["derive", "env"] }
 data-store = { version = "0.1.0", path = "../data-store" }
+fiori-server = { version = "0.1.0", path = "../fiori-server" }
+odata = { version = "0.1.0", path = "../odata" }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 serde_json = "1"
 spec = { version = "0.1.0", path = "../spec" }
 spec-schema = { version = "0.1.0", path = "../spec-schema" }
@@ -17,7 +21,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tokio-postgres = "0.7"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-uuid = { version = "1.24.0", features = ["v5"] }
+uuid = { version = "1", features = ["v5"] }
 
 [dev-dependencies]
 async-trait = "0.1"

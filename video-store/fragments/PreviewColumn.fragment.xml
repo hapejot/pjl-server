@@ -1,0 +1,15 @@
+<core:FragmentDefinition
+	xmlns="sap.m"
+	xmlns:core="sap.ui.core">
+	<!--
+		Zelle "Vorschau" in der Video-Listen-Tabelle (Custom Column). Zeigt das erste
+		Vorschaubild (thumbnail_index 0) ueber den Proxy /ext/video/thumbnail/<ID>/0.
+		Die Zeile braucht dafuer keine zusaetzliche Navigation: ${ID} ist im Kontext.
+	-->
+	<Image
+		src="{= '/ext/video/thumbnail/' + ${ID} + '/0' }"
+		alt="Vorschau"
+		width="96px"
+		densityAware="false"
+		class="sapUiTinyMarginTopBottom" />
+</core:FragmentDefinition>

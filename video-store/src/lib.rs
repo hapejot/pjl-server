@@ -43,3 +43,4 @@
 pub mod import;
 pub mod introspect;
 pub mod map;
+pub mod thumbnails;

@@ -1,6 +1,6 @@
 # Ein Image fuer beide Phasen von video-store:
 #   /app/migrate.sh      Migration (one-shot), siehe docker/migrate.sh
-#   /app/pjl-runtime     OData-Laufzeitserver
+#   /app/video-runtime   OData-Laufzeitserver (pjl-runtime + Video-Erweiterungen)
 #
 # Build-Kontext ist das Workspace-Wurzelverzeichnis (die Crates haengen per
 # path aneinander). Daher wird aus video-store/ heraus mit `context: ..` gebaut.
@@ -15,9 +15,9 @@ COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/src/app/target \
     cargo build --release -p video-store --bin video-ddic --bin video-import \
- && cargo build --release -p fiori-server --bin pjl-runtime \
+ && cargo build --release -p video-store --bin video-runtime \
  && mkdir -p /out \
- && cp target/release/video-ddic target/release/video-import target/release/pjl-runtime /out/
+ && cp target/release/video-ddic target/release/video-import target/release/video-runtime /out/
 
 ########################################
 # Stage 2: run
@@ -43,4 +43,4 @@ ENV PORT=8080 \
     EXPORT_DIR=/app/export \
     WEB_ROOT=/app/web
 EXPOSE 8080
-ENTRYPOINT ["/app/pjl-runtime"]
+ENTRYPOINT ["/app/video-runtime"]

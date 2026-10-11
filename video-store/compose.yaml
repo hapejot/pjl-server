@@ -60,7 +60,7 @@ services:
     volumes:
       - video-data:/app/data
       - video-export:/app/export:ro
-    entrypoint: ["/app/pjl-runtime"]
+    entrypoint: ["/app/video-runtime"]
     restart: unless-stopped
 
 volumes:

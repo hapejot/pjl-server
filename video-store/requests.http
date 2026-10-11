@@ -1,0 +1,11 @@
+http://nuc:3035/Service/VideoSet?$top=5
+
+####
+# Videos with the exact tag name
+http://nuc:3035/Service/VideoSet?$filter=_VideoTags/any(vt:vt/tag/name eq 'Karolynesyera')
+
+####
+# Metadata request
+http://nuc:3035/Service/$metadata
+
+

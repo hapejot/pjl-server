@@ -13,6 +13,8 @@
 //! # Abbildung
 //!
 //! * Tabelle -> Entitaet `{Singular}`, Set `{Singular}Set`.
+//! * Jede Entitaet hat ein Feld `name`: die vorhandene Spalte `name`, sonst die
+//!   Quellspalte aus [`map::NAME_SOURCE`] (umbenannt), sonst aus den Schluesseln abgeleitet.
 //! * `uuid`-PK -> `ID` unveraendert. Anderer PK -> `ID` = UUIDv5 aus
 //!   (Tabelle, Schluessel), Original als `legacy_id`. Zusammengesetzter oder
 //!   fehlender PK -> UUIDv5 aus allen PK-Werten bzw. der Zeile.

@@ -12,6 +12,7 @@ set -eu
 DATA="${DATA_DIR:-/app/data}"
 EXPORT="${EXPORT_DIR:-/app/export}"
 MARKER="$EXPORT/.migrated"
+export RUST_LOG=info
 : "${VIDEO_PG_URL:?VIDEO_PG_URL ist nicht gesetzt}"
 
 if [ "${1:-}" = "--force" ]; then

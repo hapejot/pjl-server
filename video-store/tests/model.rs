@@ -41,6 +41,16 @@ fn schema_derives_and_every_set_is_draft_enabled() {
 }
 
 #[test]
+fn every_entity_has_name_and_no_renamed_source_remains() {
+    let schema = model().schema().unwrap();
+    for set in schema.sets() {
+        assert!(set.has_column("name"), "{} ohne name", set.name);
+    }
+    assert!(!schema.set("VideoSet").unwrap().has_column("file_name"));
+    assert!(!schema.set("SceneSet").unwrap().has_column("title"));
+}
+
+#[test]
 fn cascade_on_not_null_becomes_composition_once_per_child() {
     let schema = model().schema().unwrap();
     // video_tags: video_id und tag_id cascaden; genau einer wird Komposition.

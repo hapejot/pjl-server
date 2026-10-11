@@ -47,6 +47,7 @@ pub fn catalog() -> PgCatalog {
         col("id", "uuid", false),
         col("agent_id", "uuid", false),
         col("title", "varchar", true),
+        col("file_name", "varchar", true),
         col("file_size", "int8", false),
         col("duration_seconds", "float8", true),
         col("scene_id", "text", true),

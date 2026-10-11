@@ -4,17 +4,17 @@
 //! [`records_for_table`] wandelt Zeilen in Store-Datensaetze (reine Funktion),
 //! [`import_table`] schreibt sie in Parent-vor-Kind-Reihenfolge.
 
-use anyhow::{Context, bail};
-use base64::Engine;
+use anyhow::{bail, Context};
 use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use data_store::DataStore;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use tokio_postgres::Client;
-use tracing::info;
+use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::introspect;
-use crate::map::{KEY_NAMESPACE, KeyMode, Model, TableMap};
+use crate::map::{KeyMode, Model, TableMap, KEY_NAMESPACE};
 
 #[derive(Debug, Default)]
 pub struct ImportReport {
@@ -31,6 +31,7 @@ pub async fn import_all<S: DataStore>(
     store: &S,
     model: &Model,
 ) -> anyhow::Result<ImportReport> {
+    info!("import all");
     let schema = model.schema()?;
     let order = schema
         .creation_order()
@@ -38,6 +39,7 @@ pub async fn import_all<S: DataStore>(
 
     let mut report = ImportReport::default();
     for set in order {
+        info!("import {}", set.name);
         let table = model
             .table_for_set(&set.name)
             .with_context(|| format!("kein Tabellenmapping fuer {}", set.name))?;
@@ -57,10 +59,14 @@ pub async fn write_rows<S: DataStore>(
 ) -> anyhow::Result<usize> {
     let records = records_for_table(model, table, rows)?;
     for record in &records {
-        store
+        match store
             .create_entity(&table.set, record)
             .await
-            .with_context(|| format!("{}: Zeile {} wurde abgelehnt", table.table, record["ID"]))?;
+            .with_context(|| format!("{}: Zeile {} wurde abgelehnt", table.table, record["ID"]))
+        {
+            Ok(_) => {}
+            Err(e) => error!("create entity: {e}"),
+        }
     }
     info!("{}: {} rows", table.table, records.len());
     Ok(records.len())
@@ -81,7 +87,10 @@ pub fn records_for_table(
         record.insert("IsActiveEntity".into(), Value::Bool(true));
 
         for atom in &table.atoms {
-            let raw = row.get(&atom.source).cloned().unwrap_or(Value::Null);
+            let raw = match &atom.source {
+                Some(column) => row.get(column).cloned().unwrap_or(Value::Null),
+                None => derived_name(table, row),
+            };
             let value = if atom.binary {
                 hex_to_base64(raw)?
             } else if atom.edm == "Edm.String" {
@@ -111,6 +120,23 @@ pub fn records_for_table(
     Ok(out)
 }
 
+/// `name` ohne Namensspalte: Schluessel- bzw. Fremdschluesselwerte, mit ` / ` verbunden.
+fn derived_name(table: &TableMap, row: &Map<String, Value>) -> Value {
+    let columns = table.derived_name_columns();
+    if columns.is_empty() {
+        return Value::String(Value::Object(row.clone()).to_string());
+    }
+    let parts: Vec<String> = columns
+        .iter()
+        .map(|c| match row.get(c) {
+            None | Some(Value::Null) => String::new(),
+            Some(Value::String(s)) => s.clone(),
+            Some(other) => other.to_string(),
+        })
+        .collect();
+    Value::String(parts.join(" / "))
+}
+
 /// Store-ID einer Quellzeile.
 fn identity(
     table: &TableMap,
@@ -138,7 +164,11 @@ fn identity(
             } else {
                 columns
                     .iter()
-                    .map(|c| row.get(c).map(key_text).unwrap_or_else(|| Ok(String::new())))
+                    .map(|c| {
+                        row.get(c)
+                            .map(key_text)
+                            .unwrap_or_else(|| Ok(String::new()))
+                    })
                     .collect::<anyhow::Result<Vec<_>>>()?
                     .join("\u{1f}")
             };

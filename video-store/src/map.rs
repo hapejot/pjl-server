@@ -53,6 +53,10 @@ pub const FORCE_COMPOSITION: &[(&str, &str)] = &[("video_jobs", "agent_id")];
 /// kein Kind einer Komposition sein.
 pub const FORCE_ASSOCIATION: &[(&str, &str)] = &[("video_jobs", "video_id")];
 
+/// Quellspalte, die als Feld `name` gefuehrt wird, wenn die Tabelle keine Spalte
+/// `name` hat. Sonst wird `name` aus den Schluesseln abgeleitet.
+pub const NAME_SOURCE: &[(&str, &str)] = &[("videos", "file_name"), ("scenes", "title")];
+
 /// Wie der Primaerschluessel einer Quelltabelle in die Store-ID uebergeht.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyMode {
@@ -70,8 +74,8 @@ pub enum KeyMode {
 pub struct AtomMap {
     /// Feldname im Store.
     pub name: String,
-    /// Quellspalte. Bei `legacy_id` die PK-Spalte.
-    pub source: String,
+    /// Quellspalte. `None`: `name` wird aus den Schluesseln abgeleitet.
+    pub source: Option<String>,
     pub edm: String,
     pub max_length: Option<u32>,
     pub precision: Option<u32>,
@@ -98,6 +102,17 @@ pub struct TableMap {
     pub key: KeyMode,
     pub atoms: Vec<AtomMap>,
     pub refs: Vec<RefMap>,
+}
+
+impl TableMap {
+    /// Quellspalten fuer `name` ohne Namensspalte: Schluessel, sonst Fremdschluessel.
+    pub fn derived_name_columns(&self) -> Vec<String> {
+        match &self.key {
+            KeyMode::Uuid { column } | KeyMode::Legacy { column } => vec![column.clone()],
+            KeyMode::Synth { columns } if !columns.is_empty() => columns.clone(),
+            KeyMode::Synth { .. } => self.refs.iter().map(|r| r.source.clone()).collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -282,7 +297,7 @@ fn table_map(
             dropped.insert(column.clone());
             atoms.push(AtomMap {
                 name: "legacy_id".into(),
-                source: column.clone(),
+                source: Some(column.clone()),
                 edm: "Edm.String".into(),
                 max_length: None,
                 precision: None,
@@ -294,11 +309,29 @@ fn table_map(
         KeyMode::Synth { .. } => {}
     }
 
+    let name_src = name_source(table, &dropped)?;
+    if name_src.is_none() {
+        atoms.push(AtomMap {
+            name: "name".into(),
+            source: None,
+            edm: "Edm.String".into(),
+            max_length: None,
+            precision: None,
+            scale: None,
+            binary: false,
+            immutable: false,
+        });
+    }
+
     for col in &table.columns {
         if dropped.contains(&col.name) {
             continue;
         }
-        atoms.push(atom_for(col));
+        let mut atom = atom_for(col);
+        if name_src.as_deref() == Some(col.name.as_str()) {
+            atom.name = "name".into();
+        }
+        atoms.push(atom);
     }
 
     for atom in &atoms {
@@ -339,6 +372,28 @@ fn table_map(
     })
 }
 
+/// Quellspalte fuer `name`. Eine vorhandene Spalte `name` hat Vorrang vor
+/// [`NAME_SOURCE`]. `None`: kein Quellfeld, `name` wird abgeleitet.
+fn name_source(table: &PgTable, dropped: &HashSet<String>) -> anyhow::Result<Option<String>> {
+    let override_col = NAME_SOURCE
+        .iter()
+        .find(|(t, _)| *t == table.name)
+        .map(|(_, c)| *c);
+    let source = match (table.column("name").is_some(), override_col) {
+        (true, Some(_)) => bail!("'{}' hat eine Spalte 'name' und zusaetzlich einen NAME_SOURCE-Eintrag", table.name),
+        (true, None) => "name",
+        (false, Some(col)) => col,
+        (false, None) => return Ok(None),
+    };
+    if table.column(source).is_none() {
+        bail!("'{}': Namensquelle '{source}' fehlt", table.name);
+    }
+    if dropped.contains(source) {
+        bail!("'{}': Namensquelle '{source}' ist Schluessel oder Fremdschluessel", table.name);
+    }
+    Ok(Some(source.to_string()))
+}
+
 fn key_mode(table: &PgTable) -> KeyMode {
     match table.pk.as_slice() {
         [single] => {
@@ -371,7 +426,7 @@ fn atom_for(col: &PgColumn) -> AtomMap {
     };
     AtomMap {
         name: col.name.clone(),
-        source: col.name.clone(),
+        source: Some(col.name.clone()),
         edm: edm.into(),
         max_length,
         precision,

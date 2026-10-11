@@ -54,6 +54,27 @@ fn text_key_gets_derived_id_and_legacy_id_and_consistent_references() {
 }
 
 #[test]
+fn name_is_renamed_from_source_column() {
+    let m = model();
+    let v = records_of(
+        &m,
+        "videos",
+        json!([{"id": VIDEO, "agent_id": AGENT, "file_name": "a.mp4", "file_size": 1}]),
+    );
+    assert_eq!(v[0]["name"], "a.mp4");
+    assert!(v[0].get("file_name").is_none(), "Quellspalte darf nicht bleiben");
+    let s = records_of(&m, "scenes", json!([{"id": "s-1", "title": "scene"}]));
+    assert_eq!(s[0]["name"], "scene");
+}
+
+#[test]
+fn name_is_derived_from_fk_values_without_key_or_name_column() {
+    let m = model();
+    let r = records_of(&m, "actor_tag_map", json!([{"actor_id": "a", "tag_id": "t"}]));
+    assert_eq!(r[0]["name"], "a / t");
+}
+
+#[test]
 fn derived_ids_are_deterministic() {
     let m = model();
     let a = records_of(&m, "faces", json!([{"id": 42, "name": "a"}]));
@@ -140,6 +161,19 @@ async fn full_write_in_parent_first_order_into_sqlite() {
     assert_eq!(scenes.len(), 1);
     assert_eq!(scenes[0].core_json()["legacy_id"], "s-1");
 
+    // Die Abfrage aus requests.http: Videos mit einem passenden Tag ueber
+    // die Sammelnavigation _VideoTags und den Tag-Verweis.
+    let by_tag = |tag: &str| ODataQuery {
+        filter: Some(
+            odata::query::Expr::parse(&format!(
+                "IsActiveEntity eq true and _VideoTags/any(vt: vt/tag/name eq '{tag}')"
+            ))
+            .unwrap(),
+        ),
+        ..ODataQuery::default()
+    };
+    assert_eq!(store.get_collection("VideoSet", &by_tag("action")).await.unwrap().len(), 1);
+    assert_eq!(store.get_collection("VideoSet", &by_tag("Karolynesyera")).await.unwrap().len(), 0);
 }
 
 fn active_only() -> ODataQuery {

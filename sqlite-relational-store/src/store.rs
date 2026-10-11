@@ -1,8 +1,10 @@
 //! Relationaler SQLite-Store: eine Tabelle je Entity-Set.
 
 use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use data_store::schema::{
     Association, Cardinality, EntitySet, Schema, SchemaSource, ID_COLUMN, IS_ACTIVE_COLUMN,
@@ -12,6 +14,7 @@ use data_store::{
     SqlParam, StoreError,
 };
 use odata::query::{Expr, ODataQuery};
+use rusqlite::backup::Backup;
 use rusqlite::{params_from_iter, Connection};
 use serde_json::{json, Map, Value};
 use std::backtrace::Backtrace;
@@ -105,6 +108,18 @@ pub struct RelationalStore {
     path: Option<PathBuf>,
 }
 
+impl Drop for RelationalStore {
+    fn drop(&mut self) {
+        if let Err(e) = self.persist() {
+            // Drop kann keinen Fehler zurückgeben -> loggen
+            eprintln!(
+                "RelationalStore: Persistieren nach {:?} fehlgeschlagen: {e}",
+                self.path
+            );
+        }
+    }
+}
+
 impl RelationalStore {
     /// Oeffnet `<root>/data.sqlite` und bringt die Datenbank auf den Stand des
     /// Schemas.
@@ -115,7 +130,15 @@ impl RelationalStore {
         let root = root.into();
         std::fs::create_dir_all(&root)?;
         let path = root.join("data.sqlite");
-        let conn = Connection::open(&path).map_err(|e| sql_err!(Metadata, e))?;
+        // let conn = Connection::open(&path).map_err(|e| sql_err!(Metadata, e))?;
+        let mut conn = Connection::open_in_memory().map_err(|e| sql_err!(Metadata, e))?;
+        if path.exists() {
+            let disk = Connection::open(&path).map_err(|e| sql_err!(Metadata, e))?;
+            let backup = Backup::new(&disk, &mut conn).map_err(|e| sql_err!(Metadata, e))?;
+            backup
+                .run_to_completion(256, Duration::ZERO, None)
+                .map_err(|e| sql_err!(Metadata, e))?;
+        }
         Self::from_connection(conn, schema_source, Some(path)).await
     }
 
@@ -764,6 +787,23 @@ impl RelationalStore {
                     row[&assoc.name] = Value::Array(children);
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn persist(&self) -> anyhow::Result<()> {
+        // Erst in Temp-Datei, dann atomar umbenennen -> keine halbe Datei bei Absturz
+        if let Some(path) = &self.path {
+            let tmp = path.with_extension("db.tmp");
+            let conn = self.conn.try_lock().unwrap();
+            let mut disk = Connection::open(&tmp)?;
+            {
+                let backup = Backup::new(&*conn, &mut disk)?;
+                backup.run_to_completion(256, Duration::ZERO, None)?;
+            }
+            drop(disk);
+            fs::rename(&tmp, &path)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         }
         Ok(())
     }

@@ -10,11 +10,12 @@ anyhow = "1.0.104"
 data-store = { version = "0.1.0", path = "../data-store" }
 relational-core = { version = "0.1.0", path = "../relational-core" }
 odata = { version = "0.1.0", path = "../odata" }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["backup", "bundled"] }
 serde_json = "1"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 uuid = { version = "1.24.0", features = ["serde", "v4"] }
+pathbuf = "1.0.0"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

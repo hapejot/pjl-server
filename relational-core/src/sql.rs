@@ -193,7 +193,7 @@ pub mod query {
             // Platzhalter im Fragment relativ zur laufenden Parameterliste
             // umnummerieren, damit mehrere raw-Filter kombinierbar sind.
             let mut offset = self.params.len();
-            let renumbered = renumber_placeholders(&sql, &mut offset);
+            let renumbered = renumber_placeholders(&sql, self.dialect, &mut offset);
             self.params.extend(params);
             self.raw_filters.push(renumbered);
             self
@@ -585,7 +585,7 @@ pub mod query {
                      CASE WHEN {sibling_is_draft} OR {is_draft} THEN {yes} ELSE {no} END AS {has_draft},
                      CASE WHEN {sibling_is_active} THEN {yes} ELSE {no} END AS {has_active}
                    FROM ( {base} )"#,
-                is_draft = self.dialect.bool_predicate("IsActiveEntity", false),
+                is_draft = self.dialect.bool_predicate(&quote(IS_ACTIVE_COLUMN), false),
                 sibling_is_draft = self.dialect.bool_predicate(&sibling, false),
                 sibling_is_active = self.dialect.bool_predicate(&sibling, true),
                 yes = self.dialect.bool_literal(true),
@@ -626,33 +626,37 @@ pub mod query {
         }
     }
 
-    /// Nummeriert `?N`-Platzhalter in `sql` neu, beginnend bei `*offset + 1`,
+    /// Nummeriert die Platzhalter in `sql` neu, beginnend bei `*offset + 1`,
     /// und aktualisiert `offset` auf den zuletzt verwendeten Wert. So laesst
     /// sich ein vorformuliertes Fragment sicher in eine bestehende
     /// Parameterliste einbetten.
-    fn renumber_placeholders(sql: &str, offset: &mut usize) -> String {
+    ///
+    /// Erkannt wird die Platzhalterform des Dialekts: `?N` (SQLite) bzw. `$N`
+    /// (Postgres).
+    fn renumber_placeholders(sql: &str, dialect: &dyn Dialect, offset: &mut usize) -> String {
+        let prefix = dialect
+            .placeholder(1)
+            .trim_end_matches(|c: char| c.is_ascii_digit())
+            .to_string();
         let mut result = String::with_capacity(sql.len());
-        let bytes = sql.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            if bytes[i] == b'?' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit() {
-                let start = i + 1;
-                let mut end = start;
-                while end < bytes.len() && bytes[end].is_ascii_digit() {
-                    end += 1;
-                }
-                // Original-Index wird verworfen: die relative Reihenfolge im
-                // Fragment ist massgebend, nicht der urspruengliche Wert.
-                let _original: usize = sql[start..end].parse().unwrap_or_default();
-                *offset += 1;
-                result.push('?');
-                result.push_str(&offset.to_string());
-                i = end;
-            } else {
-                result.push(bytes[i] as char);
-                i += 1;
+        let mut rest = sql;
+        while let Some(pos) = rest.find(&prefix) {
+            result.push_str(&rest[..pos]);
+            let after = &rest[pos + prefix.len()..];
+            let digits = after.bytes().take_while(|b| b.is_ascii_digit()).count();
+            if digits == 0 {
+                // Kein Platzhalter, sondern zufaellig das Praefix.
+                result.push_str(&prefix);
+                rest = after;
+                continue;
             }
+            // Original-Index wird verworfen: die relative Reihenfolge im
+            // Fragment ist massgebend, nicht der urspruengliche Wert.
+            *offset += 1;
+            result.push_str(&dialect.placeholder(*offset));
+            rest = &after[digits..];
         }
+        result.push_str(rest);
         result
     }
 
@@ -726,7 +730,7 @@ pub mod query {
             let expected = normalize(
                 r#"SELECT "ID", "IsActiveEntity", "HasActiveEntity", "HasDraftEntity", "name"
                    FROM (SELECT *,
-                       CASE WHEN "SiblingEntity/IsActiveEntity" = 0 OR IsActiveEntity = 0 THEN 1 ELSE 0 END AS "HasDraftEntity",
+                       CASE WHEN "SiblingEntity/IsActiveEntity" = 0 OR "IsActiveEntity" = 0 THEN 1 ELSE 0 END AS "HasDraftEntity",
                        CASE WHEN "SiblingEntity/IsActiveEntity" = 1 THEN 1 ELSE 0 END AS "HasActiveEntity"
                      FROM (
                        SELECT a.*,

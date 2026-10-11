@@ -9,7 +9,14 @@ M = ein bis zwei Tage, L = mehr).
 
 ## 1. Sicherheit
 
-### 1.1 Proxy ist ohne Authentifizierung erreichbar (Priorität hoch, Aufwand S bis M)
+### 1.1 Proxy ist ohne Authentifizierung erreichbar (Priorität hoch, Aufwand S bis M) — umgesetzt
+
+**Status**: Benutzer-Header (`AUTH_USER_HEADER`) wird gelesen, `AUTH_REQUIRED=true` lehnt ohne
+Header ab (`fiori-server/src/auth.rs`). Der Proxy-Teil (Caddy + oauth2-proxy) liegt außerhalb
+des Repos. Offen: Löschstatus (`deleted_at`) im Thumbnail-Endpoint prüfen; Benutzer in Audit-Logs
+für Schreibzugriffe übernehmen.
+
+**Ursprünglicher Befund**
 
 - **Beleg**: `video-store/src/thumbnails.rs`, Route `/ext/video/thumbnail/{video_id}/{n}`.
   Jeder mit Netzzugriff auf Port 3035 kann Bilder vom Thumbnail-Dienst abrufen, auch ohne Login.

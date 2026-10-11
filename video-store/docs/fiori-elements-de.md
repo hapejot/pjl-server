@@ -324,6 +324,8 @@ Der Einstieg ist jeweils `Annotations::from_entity` bzw. `from_field`.
 
 * Umgebungsvariablen: `PORT`, `DATA_DIR`, `EXPORT_DIR`, `WEB_ROOT`, `DDIC`, `RUST_LOG`,
   zusätzlich für die Video-Erweiterung `THUMBNAIL_BASE_URL` (Default `http://nuc:9000/proxy`).
+* Authentifizierung: `AUTH_USER_HEADER` (Standard `X-Forwarded-User`) und `AUTH_REQUIRED`
+  (Standard aus). Details in 10.12.
 * Das Runtime-Image startet `/app/video-runtime` (nicht mehr `pjl-runtime`). `video-runtime`
   ist `pjl-runtime` plus die Video-Erweiterungen aus Abschnitt 10.
 * `WEB_ROOT` für eigene statische Assets. Liegt dort eine App-Datei, wird sie über den
@@ -618,6 +620,19 @@ Zellen-Fragment `fragments/PreviewColumn.fragment.xml`:
 * Der Proxy holt Daten mit einem HTTP-Client. Im `video-store` ist `reqwest` (rustls) eingebunden.
 * Upstream-Adresse über Umgebungsvariable konfigurieren (`THUMBNAIL_BASE_URL`), nicht fest
   im Code.
+
+### 10.12 Authentifizierung (Auth-Proxy)
+
+* Die Runtime prüft keine Anmeldung selbst. Ein vorgeschalteter Reverse Proxy (Caddy mit
+  oauth2-proxy) authentifiziert den Benutzer und setzt einen Header mit dem Benutzernamen.
+* Der fiori-server liest den Header (`AUTH_USER_HEADER`, Standard `X-Forwarded-User`) und
+  legt ihn als `CurrentUser` in die Request-Extensions (`fiori-server/src/auth.rs`).
+* In einer Erweiterung: `user: Option<axum::Extension<fiori_server::auth::CurrentUser>>`
+  als Handler-Parameter. `user.0 .0` ist der Benutzername.
+* `AUTH_REQUIRED=true` lehnt Anfragen ohne Header mit `401` ab. Für Produktion setzen.
+* **Pflicht im Proxy**: Der Header muss von eingehenden Anfragen entfernt und neu gesetzt werden,
+  sonst kann ein Client die Identität selbst vorgeben. Die Runtime darf außerdem nur über den
+  Proxy erreichbar sein (kein direkter Port nach außen).
 
 ### 10.11 Grenzen
 

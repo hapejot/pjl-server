@@ -132,10 +132,13 @@ async fn preview_fragment() -> impl IntoResponse {
 
 async fn thumbnail(
     State(st): State<Arc<ProxyState>>,
+    user: Option<axum::Extension<fiori_server::auth::CurrentUser>>,
     Path((video_id, n)): Path<(String, u32)>,
 ) -> Result<Response, StatusCode> {
+    let user = user.map(|u| u.0 .0).unwrap_or_else(|| "-".into());
     let id = Uuid::parse_str(&video_id).map_err(|_| StatusCode::BAD_REQUEST)?;
     let agent = agent_of(&st.app, id).await.ok_or(StatusCode::NOT_FOUND)?;
+    tracing::debug!(%user, video = %id, n, "thumbnail requested");
 
     let url = format!("{}/{}/thumbnail/{}/{}", st.upstream, agent, id, n);
     let resp = st

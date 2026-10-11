@@ -90,6 +90,17 @@ pub struct Cli {
     /// mitexportieren. Standardmaessig bleibt es im Designer.
     #[arg(long, env = "EXPORT_METAMODEL")]
     pub export_metamodel: bool,
+
+    /// Header, den ein vorgeschalteter Auth-Proxy (z. B. oauth2-proxy) mit dem
+    /// angemeldeten Benutzer setzt. Der Proxy muss diesen Header von Clients
+    /// entfernen bzw. ueberschreiben, sonst kann ihn jeder selbst setzen.
+    #[arg(long, env = "AUTH_USER_HEADER", default_value = "X-Forwarded-User")]
+    pub auth_user_header: String,
+
+    /// Ohne Benutzer-Header antwortet der Server mit 401. Standard: aus, damit
+    /// Entwicklung ohne Proxy moeglich bleibt.
+    #[arg(long, env = "AUTH_REQUIRED")]
+    pub auth_required: bool,
 }
 
 impl Cli {
@@ -112,6 +123,8 @@ impl Cli {
             schema: self.schema,
             export_dir: self.export_dir,
             export_metamodel: self.export_metamodel,
+            auth_user_header: self.auth_user_header,
+            auth_required: self.auth_required,
         }
     }
 }
@@ -129,6 +142,8 @@ pub struct ServerConfig {
     pub schema: Option<PathBuf>,
     pub export_dir: PathBuf,
     pub export_metamodel: bool,
+    pub auth_user_header: String,
+    pub auth_required: bool,
 }
 
 impl ServerConfig {
@@ -153,6 +168,8 @@ impl ServerConfig {
             schema: None,
             export_dir: "export".into(),
             export_metamodel: false,
+            auth_user_header: "X-Forwarded-User".into(),
+            auth_required: false,
         }
     }
 }

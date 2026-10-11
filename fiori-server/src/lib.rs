@@ -3,6 +3,7 @@ use std::sync::{Arc, RwLock};
 use data_store::DraftDataStore;
 use spec::data_dictionary::DataDictionary;
 
+pub mod auth;
 pub mod batch;
 pub mod config;
 pub mod ddic_loader;

@@ -182,6 +182,7 @@ fn wrap_store(
 }
 
 fn router(state: AppState, config: &ServerConfig) -> Router {
+    let identity_config = std::sync::Arc::new(config.clone());
     let mut app = Router::new()
         .nest("/Service/", batch::router(srv::router(), state.clone()))
         .nest("/flp/", flp::router())
@@ -198,5 +199,9 @@ fn router(state: AppState, config: &ServerConfig) -> Router {
         app = app.merge(ext.routes(state.clone()));
     }
     app.fallback_service(ServeDir::new(&config.web_root))
+        .layer(axum::middleware::from_fn_with_state(
+            identity_config,
+            crate::auth::identity,
+        ))
         .layer(TraceLayer::new_for_http())
 }

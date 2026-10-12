@@ -29,7 +29,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: video
-      POSTGRES_PASSWORD: ${VIDEO_DB_PASSWORD:?VIDEO_DB_PASSWORD muss gesetzt sein}
+      POSTGRES_PASSWORD: video
       POSTGRES_DB: video
     volumes:
       - video-db:/var/lib/postgresql/data
@@ -48,8 +48,8 @@ services:
       target: run
     entrypoint: ["/app/migrate.sh"]
     environment:
-      VIDEO_PG_URL: ${VIDEO_PG_URL:?VIDEO_PG_URL muss gesetzt sein}
-      STORE_PG_URL: postgres://video:${VIDEO_DB_PASSWORD}@db:5432/video
+      VIDEO_PG_URL: postgres://peter:peter@nuc/xstreaming
+      STORE_PG_URL: postgres://video:video@db:5432/video
       EXPORT_DIR: /app/export
       RUST_BACKTRACE: 1
     depends_on:
@@ -74,7 +74,7 @@ services:
         condition: service_completed_successfully
     environment:
       DDIC: /app/export/ddic.json
-      STORE_PG_URL: postgres://video:${VIDEO_DB_PASSWORD}@db:5432/video
+      STORE_PG_URL: postgres://video:video@db:5432/video
       EXPORT_DIR: /app/export
       PORT: "8080"
       RUST_LOG: info

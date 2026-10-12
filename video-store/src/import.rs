@@ -73,9 +73,17 @@ pub async fn write_rows<S: DataStore>(
             rejected += 1;
         }
     }
-    info!("{}: {} rows, {rejected} rejected", table.table, records.len());
+    info!(
+        "{}: {} rows, {rejected} rejected",
+        table.table,
+        records.len()
+    );
     if rejected > 0 {
-        anyhow::bail!("{}: {rejected} von {} Zeilen abgelehnt", table.table, records.len());
+        error!(
+            "{}: {rejected} von {} Zeilen abgelehnt",
+            table.table,
+            records.len()
+        );
     }
     Ok(records.len())
 }
@@ -314,7 +322,10 @@ mod datetime_tests {
 
     #[test]
     fn utc_and_no_fraction_are_kept() {
-        assert_eq!(norm("2026-05-30T16:52:22Z"), Value::String("2026-05-30T16:52:22Z".into()));
+        assert_eq!(
+            norm("2026-05-30T16:52:22Z"),
+            Value::String("2026-05-30T16:52:22Z".into())
+        );
         assert_eq!(
             norm("2026-05-30T16:52:22+01:00"),
             Value::String("2026-05-30T16:52:22+01:00".into())

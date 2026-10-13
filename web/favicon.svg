@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#87CEEB"/>
+      <stop offset="100%" stop-color="#b8e4f9"/>
+    </linearGradient>
+    <clipPath id="tower">
+      <polygon points="26,56 22,22 42,22 38,56"/>
+    </clipPath>
+  </defs>
+  <!-- Sky -->
+  <rect width="64" height="64" rx="12" fill="url(#sky)"/>
+  <!-- Dune / Sand -->
+  <ellipse cx="32" cy="60" rx="38" ry="10" fill="#d4a84b"/>
+  <!-- Tower: red/white stripes clipped -->
+  <g clip-path="url(#tower)">
+    <rect x="20" y="22" width="24" height="34" fill="#ffffff"/>
+    <rect x="20" y="22" width="24" height="5"  fill="#c0392b"/>
+    <rect x="20" y="32" width="24" height="5"  fill="#c0392b"/>
+    <rect x="20" y="42" width="24" height="5"  fill="#c0392b"/>
+    <rect x="20" y="52" width="24" height="4"  fill="#c0392b"/>
+  </g>
+  <!-- Gallery (balcony) -->
+  <rect x="19" y="19" width="26" height="4" rx="1" fill="#2c3e50"/>
+  <!-- Lantern (glass house) -->
+  <rect x="25" y="11" width="14" height="9" rx="2" fill="#f9e784" opacity="0.9"/>
+  <rect x="25" y="11" width="14" height="9" rx="2" fill="none" stroke="#2c3e50" stroke-width="1"/>
+  <!-- Roof -->
+  <polygon points="24,11 32,5 40,11" fill="#2c3e50"/>
+  <!-- Light beams -->
+  <polygon points="39,15 58,6 58,12 39,17" fill="#f9e784" opacity="0.5"/>
+  <polygon points="25,15 6,6 6,12 25,17" fill="#f9e784" opacity="0.4"/>
+  <!-- Door -->
+  <rect x="29" y="49" width="6" height="7" rx="3" fill="#2c3e50"/>
+</svg>

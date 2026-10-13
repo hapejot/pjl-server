@@ -2857,13 +2857,13 @@ mod list_view_annotation_tests {
     #[test]
     fn views_settings_only_with_more_than_one_view() {
         let single = active_video(vec![ListView::new("default", &["name"])]);
-        assert!(crate::flp::list_views_settings(&single).is_empty());
+        assert!(crate::flp::list_views_settings(&single, &[]).is_empty());
 
         let multi = active_video(vec![
             ListView::new("review", &["title"]),
             ListView::new("default", &["name"]),
         ]);
-        let settings = crate::flp::list_views_settings(&multi);
+        let settings = crate::flp::list_views_settings(&multi, &[]);
         let paths = settings["views"]["paths"].as_array().unwrap();
         assert_eq!(paths[0]["key"], "default");
         assert_eq!(

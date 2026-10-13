@@ -1,0 +1,89 @@
+<core:FragmentDefinition
+	xmlns="sap.m"
+	xmlns:core="sap.ui.core">
+	<!--
+		Tag-Suche fuer die Video-Listenseite (Header-Facet der ListReport, siehe
+		src/tags.rs). Tags und Videos fliessen jeweils per FlexBox mit wrap: erst
+		nebeneinander, dann untereinander. Zustand liegt im Core-Modell "tagsearch"
+		(ui5/TagSearch.js), die Logik im Modul video/ext/TagSearch.
+	-->
+	<VBox class="sapUiSmallMargin" width="100%">
+		<MessageStrip
+			type="Error"
+			showIcon="true"
+			text="{tagsearch>/error}"
+			visible="{= !!${tagsearch>/error} }" />
+		<HBox alignItems="Center" justifyContent="SpaceBetween" class="sapUiTinyMarginBottom">
+			<Text text="{tagsearch>/matches} Treffer für die Auswahl" />
+			<Button
+				text="Auswahl aufheben"
+				icon="sap-icon://decline"
+				press="video.ext.TagSearch.clear"
+				visible="{= ${tagsearch>/selectedCount} > 0 }" />
+		</HBox>
+		<SearchField
+			placeholder="Tags suchen (Teil des Namens)"
+			liveChange="video.ext.TagSearch.search"
+			search="video.ext.TagSearch.search"
+			width="100%"
+			class="sapUiTinyMarginBottom" />
+		<FlexBox
+			wrap="Wrap"
+			alignItems="Start"
+			justifyContent="Start"
+			items="{tagsearch>/facets}">
+			<ToggleButton
+				text="{tagsearch>label}"
+				pressed="{tagsearch>selected}"
+				press="video.ext.TagSearch.toggle"
+				class="sapUiTinyMargin">
+				<customData>
+					<core:CustomData key="id" value="{tagsearch>id}" />
+				</customData>
+			</ToggleButton>
+		</FlexBox>
+		<FlexBox
+			wrap="Wrap"
+			alignItems="Start"
+			justifyContent="Start"
+			class="sapUiSmallMarginTop"
+			items="{tagsearch>/results}">
+			<VBox width="216px" class="sapUiTinyMargin">
+				<customData>
+					<core:CustomData key="id" value="{tagsearch>ID}" />
+				</customData>
+				<Image
+					src="{= '/ext/video/thumbnail/' + ${tagsearch>ID} + '/0' }"
+					alt="{tagsearch>name}"
+					width="200px"
+					densityAware="false"
+					press="video.ext.TagSearch.open" />
+				<Button
+					text="{tagsearch>name}"
+					type="Transparent"
+					width="200px"
+					press="video.ext.TagSearch.open" />
+				<Text text="{tagsearch>durationText}" />
+			</VBox>
+		</FlexBox>
+		<HBox class="sapUiSmallMarginTop" justifyContent="Start">
+			<Button
+				text="Treffer in der Liste anzeigen"
+				icon="sap-icon://list"
+				type="Emphasized"
+				press="video.ext.TagSearch.showInList"
+				visible="{= ${tagsearch>/matches} > 0 }"
+				class="sapUiTinyMarginEnd" />
+			<Button
+				text="Filter der Liste entfernen"
+				icon="sap-icon://clear-filter"
+				press="video.ext.TagSearch.resetList" />
+		</HBox>
+		<Button
+			text="Weitere Videos laden"
+			icon="sap-icon://navigation-down-arrow"
+			press="video.ext.TagSearch.more"
+			visible="{tagsearch>/hasMore}"
+			class="sapUiSmallMarginTop" />
+	</VBox>
+</core:FragmentDefinition>

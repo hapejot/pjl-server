@@ -1,6 +1,7 @@
 //! Tag-Facetten-Endpunkt fuer die Video-Oberflaeche.
 //!
-//! * `GET /ext/video/tags/facets?selected=<id>,<id>&top=20`
+//! * `GET /ext/video/tags/facets?selected=<id>,<id>&top=20&q=<text>`
+//!   `q` filtert die angebotenen Tags nach Name (Teilstring, ohne Gross-/Kleinschreibung).
 //!   liefert `{ "matches": n, "tags": [{ "id", "name", "count" }] }`.
 //!   `matches` ist die Anzahl Videos mit allen gewaehlten Tags, `tags` die noch
 //!   sinnvoll waehlbaren Tags (mindestens ein Treffer), absteigend nach Trefferzahl.
@@ -52,6 +53,28 @@ impl Default for VideoTagFacets {
 }
 
 impl Extension for VideoTagFacets {
+    fn ui5_modules(&self) -> Vec<String> {
+        vec!["video/ext/TagSearch".into()]
+    }
+
+    fn controller_extensions(&self) -> Vec<(String, String)> {
+        vec![(
+            "sap.fe.templates.ListReport.ListReportController".into(),
+            "video.ext.TagSearchController".into(),
+        )]
+    }
+
+    fn list_views(&self, entity: &str) -> Vec<Value> {
+        if entity != "Video" {
+            return Vec::new();
+        }
+        vec![json!({
+            "key": "TagSearch",
+            "label": "Tag-Suche",
+            "template": "video.ext.fragment.TagSearch"
+        })]
+    }
+
     fn routes(&self, app: AppState) -> Router {
         // Index im Hintergrund laden; der Server ist sofort erreichbar.
         let cell = self.index.clone();
@@ -79,6 +102,12 @@ impl Extension for VideoTagFacets {
             .route("/ext/video/tagsearch/", get(search_page))
             .route("/ext/video/tagsearch/index.html", get(search_page))
             .route("/ext/video/tagsearch/App.js", get(search_app))
+            .route("/ext/video/fragment/TagSearch.fragment.xml", get(list_fragment))
+            .route("/ext/video/TagSearch.js", get(list_module))
+            .route(
+                "/ext/video/TagSearchController.controller.js",
+                get(list_controller),
+            )
             .with_state(Arc::new(FacetState {
                 index: self.index.clone(),
             }))
@@ -87,6 +116,39 @@ impl Extension for VideoTagFacets {
 
 const SEARCH_PAGE: &str = include_str!("../tagsearch/index.html");
 const SEARCH_APP: &str = include_str!("../tagsearch/App.js");
+const LIST_FRAGMENT: &str = include_str!("../fragments/TagSearch.fragment.xml");
+const LIST_MODULE: &str = include_str!("../ui5/TagSearch.js");
+const LIST_CONTROLLER: &str = include_str!("../ui5/TagSearchController.js");
+
+async fn list_controller() -> Response {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        LIST_CONTROLLER,
+    )
+        .into_response()
+}
+
+async fn list_fragment() -> Response {
+    (
+        [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
+        LIST_FRAGMENT,
+    )
+        .into_response()
+}
+
+async fn list_module() -> Response {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        LIST_MODULE,
+    )
+        .into_response()
+}
 
 async fn search_page() -> Response {
     (
@@ -184,10 +246,12 @@ async fn facets(
     };
     let selected = parse_selected(&q);
     let top = parse_usize(&q, "top", DEFAULT_TOP, MAX_TOP).max(1);
+    let needle = q.get("q").cloned().unwrap_or_default();
 
     // Die Berechnung ist CPU-lastig; ausserhalb des Async-Threads ausfuehren.
     let index = index.clone();
-    let result = tokio::task::spawn_blocking(move || index.facets(&selected, top)).await;
+    let result =
+        tokio::task::spawn_blocking(move || index.facets_matching(&selected, top, &needle)).await;
     match result {
         Ok(Ok(r)) => Json(json!({
             "matches": r.matches,

@@ -234,6 +234,19 @@ impl TagIndex {
 
     /// Facetten zur Auswahl `selected` (Tag-IDs). `top` begrenzt die Ausgabe.
     pub fn facets(&self, selected: &[String], top: usize) -> Result<FacetResult, FacetError> {
+        self.facets_matching(selected, top, "")
+    }
+
+    /// Wie [`facets`], zusaetzlich nur Tags, deren Name `needle` enthaelt
+    /// (Gross-/Kleinschreibung egal). Leerer Suchtext = keine Einschraenkung.
+    pub fn facets_matching(
+        &self,
+        selected: &[String],
+        top: usize,
+        needle: &str,
+    ) -> Result<FacetResult, FacetError> {
+        let needle = needle.trim().to_lowercase();
+        let matches = |t: u32| needle.is_empty() || self.tag_names[t as usize].to_lowercase().contains(&needle);
         let mut sel: Vec<u32> = Vec::with_capacity(selected.len());
         for id in selected {
             let t = *self
@@ -250,6 +263,7 @@ impl TagIndex {
             let tags = self
                 .global_ranking
                 .iter()
+                .filter(|&&t| matches(t))
                 .take(top)
                 .map(|&t| self.facet(t, self.tag_videos[t as usize].len() as u32))
                 .collect();
@@ -276,6 +290,7 @@ impl TagIndex {
                     .map(|(t, c)| (t as u32, c)),
                 &sel,
                 top,
+                &matches,
             ),
         })
     }
@@ -294,12 +309,13 @@ impl TagIndex {
         result
     }
 
-    fn rank<I>(&self, counts: I, selected: &[u32], top: usize) -> Vec<Facet>
+    fn rank<I, M>(&self, counts: I, selected: &[u32], top: usize, matches: &M) -> Vec<Facet>
     where
         I: Iterator<Item = (u32, u32)>,
+        M: Fn(u32) -> bool,
     {
         let mut items: Vec<(u32, u32)> = counts
-            .filter(|(t, c)| *c > 0 && selected.binary_search(t).is_err())
+            .filter(|(t, c)| *c > 0 && selected.binary_search(t).is_err() && matches(*t))
             .collect();
         items.sort_by(|a, b| {
             b.1.cmp(&a.1)
@@ -408,6 +424,19 @@ mod tests {
     fn top_limits_the_result() {
         let r = fixture().facets(&[], 2).unwrap();
         assert_eq!(r.tags.len(), 2);
+    }
+
+    #[test]
+    fn needle_filters_offered_tags_case_insensitively() {
+        // Ohne Auswahl: nur "ta" trifft Beta und Delta
+        let r = fixture().facets_matching(&[], 20, "TA").unwrap();
+        let names: Vec<_> = r.tags.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, vec!["Beta", "Delta"]);
+        // Mit Auswahl a: Treffer v1/v2 bieten b und c; Suche "gam" -> nur Gamma
+        let r = fixture().facets_matching(&["a".into()], 20, "gam").unwrap();
+        assert_eq!(ids(&r), vec![("c".into(), 1)]);
+        // Kein Treffer
+        assert!(fixture().facets_matching(&[], 20, "zzz").unwrap().tags.is_empty());
     }
 
     #[test]

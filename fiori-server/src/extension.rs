@@ -38,6 +38,13 @@ pub trait Extension: Send + Sync {
         None
     }
 
+    /// Zusaetzliche Ansichten der ListReport-Seite (View-Leiste) der Hauptentitaet
+    /// `entity`, z. B. eine Custom-View mit eigenem Fragment:
+    /// `{"key": "...", "label": "...", "template": "ns.fragment.Name"}`.
+    fn list_views(&self, _entity: &str) -> Vec<Value> {
+        Vec::new()
+    }
+
     /// Zusaetzliche Spalten der Listen-Tabelle der Hauptentitaet `entity`.
     /// Liefert `{ "<Schluessel>": { "template": "...", "header": "...", "position": {...} } }`.
     fn list_columns(&self, _entity: &str) -> Option<Value> {
@@ -155,6 +162,11 @@ pub fn object_page_content(extensions: &[Arc<dyn Extension>], entity: &str) -> O
     } else {
         Some(json!({ "body": { "sections": sections } }))
     }
+}
+
+/// Zusaetzliche View-Eintraege aller Erweiterungen fuer die ListReport von `entity`.
+pub fn list_views(extensions: &[Arc<dyn Extension>], entity: &str) -> Vec<Value> {
+    extensions.iter().flat_map(|ext| ext.list_views(entity)).collect()
 }
 
 /// Ausgeblendete Formularfelder der Hauptentitaet `entity` (alle Erweiterungen).

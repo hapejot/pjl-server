@@ -357,7 +357,10 @@ pub async fn app_manifest_handler(
         .and_then(|o| o.get_mut("settings"))
         .and_then(|s| s.as_object_mut())
     {
-        settings.extend(list_views_settings(&main_entity));
+        settings.extend(list_views_settings(
+            &main_entity,
+            &crate::extension::list_views(&_state.extensions, &main_name),
+        ));
     }
 
     let mut object_navigation: serde_json::Map<String, Value> = serde_json::Map::new();
@@ -548,15 +551,15 @@ pub async fn app_manifest_handler(
 /// Nur bei mehr als einer Ansicht: dann erscheint die Auswahl (View-Leiste) und
 /// jede Ansicht zeigt ihr `UI.PresentationVariant#<name>` (bzw. unqualifiziert
 /// fuer `default`). Mit einer oder keiner Ansicht bleibt die Seite unveraendert.
-pub(crate) fn list_views_settings(entity: &EntitySpec) -> serde_json::Map<String, Value> {
+pub(crate) fn list_views_settings(
+    entity: &EntitySpec,
+    extra: &[Value],
+) -> serde_json::Map<String, Value> {
     let mut out = serde_json::Map::new();
     let views = entity.list_views();
-    if views.len() <= 1 {
-        return out;
-    }
     let mut ordered: Vec<&spec::ListView> = views.iter().filter(|v| v.is_default()).collect();
     ordered.extend(views.iter().filter(|v| !v.is_default()));
-    let paths: Vec<Value> = ordered
+    let mut paths: Vec<Value> = ordered
         .iter()
         .map(|v| {
             let annotation_path = if v.is_default() {
@@ -567,6 +570,10 @@ pub(crate) fn list_views_settings(entity: &EntitySpec) -> serde_json::Map<String
             json!({ "key": v.name, "annotationPath": annotation_path })
         })
         .collect();
+    paths.extend(extra.iter().cloned());
+    if paths.len() <= 1 {
+        return out;
+    }
     out.insert("views".into(), json!({ "paths": paths }));
     out
 }

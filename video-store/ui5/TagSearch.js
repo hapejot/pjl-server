@@ -38,6 +38,8 @@ sap.ui.define(["sap/base/util/ObjectPath", "sap/ui/model/json/JSONModel", "sap/m
     var sequence = 0;        // Laufnummer gegen veraltete Antworten
     var timer = null;        // Debounce des Suchfelds
     var view = null;         // View der Listenseite, gesetzt von der Controller-Erweiterung
+    var playlist = [];       // IDs der Trefferreihenfolge beim letzten Klick aus der Tag-Suche
+    var autoplayNext = false; // Naechstes geladenes Video direkt starten
     var listHandler = null;  // Uebergibt IDs an die Standardliste (Controller-Erweiterung)
     var LIST_LIMIT = 200;    // Obergrenze fuer den ID-Filter der Standardliste
 
@@ -117,6 +119,31 @@ sap.ui.define(["sap/base/util/ObjectPath", "sap/ui/model/json/JSONModel", "sap/m
             });
     }
 
+    // Semantic Navigation (Intent Video-display) auf die Object Page eines Videos.
+    // Ohne FLP faellt sie auf den Router der View zurueck.
+    function navigateTo(id) {
+        var key = "ID=" + id + ",IsActiveEntity=true";
+        try {
+            if (sap.ushell && sap.ushell.Container) {
+                var nav = sap.ushell.Container.getService("CrossApplicationNavigation");
+                nav.toExternal({
+                    target: { semanticObject: SEMANTIC_OBJECT, action: SEMANTIC_ACTION },
+                    appSpecificRoute: "&/VideoSet(" + key + ")"
+                });
+                return;
+            }
+            var router = view ? UIComponent.getRouterFor(view) : null;
+            if (!router) {
+                MessageToast.show("Navigation nicht verfuegbar");
+                return;
+            }
+            router.navTo(OBJECT_ROUTE, { key: key });
+        } catch (e) {
+            console.error("[TagSearch] Navigation fehlgeschlagen", e);
+            MessageToast.show("Navigation fehlgeschlagen: " + e.message);
+        }
+    }
+
     var TAG_SEARCH = {
         // Suchfeld: Eingabe verzoegert uebernehmen, dann Tags neu filtern.
         search: function (oEvent) {
@@ -143,9 +170,7 @@ sap.ui.define(["sap/base/util/ObjectPath", "sap/ui/model/json/JSONModel", "sap/m
         more: function () {
             loadResults(selected.slice(), sequence, model.getProperty("/results").length, true);
         },
-        // Klick auf ein Video: Semantic Navigation (Intent Video-display, wie im Manifest
-        // als Inbound deklariert). Der App-spezifische Teil fuehrt auf die Object Page.
-        // Ohne FLP (kein sap.ushell) faellt die Navigation auf den Router der View zurueck.
+        // Klick auf ein Video: Trefferreihenfolge als Wiedergabeliste merken, dann navigieren.
         open: function (oEvent) {
             var src = oEvent.getSource();
             var id = (src.getParent() && src.getParent().data("id")) || src.data("id");
@@ -153,26 +178,25 @@ sap.ui.define(["sap/base/util/ObjectPath", "sap/ui/model/json/JSONModel", "sap/m
                 MessageToast.show("Video-ID fehlt");
                 return;
             }
-            var key = "ID=" + id + ",IsActiveEntity=true";
-            try {
-                if (sap.ushell && sap.ushell.Container) {
-                    var nav = sap.ushell.Container.getService("CrossApplicationNavigation");
-                    nav.toExternal({
-                        target: { semanticObject: SEMANTIC_OBJECT, action: SEMANTIC_ACTION },
-                        appSpecificRoute: "&/VideoSet(" + key + ")"
-                    });
-                    return;
-                }
-                var router = view ? UIComponent.getRouterFor(view) : null;
-                if (!router) {
-                    MessageToast.show("Navigation nicht verfuegbar");
-                    return;
-                }
-                router.navTo(OBJECT_ROUTE, { key: key });
-            } catch (e) {
-                console.error("[TagSearch] Navigation fehlgeschlagen", e);
-                MessageToast.show("Navigation fehlgeschlagen: " + e.message);
+            playlist = model.getProperty("/results").map(function (r) { return r.ID; });
+            navigateTo(id);
+        },
+        // Ende eines Videos in der Object Page: naechstes Video der Wiedergabeliste oeffnen
+        // und dort automatisch starten.
+        playNext: function (currentId) {
+            var at = playlist.indexOf(currentId);
+            if (at < 0 || at + 1 >= playlist.length) {
+                MessageToast.show("Ende der Trefferliste");
+                return;
             }
+            autoplayNext = true;
+            navigateTo(playlist[at + 1]);
+        },
+        // Liefert true, wenn das aktuell geladene Video automatisch starten soll (einmalig).
+        consumeAutoplay: function () {
+            var flag = autoplayNext;
+            autoplayNext = false;
+            return flag;
         },
         // Alle Treffer der Auswahl (bis LIST_LIMIT) in die Standardliste uebernehmen.
         showInList: function () {

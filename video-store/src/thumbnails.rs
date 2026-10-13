@@ -60,7 +60,10 @@ impl Extension for VideoThumbnails {
         Router::new()
             .route("/ext/video/thumbnail/{video_id}/{n}", get(thumbnail))
             .route("/ext/video/fragment/Thumbnails.fragment.xml", get(fragment))
-            .route("/ext/video/fragment/PreviewColumn.fragment.xml", get(preview_fragment))
+            .route(
+                "/ext/video/fragment/PreviewColumn.fragment.xml",
+                get(preview_fragment),
+            )
             .route("/apps/Video/i18n/i18n.properties", get(i18n_default))
             .route("/apps/Video/i18n/i18n_de.properties", get(i18n_de))
             .route("/apps/Video/i18n/i18n_en.properties", get(i18n_en))
@@ -123,11 +126,17 @@ async fn i18n_en() -> Response {
 }
 
 async fn fragment() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "application/xml; charset=utf-8")], FRAGMENT)
+    (
+        [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
+        FRAGMENT,
+    )
 }
 
 async fn preview_fragment() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "application/xml; charset=utf-8")], PREVIEW_FRAGMENT)
+    (
+        [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
+        PREVIEW_FRAGMENT,
+    )
 }
 
 async fn thumbnail(
@@ -159,7 +168,10 @@ async fn thumbnail(
     Ok((
         [
             (header::CONTENT_TYPE, content_type),
-            (header::CACHE_CONTROL, header::HeaderValue::from_static("private, max-age=86400")),
+            (
+                header::CACHE_CONTROL,
+                header::HeaderValue::from_static("private, max-age=86400"),
+            ),
         ],
         bytes,
     )

@@ -52,7 +52,13 @@ pub const FORCE_COMPOSITION: &[(&str, &str)] = &[("video_jobs", "agent_id")];
 /// Komposition verbieten, obwohl die Datenbank CASCADE hat.
 /// `video_jobs.video_id` ist nullable (Agent-Jobs ohne Video) und darf daher
 /// kein Kind einer Komposition sein.
-pub const FORCE_ASSOCIATION: &[(&str, &str)] = &[("video_jobs", "video_id")];
+/// `videos.agent_id` ist NOT NULL mit CASCADE, soll aber nur eine Assoziation sein:
+/// Sonst waere `Video` ein DraftNode unter `Agent`, und die App mit Hauptentitaet
+/// `Video` bietet keine Bearbeitung an. Dadurch ist `Video` DraftRoot.
+pub const FORCE_ASSOCIATION: &[(&str, &str)] = &[
+    ("video_jobs", "video_id"),
+    ("videos", "agent_id"),
+];
 
 /// Quellspalte, die als Feld `name` gefuehrt wird, wenn die Tabelle keine Spalte
 /// `name` hat. Sonst wird `name` aus den Schluesseln abgeleitet.

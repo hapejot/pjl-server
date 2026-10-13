@@ -60,8 +60,11 @@ fn cascade_on_not_null_becomes_composition_once_per_child() {
     let tags = assoc(&schema, "VideoSet", "_VideoTags");
     assert_eq!(tags.cardinality, Cardinality::ToMany);
     assert_eq!(tags.ownership, Ownership::Composition);
-    // videos.agent_id cascadet -> Komposition des Agents
-    assert_eq!(assoc(&schema, "VideoSet", "agent").ownership, Ownership::Composition);
+    // videos.agent_id cascadet, ist per FORCE_ASSOCIATION aber nur Assoziation,
+    // damit Video DraftRoot bleibt.
+    assert_eq!(assoc(&schema, "VideoSet", "agent").ownership, Ownership::Association);
+    assert!(schema.set("VideoSet").is_ok());
+    assert_eq!(assoc(&schema, "VideoSet", "agent").cardinality, Cardinality::ToOne);
 }
 
 #[test]

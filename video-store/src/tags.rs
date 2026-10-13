@@ -57,6 +57,7 @@ impl Extension for VideoTagFacets {
         let cell = self.index.clone();
         let store_app = app.clone();
         tokio::spawn(async move {
+            info!("loading tag index");
             match load_index(&store_app).await {
                 Ok(idx) => {
                     info!(
@@ -68,6 +69,7 @@ impl Extension for VideoTagFacets {
                 }
                 Err(e) => error!("tag index could not be built: {e:#}"),
             }
+            info!("tag index completed");
         });
 
         Router::new()
@@ -87,12 +89,19 @@ const SEARCH_PAGE: &str = include_str!("../tagsearch/index.html");
 const SEARCH_APP: &str = include_str!("../tagsearch/App.js");
 
 async fn search_page() -> Response {
-    ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], SEARCH_PAGE).into_response()
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        SEARCH_PAGE,
+    )
+        .into_response()
 }
 
 async fn search_app() -> Response {
     (
-        [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
         SEARCH_APP,
     )
         .into_response()
@@ -288,24 +297,45 @@ mod tests {
     #[test]
     fn invisible_tags_and_their_assignments_are_dropped() {
         let tags = vec![
-            rec(json!({"ID": "11111111-1111-4111-8111-111111111111", "IsActiveEntity": true, "name": "sichtbar", "visible": true})),
-            rec(json!({"ID": "22222222-2222-4222-8222-222222222222", "IsActiveEntity": true, "name": "versteckt", "visible": false})),
-            rec(json!({"ID": "33333333-3333-4333-8333-333333333333", "IsActiveEntity": true, "name": "ohne Feld"})),
+            rec(
+                json!({"ID": "11111111-1111-4111-8111-111111111111", "IsActiveEntity": true, "name": "sichtbar", "visible": true}),
+            ),
+            rec(
+                json!({"ID": "22222222-2222-4222-8222-222222222222", "IsActiveEntity": true, "name": "versteckt", "visible": false}),
+            ),
+            rec(
+                json!({"ID": "33333333-3333-4333-8333-333333333333", "IsActiveEntity": true, "name": "ohne Feld"}),
+            ),
         ];
         let rows = vec![
-            rec(json!({"ID": "c1111111-1111-4111-8111-111111111111", "IsActiveEntity": true, "video_ID": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "tag_ID": "11111111-1111-4111-8111-111111111111"})),
-            rec(json!({"ID": "c2222222-2222-4222-8222-222222222222", "IsActiveEntity": true, "video_ID": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "tag_ID": "22222222-2222-4222-8222-222222222222"})),
-            rec(json!({"ID": "c3333333-3333-4333-8333-333333333333", "IsActiveEntity": true, "video_ID": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "tag_ID": "33333333-3333-4333-8333-333333333333"})),
+            rec(
+                json!({"ID": "c1111111-1111-4111-8111-111111111111", "IsActiveEntity": true, "video_ID": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "tag_ID": "11111111-1111-4111-8111-111111111111"}),
+            ),
+            rec(
+                json!({"ID": "c2222222-2222-4222-8222-222222222222", "IsActiveEntity": true, "video_ID": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "tag_ID": "22222222-2222-4222-8222-222222222222"}),
+            ),
+            rec(
+                json!({"ID": "c3333333-3333-4333-8333-333333333333", "IsActiveEntity": true, "video_ID": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "tag_ID": "33333333-3333-4333-8333-333333333333"}),
+            ),
         ];
         let (names, assignments) = index_inputs(&tags, &rows);
         assert!(names.contains_key("11111111-1111-4111-8111-111111111111"));
         assert!(!names.contains_key("22222222-2222-4222-8222-222222222222"));
-        assert!(names.contains_key("33333333-3333-4333-8333-333333333333"), "fehlendes visible gilt als sichtbar");
+        assert!(
+            names.contains_key("33333333-3333-4333-8333-333333333333"),
+            "fehlendes visible gilt als sichtbar"
+        );
         assert_eq!(
             assignments,
             vec![
-                ("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(), "11111111-1111-4111-8111-111111111111".to_string()),
-                ("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb".to_string(), "33333333-3333-4333-8333-333333333333".to_string()),
+                (
+                    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
+                    "11111111-1111-4111-8111-111111111111".to_string()
+                ),
+                (
+                    "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb".to_string(),
+                    "33333333-3333-4333-8333-333333333333".to_string()
+                ),
             ]
         );
     }

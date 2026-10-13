@@ -87,6 +87,11 @@ impl EntityType {
                     }
                     if let Some(precision) = precision {
                         property = property.precision(*precision);
+                    } else if edm_type == "Edm.DateTimeOffset" {
+                        // OData V4: ohne Precision keine Sekundenbruchteile.
+                        // UI5 meldet sonst "Illegal DateTimeOffset value" bei
+                        // jedem Zeitstempel mit Millisekunden.
+                        property = property.precision(7);
                     }
                     if let Some(scale) = scale {
                         property = property.scale(*scale);
@@ -421,9 +426,9 @@ impl Annotations {
             Annotation::new("Common.SemanticKey")
                 .collection(Collection::new().add_property_path("ID")),
         );
-        main_annotations
-            .annotations
-            .push(Annotation::new("Common.Messages").path("DraftMessages"));
+        // Kein Common.Messages: DraftMessages ist im $metadata keine Navigation
+        // (nur eine JSON-Spalte im Store). Der Verweis wuerde FE-Fehler
+        // "does not point to a property" ausloesen.
 
         // Default Object Page section pointing to a main field group, plus one
         // list section per to-many navigation.

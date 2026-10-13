@@ -237,7 +237,7 @@ pub async fn app_component_handler(
 // Namespace der App auf ihr Verzeichnis abbilden, damit UI5 Modul- und Preload-Pfade findet.
 sap.ui.loader.config({{ paths: {{ "{cmp}": "/apps/{main}" }} }});
 {ui5_paths}
-sap.ui.define(["sap/fe/core/AppComponent"], function (AppComponent) {{
+sap.ui.define(["sap/fe/core/AppComponent", "{cmp}/ext/Format"], function (AppComponent) {{
     "use strict";
 	return AppComponent.extend("{cmp}.Component", {{ metadata: {{ manifest: "json" }} }});
 }}); "##,
@@ -245,6 +245,23 @@ sap.ui.define(["sap/fe/core/AppComponent"], function (AppComponent) {{
             main = a.main_entity(&ddic).name(),
             ui5_paths = ui5_path_config(&_state)
         ),
+    )
+}
+
+/// LRep-Stub: UI5 fragt beim Start Aenderungs-Daten und Feature-Settings ab.
+/// Ohne Antwort (404) oder mit falschem Content-Type meldet UI5 Fehler.
+pub async fn lrep_settings() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+        r#"{"isKeyUser":false,"isVariantSharingEnabled":false,"isAtoAvailable":false,"isAtoEnabled":false,"isProductiveSystem":true}"#,
+    )
+}
+
+/// LRep-Stub fuer Flex-Aenderungen: keine Aenderungen vorhanden.
+pub async fn lrep_flex_data() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+        r#"{"changes":[],"contents":[]}"#,
     )
 }
 
@@ -470,9 +487,13 @@ pub async fn app_manifest_handler(
             "sap.m": {},
             "sap.ui.core": {}
           },
-          "minUI5Version": "1.139.0"
+          "minUI5Version": "1.139.0",
+          "modules": [format!("{}/ext/Format", a.name())]
         },
-        "flexEnabled": true,
+        "flexEnabled": false,
+        "commands": {
+          "DeleteEntry::ContextMenu": {}
+        },
         "models": {
           "": {
             "dataSource": "mainService",
@@ -539,6 +560,45 @@ pub(crate) fn list_views_settings(entity: &EntitySpec) -> serde_json::Map<String
     out
 }
 
+/// Anzeige-Formatierung der Listenspalten: Feld, Fragment, Spaltenueberschrift.
+/// Die Formatierung laeuft als Custom Column (wie die Vorschau-Spalte), weil
+/// Fiori Elements `template` fuer annotierte `DataField`-Spalten ignoriert.
+/// Die Rohwerte bleiben unveraendert (Sortierung und Filter).
+const FORMATTED_FIELDS: &[(&str, &str, &str)] = &[
+    ("file_size", "Bytes", "Größe"),
+    ("bitrate", "Bitrate", "Bitrate"),
+    ("duration_seconds", "Duration", "Dauer"),
+];
+
+/// Custom Columns mit Formatter-Fragmenten, nur fuer vorhandene Felder der Entitaet.
+/// Die Rohspalte jedes Feldes wird ausgeblendet.
+fn format_column_overrides(state: &AppState, app_id: &str, entity: &str) -> Value {
+    let ddic = state.ddic();
+    let Some(spec) = ddic.active_entity(entity) else {
+        return json!({});
+    };
+    let mut cols = serde_json::Map::new();
+    for (field, fragment, header) in FORMATTED_FIELDS {
+        if spec.fields().any(|f| f.name() == *field) {
+            cols.insert(
+                format!("Fmt{fragment}"),
+                json!({
+                    "header": header,
+                    "template": format!("{app_id}.ext.fragments.{fragment}"),
+                    "horizontalAlign": "End",
+                    "width": "110px",
+                    "position": { "anchor": field, "placement": "After" }
+                }),
+            );
+            cols.insert(
+                format!("DataField::{field}"),
+                json!({ "visible": false }),
+            );
+        }
+    }
+    Value::Object(cols)
+}
+
 /// Designer-Konfiguration plus Spalten aus den Erweiterungen (`Extension::list_columns`).
 fn list_control_configuration_with_extensions(
     state: &AppState,
@@ -546,6 +606,18 @@ fn list_control_configuration_with_extensions(
     entity: &str,
 ) -> Value {
     let mut config = list_control_configuration(state, app_id);
+    if let Some(obj) = config
+        .as_object_mut()
+        .expect("controlConfiguration ist ein Objekt")
+        .entry("@com.sap.vocabularies.UI.v1.LineItem")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+    {
+        let overrides = format_column_overrides(state, app_id, entity);
+        if overrides.as_object().is_some_and(|m| !m.is_empty()) {
+            obj.insert("columns".into(), overrides);
+        }
+    }
     if let Some(columns) = crate::extension::list_columns(&state.extensions, entity) {
         let line_item = config
             .as_object_mut()
@@ -553,7 +625,13 @@ fn list_control_configuration_with_extensions(
             .entry("@com.sap.vocabularies.UI.v1.LineItem")
             .or_insert_with(|| json!({}));
         if let Some(obj) = line_item.as_object_mut() {
-            obj.insert("columns".into(), columns);
+            // Zusammenfuehren, falls Format-Overrides schon gesetzt sind.
+            match (obj.get_mut("columns"), columns) {
+                (Some(Value::Object(existing)), Value::Object(extra)) => existing.extend(extra),
+                (_, columns) => {
+                    obj.insert("columns".into(), columns);
+                }
+            }
         }
     }
     config
@@ -647,6 +725,98 @@ pub async fn publish_ext_handler(
     )
 }
 
+/// Formatter-Modul fuer Groessen, Bitraten und Dauern (UI5-Modul).
+/// Bytes -> B/KB/MB/GB/TB, bit/s -> kbit/s bzw. Mbit/s, Sekunden -> h:mm:ss bzw. m:ss.
+pub async fn format_ext_handler(
+    Path(app): Path<String>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, StatusCode> {
+    debug!("ext/Format.js for {}", app);
+    let ddic = state.ddic();
+    let ns = ddic
+        .apps()
+        .find(|x| x.main_entity(&ddic).name() == app)
+        .map(|a| a.name().to_string())
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok((
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        r##"sap.ui.define(["sap/base/util/ObjectPath"], function (ObjectPath) {
+    "use strict";
+    var UNITS = ["B", "KB", "MB", "GB", "TB"];
+
+    function num(v) {
+        return (v === null || v === undefined || v === "") ? null : Number(v);
+    }
+    function one(n) {
+        return n < 10 ? n.toFixed(1) : Math.round(n).toString();
+    }
+
+    var FORMATTER = {
+        bytes: function (v) {
+            var n = num(v);
+            if (n === null || isNaN(n)) { return ""; }
+            var i = 0;
+            while (n >= 1024 && i < UNITS.length - 1) { n /= 1024; i++; }
+            return (i === 0 ? String(Math.round(n)) : one(n)) + " " + UNITS[i];
+        },
+        bitrate: function (v) {
+            var n = num(v);
+            if (n === null || isNaN(n)) { return ""; }
+            return n >= 1000000 ? one(n / 1000000) + " Mbit/s" : Math.round(n / 1000) + " kbit/s";
+        },
+        duration: function (v) {
+            var n = num(v);
+            if (n === null || isNaN(n)) { return ""; }
+            var s = Math.round(n);
+            var h = Math.floor(s / 3600);
+            var m = Math.floor((s % 3600) / 60);
+            var sec = s % 60;
+            var pad = function (x) { return (x < 10 ? "0" : "") + x; };
+            return h > 0 ? h + ":" + pad(m) + ":" + pad(sec) : m + ":" + pad(sec);
+        }
+    };
+    // Globaler Name fuer die Formatter-Referenz im Fragment (XML-Bindung).
+    ObjectPath.set("__NS__.ext.Format", FORMATTER);
+    return FORMATTER;
+});
+"##
+        .replace("__NS__", &ns),
+    ))
+}
+
+/// Fragment fuer eine formatierte Listenspalte. `name` ist `Bytes`, `Bitrate` oder `Duration`.
+pub async fn format_fragment_handler(
+    Path((app, name)): Path<(String, String)>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let (field, formatter) = match name.as_str() {
+        "Bytes.fragment.xml" => ("file_size", "bytes"),
+        "Bitrate.fragment.xml" => ("bitrate", "bitrate"),
+        "Duration.fragment.xml" => ("duration_seconds", "duration"),
+        _ => return Err(StatusCode::NOT_FOUND),
+    };
+    let ddic = state.ddic();
+    let ns = ddic
+        .apps()
+        .find(|x| x.main_entity(&ddic).name() == app)
+        .map(|a| a.name().to_string())
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let xml = format!(
+        r##"<core:FragmentDefinition xmlns:core="sap.ui.core" xmlns="sap.m">
+    <Text text="{{path: '{field}', targetType: 'any', formatter: '{ns}.ext.Format.{formatter}'}}"/>
+</core:FragmentDefinition>
+"##
+    );
+    Ok((
+        [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
+        xml,
+    ))
+}
+
+
 pub async fn app_handler(
     Path((app, path)): Path<(String, String)>,
     State(_state): State<AppState>,
@@ -666,7 +836,7 @@ pub async fn app_handler(
     )
 }
 
-pub async fn index() -> Html<String> {
+pub async fn index() -> impl IntoResponse {
     info!("fetch static index");
     let out_format = r##"
         <!doctype html>
@@ -788,5 +958,13 @@ pub async fn index() -> Html<String> {
 <body class="sapUiBody" id="content"></body>
 </html>
     "##;
-    Html(out_format.into())
+    (
+        // UI5 (ResizeHandler) registriert einen unload-Listener; ohne diese
+        // Freigabe meldet der Browser eine Permissions-Policy-Verletzung.
+        [(
+            header::HeaderName::from_static("permissions-policy"),
+            "unload=(self)",
+        )],
+        Html(out_format.to_string()),
+    )
 }

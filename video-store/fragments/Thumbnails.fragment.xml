@@ -26,6 +26,12 @@
 			alt="{= 'Thumbnail ' + ${thumbnail_index} }"
 			width="200px"
 			densityAware="false"
-			class="sapUiTinyMargin" />
+			press="video.ext.Player.seek"
+			tooltip="{= 'Abspielen ab ' + ${timestamp_seconds} + ' s' }"
+			class="sapUiTinyMargin">
+			<customData>
+				<core:CustomData key="seconds" value="{timestamp_seconds}" />
+			</customData>
+		</Image>
 	</FlexBox>
 </core:FragmentDefinition>

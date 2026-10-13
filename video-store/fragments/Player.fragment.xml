@@ -9,6 +9,6 @@
 	<VBox class="sapUiSmallMargin">
 		<core:HTML
 			sanitize="false"
-			content="{= ${ID} ? '&lt;video controls preload=&quot;metadata&quot; style=&quot;max-width:100%;&quot; src=&quot;/ext/video/stream/' + ${ID} + '&quot;&gt;&lt;/video&gt;' : '' }" />
+			content="{= ${ID} ? '&lt;video id=&quot;videoPlayer&quot; controls preload=&quot;metadata&quot; style=&quot;max-width:100%;&quot; src=&quot;/ext/video/stream/' + ${ID} + '&quot;&gt;&lt;/video&gt;' : '' }" />
 	</VBox>
 </core:FragmentDefinition>

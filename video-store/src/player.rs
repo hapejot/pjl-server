@@ -31,6 +31,8 @@ use crate::thumbnails::DEFAULT_UPSTREAM;
 
 const VIDEO_SET: &str = "VideoSet";
 const FRAGMENT: &str = include_str!("../fragments/Player.fragment.xml");
+const PLAYER_JS: &str = include_str!("../ui5/Player.js");
+const CONTROLLER_JS: &str = include_str!("../ui5/ObjectPageController.js");
 
 pub struct VideoPlayer {
     upstream: String,
@@ -62,7 +64,20 @@ impl Extension for VideoPlayer {
         Router::new()
             .route("/ext/video/stream/{video_id}", get(stream))
             .route("/ext/video/fragment/Player.fragment.xml", get(fragment))
+            .route("/ext/video/Player.js", get(player_js))
+            .route("/ext/video/ObjectPageController.controller.js", get(controller_js))
             .with_state(state)
+    }
+
+    fn ui5_modules(&self) -> Vec<String> {
+        vec!["video/ext/Player".into()]
+    }
+
+    fn controller_extensions(&self) -> Vec<(String, String)> {
+        vec![(
+            "sap.fe.templates.ObjectPage.ObjectPageController".into(),
+            "video.ext.ObjectPageController".into(),
+        )]
     }
 
     fn object_page_content(&self, entity: &str) -> Option<Value> {
@@ -81,6 +96,14 @@ impl Extension for VideoPlayer {
 
 async fn fragment() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "application/xml; charset=utf-8")], FRAGMENT)
+}
+
+async fn player_js() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8")], PLAYER_JS)
+}
+
+async fn controller_js() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8")], CONTROLLER_JS)
 }
 
 async fn stream(

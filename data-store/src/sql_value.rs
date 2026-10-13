@@ -74,6 +74,10 @@ pub fn json_to_param(
             Value::String(s) => SqlParam::Text(s.clone()),
             _ => return Err(type_error("Dezimalzahl")),
         },
+        // Leerer Zeitstempel ist kein Wert: sonst liest UI5 "" und meldet einen Fehler.
+        DataType::DateTimeOffset if matches!(value, Value::String(s) if s.trim().is_empty()) => {
+            SqlParam::Null
+        }
         DataType::Guid | DataType::String { .. } | DataType::Date | DataType::DateTimeOffset => {
             match value {
                 Value::String(s) => SqlParam::Text(s.clone()),
@@ -130,6 +134,8 @@ pub fn param_to_json(value: &SqlParam, data_type: &DataType) -> Value {
                 .map(Value::Number)
                 .unwrap_or_else(|| Value::String(text.clone())),
             DataType::Bool => Value::Bool(!text.is_empty() && text != "0" && text != "false"),
+            // Leere Zeitstempel (z. B. aus frueheren Schreibvorgaengen) sind null.
+            DataType::DateTimeOffset if text.trim().is_empty() => Value::Null,
             _ => Value::String(text.clone()),
         },
         SqlParam::Blob(bytes) => Value::String(String::from_utf8_lossy(bytes).to_string()),

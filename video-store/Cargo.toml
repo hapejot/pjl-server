@@ -6,6 +6,7 @@ description = "One-shot migration of the video Postgres database into a PJL DDIC
 
 [dependencies]
 anyhow = "1.0.104"
+async-trait = "0.1"
 axum = "0.8.9"
 base64 = "0.22"
 clap = { version = "4.5", features = ["derive", "env"] }
@@ -30,7 +31,6 @@ uuid = { version = "1", features = ["v5"] }
 docker-tests = []
 
 [dev-dependencies]
-async-trait = "0.1"
 deadpool-postgres = "0.14"
 tempfile = "=3.10.1"
 odata = { version = "0.1.0", path = "../odata" }

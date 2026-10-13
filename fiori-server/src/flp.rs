@@ -442,6 +442,7 @@ pub async fn app_manifest_handler(
         }
     }
 
+
     let sem = format!("{}-{}", a.main_entity(&ddic).name(), a.action());
     let sap_app = json!({
       "applicationVersion": {

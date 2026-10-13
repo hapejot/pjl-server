@@ -42,6 +42,7 @@
 //! Die Markierung `TODO(pg-backend)` steht bei den Typabbildungen, die im
 //! Store als Text liegen (Dezimal, jsonb, Enums, vector).
 
+pub mod convert;
 pub mod import;
 pub mod introspect;
 pub mod map;

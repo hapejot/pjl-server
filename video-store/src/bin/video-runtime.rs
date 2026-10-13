@@ -5,6 +5,7 @@ use fiori_server::config::{ServerConfig, ServerMode};
 use fiori_server::server;
 use tracing::{error, info};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use video_store::convert::VideoConvert;
 use video_store::tags::VideoTagFacets;
 use video_store::thumbnails::VideoThumbnails;
 
@@ -20,6 +21,7 @@ async fn main() -> std::process::ExitCode {
         vec![
             std::sync::Arc::new(VideoThumbnails::from_env()),
             std::sync::Arc::new(VideoTagFacets::new()),
+            std::sync::Arc::new(VideoConvert),
         ];
     match server::run_with(config, extensions).await {
         Ok(()) => {

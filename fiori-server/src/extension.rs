@@ -14,6 +14,7 @@
 use std::sync::Arc;
 
 use axum::Router;
+use data_store::EntityKey;
 use serde_json::{json, Value};
 
 use crate::AppState;
@@ -42,9 +43,77 @@ pub trait Extension: Send + Sync {
     fn list_columns(&self, _entity: &str) -> Option<Value> {
         None
     }
+
+    /// Gebundene Aktionen auf Entity Sets (siehe [`BoundAction`]).
+    fn actions(&self) -> Vec<BoundAction> {
+        Vec::new()
+    }
 }
 
 pub type Extensions = Vec<Arc<dyn Extension>>;
+
+/// Fehler einer Erweiterungs-Aktion. Wird in `srv` auf einen OData-Fehler abgebildet.
+#[derive(Debug, thiserror::Error)]
+pub enum ActionError {
+    /// Fachlicher Fehler, z. B. "Video hat keinen Agenten".
+    #[error("{0}")]
+    Failed(String),
+    /// Fehler aus dem Store.
+    #[error(transparent)]
+    Store(#[from] data_store::StoreError),
+}
+
+/// Implementierung einer Aktion. `key` ist der Schluessel der gebundenen Instanz.
+/// `Value::Null` als Ergebnis wird als `204 No Content` beantwortet.
+#[async_trait::async_trait]
+pub trait ActionHandler: Send + Sync {
+    async fn invoke(&self, state: &AppState, key: &EntityKey) -> Result<Value, ActionError>;
+}
+
+/// Gebundene Aktion (`IsBound="true"`) auf dem Entity Set `set`, z. B. `VideoSet`.
+/// Aufruf per `POST /Service/<set>(<key>)/Service.<name>`.
+#[derive(Clone)]
+pub struct BoundAction {
+    /// Entity Set, auf dem die Aktion liegt (z. B. `VideoSet`).
+    pub set: String,
+    /// Name der Aktion ohne Namespace (z. B. `convert`).
+    pub name: String,
+    /// Entitaetstyp des Rueckgabewerts (z. B. `VideoJob`), `None` ohne Rueckgabe.
+    pub returns: Option<String>,
+    pub handler: Arc<dyn ActionHandler>,
+    /// Button im Header der Object Page; `None` = nur per API aufrufbar.
+    pub header: Option<HeaderButton>,
+    /// Verfuegbarkeit: die Aktion ist nur verfuegbar, wenn die Eigenschaft den Wert hat.
+    /// Wird als `Core.OperationAvailable` am Action-Element deklariert.
+    pub available_if: Option<Availability>,
+}
+
+/// `<property> == <equals>` an der gebundenen Instanz (`in/<property>` in CSDL).
+/// Unterstuetzt werden Boolean- und String-Werte.
+#[derive(Clone)]
+pub struct Availability {
+    pub property: String,
+    pub equals: Value,
+}
+
+/// Aktion als Button im Object-Page-Header (`UI.Identification`, `DataFieldForAction`).
+#[derive(Clone)]
+pub struct HeaderButton {
+    /// Beschriftung des Buttons.
+    pub text: String,
+}
+
+/// Alle gebundenen Aktionen aller Erweiterungen.
+pub fn bound_actions(extensions: &[Arc<dyn Extension>]) -> Vec<BoundAction> {
+    extensions.iter().flat_map(|ext| ext.actions()).collect()
+}
+
+/// Gebundene Aktion `name` auf dem Entity Set `set`.
+pub fn find_action(extensions: &[Arc<dyn Extension>], set: &str, name: &str) -> Option<BoundAction> {
+    bound_actions(extensions)
+        .into_iter()
+        .find(|a| a.set == set && a.name == name)
+}
 
 /// Zusammengefuehrtes `content` der Object Page fuer `entity`, `None` ohne Beitraege.
 pub fn object_page_content(extensions: &[Arc<dyn Extension>], entity: &str) -> Option<Value> {

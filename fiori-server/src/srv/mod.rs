@@ -1395,6 +1395,15 @@ impl ODataError {
     }
 }
 
+impl From<crate::extension::ActionError> for ODataError {
+    fn from(e: crate::extension::ActionError) -> Self {
+        match e {
+            crate::extension::ActionError::Failed(msg) => ODataError::bad_request(msg),
+            crate::extension::ActionError::Store(s) => ODataError::from_store(s),
+        }
+    }
+}
+
 impl IntoResponse for ODataError {
     fn into_response(self) -> Response {
         let body = json!({"error": {"code": self.code, "message": self.message}});
@@ -1868,6 +1877,15 @@ async fn post_handler(
         {
             let action_name = action.name.rsplit('.').next().unwrap_or_default();
             let key: EntityKey = entity.into();
+            if let Some(a) =
+                crate::extension::find_action(&state.extensions, &entity.name, action_name)
+            {
+                return match a.handler.invoke(&state, &key).await {
+                    Ok(Value::Null) => StatusCode::NO_CONTENT.into_response(),
+                    Ok(r) => to_json_response(r).into_response(),
+                    Err(e) => ODataError::from(e).into_response(),
+                };
+            }
             match draft_action(&state, &entity.name, &key, action_name).await {
                 Ok(r) => to_json_response(r).into_response(),
                 Err(e) => e.into_response(),
@@ -2251,6 +2269,86 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
             r##"<Action Name="publishConfig" IsBound="true" EntitySetPath="in">
                     <Parameter Name="in" Type="{entity_name}"/>
                     <ReturnType Type="{entity_name}"/></Action>"##,
+        ));
+    }
+
+    // Gebundene Aktionen der Erweiterungen (siehe `extension::Extension::actions`).
+    // Header-Buttons landen als DataFieldForAction in UI.Identification der Entitaet;
+    // pro Entitaet genau eine Collection.
+    let mut header_actions: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for a in crate::extension::bound_actions(&state.extensions) {
+        let Some(entity) = ddic.active_entity_by_setname(&a.set) else {
+            continue;
+        };
+        let entity_name = format!("Service.{}", entity.name());
+        let returns = a
+            .returns
+            .as_deref()
+            .map(|r| format!(r##"<ReturnType Type="Service.{r}"/>"##))
+            .unwrap_or_default();
+        actions.push(format!(
+            r##"<Action Name="{}" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="{entity_name}"/>{returns}</Action>"##,
+            a.name
+        ));
+        if let Some(avail) = &a.available_if {
+            match &avail.equals {
+                Value::Bool(b) => annotations.push(format!(
+                    r##"<Annotations Target="Service.{}(Service.{})"><Annotation Term="Core.OperationAvailable"><Eq><Path>in/{}</Path><Bool>{b}</Bool></Eq></Annotation></Annotations>"##,
+                    a.name,
+                    entity.name(),
+                    avail.property
+                )),
+                Value::String(t) => annotations.push(format!(
+                    r##"<Annotations Target="Service.{}(Service.{})"><Annotation Term="Core.OperationAvailable"><Eq><Path>in/{}</Path><String>{t}</String></Eq></Annotation></Annotations>"##,
+                    a.name,
+                    entity.name(),
+                    avail.property
+                )),
+                other => tracing::warn!("availability of {} unsupported: {other}", a.name),
+            }
+        }
+        // Die Eigenschaft der Verfuegbarkeitsbedingung muss vom Client angefordert
+        // werden, sonst wertet Fiori Elements sie nicht aus. Ausgeblendetes DataField.
+        if let Some(avail) = &a.available_if {
+            header_actions
+                .entry(entity_name.clone())
+                .or_default()
+                .push(format!(
+                    r##"<Record Type="UI.DataField"><PropertyValue Property="Value" Path="{}"/><Annotation Term="UI.Hidden"/></Record>"##,
+                    avail.property
+                ));
+        }
+        if let Some(header) = &a.header {
+            // Sichtbarkeit: ausgeblendet, solange die Bedingung nicht erfuellt ist
+            // (`UI.Hidden` ist fuer Header-Buttons ausgewertet, `OperationAvailable` nicht).
+            let hidden = match &a.available_if {
+                Some(avail) => {
+                    let literal = match &avail.equals {
+                        Value::Bool(b) => format!("<Bool>{b}</Bool>"),
+                        Value::String(t) => format!("<String>{t}</String>"),
+                        _ => String::new(),
+                    };
+                    if literal.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            r##"<Annotation Term="UI.Hidden"><Ne><Path>{}</Path>{literal}</Ne></Annotation>"##,
+                            avail.property
+                        )
+                    }
+                }
+                None => String::new(),
+            };
+            header_actions.entry(entity_name).or_default().push(format!(
+                r##"<Record Type="UI.DataFieldForAction"><PropertyValue Property="Action" String="Service.{}"/><PropertyValue Property="Label" String="{}"/>{hidden}</Record>"##,
+                a.name, header.text
+            ));
+        }
+    }
+    for (entity_name, records) in header_actions {
+        annotations.push(format!(
+            r##"<Annotations Target="{entity_name}"><Annotation Term="UI.Identification"><Collection>{}</Collection></Annotation></Annotations>"##,
+            records.concat()
         ));
     }
 

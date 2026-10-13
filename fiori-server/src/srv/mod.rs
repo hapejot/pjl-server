@@ -12,7 +12,7 @@ use axum::{
 use data_store::{DataRecord, EntityKey, StoreError};
 use odata::{
     path::{parse_odata_path, PathSegment},
-    query::{BinOp, ExpandItem, Expr, ODataQuery},
+    query::{BinOp, ExpandItem, Expr, ODataQuery, OrderByItem, SortDirection},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -403,7 +403,7 @@ pub struct Annotations {
     pub annotations: Vec<Annotation>,
 }
 impl Annotations {
-    fn from_entity(x: &EntitySpec) -> Vec<Annotations> {
+    fn from_entity(x: &EntitySpec, hidden: &[String]) -> Vec<Annotations> {
         let mut annotations = Vec::new();
         let mut main_annotations = Annotations {
             target: format!("Service.{}", x.name()),
@@ -456,7 +456,7 @@ impl Annotations {
             .annotations
             .push(Annotation::new("UI.Facets").collection(facets));
 
-        let main_field_group = prepare_field_group(x);
+        let main_field_group = prepare_field_group(x, hidden);
         main_annotations.annotations.push(main_field_group);
 
         annotations.push(main_annotations);
@@ -660,7 +660,8 @@ fn list_facet_records(x: &EntitySpec) -> Vec<Record> {
         .collect()
 }
 
-fn prepare_field_group(x: &EntitySpec) -> Annotation {
+/// `hidden`: Felder, die aus der Standard-FieldGroup fehlen (z. B. wenn eine Erweiterung sie als eigenen Abschnitt zeigt).
+fn prepare_field_group(x: &EntitySpec, hidden: &[String]) -> Annotation {
     let mut main_data = Collection::new();
     // main_data = main_data
     //     .add_record(Record::new("UI.DataField")
@@ -680,7 +681,11 @@ fn prepare_field_group(x: &EntitySpec) -> Annotation {
                 }
             }
             FieldSpec::Atom { name, .. } => {
+                if hidden.iter().any(|h| h == name) {
+                    continue;
+                }
                 main_data = main_data.add_record(
+
                     Record::new("UI.DataField").add(PropertyValue::new("Value").path(name)),
                 )
             }
@@ -1217,25 +1222,57 @@ fn build_query(params: &HashMap<String, String>) -> Result<ODataQuery, ODataErro
         ),
         None => None,
     };
+    let orderby = match params.get("$orderby") {
+        Some(raw) => parse_orderby(raw)?,
+        None => vec![],
+    };
+    let expand = match params.get("$expand") {
+        Some(raw) => parse_expand_items(raw)?,
+        None => vec![],
+    };
     Ok(ODataQuery {
         filter,
-        orderby: vec![],
+        orderby,
         top,
         skip,
         select: params
             .get("$select")
             .and_then(|x| Some(x.split(",").map(|y| y.to_string()).collect::<Vec<_>>()))
             .unwrap_or_else(|| vec![]),
-        expand: params
-            .get("$expand")
-            .map(|x| parse_expand_items(x))
-            .unwrap_or_else(|| vec![]),
+        expand,
         count: params.get("$count").is_some(),
         search: params.get("$search").cloned(),
     })
 }
 
-fn parse_expand_items(raw: &str) -> Vec<ExpandItem> {
+/// `$orderby`: kommagetrennte Liste aus `Property [asc|desc]`.
+fn parse_orderby(raw: &str) -> Result<Vec<OrderByItem>, ODataError> {
+    split_top_level(raw, ',')
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .map(|part| parse_orderby_item(&part))
+        .collect()
+}
+
+fn parse_orderby_item(raw: &str) -> Result<OrderByItem, ODataError> {
+    let parts: Vec<&str> = raw.split_whitespace().collect();
+    let (property, direction) = match parts.as_slice() {
+        [p] => (*p, SortDirection::Asc),
+        [p, d] if d.eq_ignore_ascii_case("asc") => (*p, SortDirection::Asc),
+        [p, d] if d.eq_ignore_ascii_case("desc") => (*p, SortDirection::Desc),
+        _ => {
+            return Err(ODataError::bad_request(format!(
+                "Invalid $orderby item '{raw}'"
+            )))
+        }
+    };
+    Ok(OrderByItem {
+        property: property.to_string(),
+        direction,
+    })
+}
+
+fn parse_expand_items(raw: &str) -> Result<Vec<ExpandItem>, ODataError> {
     split_top_level(raw, ',')
         .into_iter()
         .filter(|part| !part.is_empty())
@@ -1243,24 +1280,24 @@ fn parse_expand_items(raw: &str) -> Vec<ExpandItem> {
         .collect()
 }
 
-fn parse_expand_item(raw: &str) -> ExpandItem {
+fn parse_expand_item(raw: &str) -> Result<ExpandItem, ODataError> {
     let trimmed = raw.trim();
     if let Some(paren) = find_top_level_options_start(trimmed) {
         let navigation_property = trimmed[..paren].trim().to_string();
         let options = trimmed[paren + 1..trimmed.len() - 1].trim();
-        ExpandItem {
+        Ok(ExpandItem {
             navigation_property,
-            nested_query: Box::new(parse_nested_query(options)),
-        }
+            nested_query: Box::new(parse_nested_query(options)?),
+        })
     } else {
-        ExpandItem {
+        Ok(ExpandItem {
             navigation_property: trimmed.to_string(),
             nested_query: Box::new(ODataQuery::default()),
-        }
+        })
     }
 }
 
-fn parse_nested_query(raw: &str) -> ODataQuery {
+fn parse_nested_query(raw: &str) -> Result<ODataQuery, ODataError> {
     let mut query = ODataQuery::default();
     for option in split_top_level(raw, ';') {
         let Some((name, value)) = option.split_once('=') else {
@@ -1268,16 +1305,17 @@ fn parse_nested_query(raw: &str) -> ODataQuery {
         };
         match name.trim() {
             "$filter" => query.filter = Some(Expr::parse(value.trim()).unwrap()),
+            "$orderby" => query.orderby = parse_orderby(value.trim())?,
             "$top" => query.top = Some(value.trim().parse().unwrap()),
             "$skip" => query.skip = Some(value.trim().parse().unwrap()),
             "$select" => query.select = split_top_level(value.trim(), ','),
-            "$expand" => query.expand = parse_expand_items(value.trim()),
+            "$expand" => query.expand = parse_expand_items(value.trim())?,
             "$count" => query.count = value.trim().parse().unwrap_or(true),
             "$search" => query.search = Some(value.trim().to_string()),
             _ => {}
         }
     }
-    query
+    Ok(query)
 }
 
 fn find_top_level_options_start(raw: &str) -> Option<usize> {
@@ -2217,7 +2255,7 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
         .collect();
     let annotation_lst: Vec<Annotations> = ddic
         .active_entities()
-        .map(|x| Annotations::from_entity(x))
+        .map(|x| Annotations::from_entity(x, &crate::extension::hidden_fields(&state.extensions, x.name())))
         .flatten()
         .collect();
     // let _sample_entity = sample::sample_entity();
@@ -2504,7 +2542,7 @@ mod tests {
         // "Entity" has to-many lookups _Fields, _Many, _One after activation.
         let entity = ddic.active_entity("Entity").unwrap();
 
-        let annotations = Annotations::from_entity(entity);
+        let annotations = Annotations::from_entity(entity, &[]);
         let main = annotations
             .iter()
             .find(|a| a.target == "Service.Entity")
@@ -2588,7 +2626,7 @@ mod tests {
 
     #[test]
     fn parses_simple_expand_list() {
-        let expand = parse_expand_items("DraftAdministrativeData,package");
+        let expand = parse_expand_items("DraftAdministrativeData,package").unwrap();
 
         assert_eq!(expand.len(), 2);
         assert_eq!(expand[0].navigation_property, "DraftAdministrativeData");
@@ -2598,7 +2636,8 @@ mod tests {
     #[test]
     fn parses_expand_with_select_options() {
         let expand =
-            parse_expand_items("DraftAdministrativeData($select=DraftUUID,InProcessByUser)");
+            parse_expand_items("DraftAdministrativeData($select=DraftUUID,InProcessByUser)")
+                .unwrap();
 
         assert_eq!(expand.len(), 1);
         assert_eq!(expand[0].navigation_property, "DraftAdministrativeData");
@@ -2610,7 +2649,7 @@ mod tests {
 
     #[test]
     fn parses_nested_expand_options() {
-        let expand = parse_expand_items("_Entities($expand=package($select=name))");
+        let expand = parse_expand_items("_Entities($expand=package($select=name))").unwrap();
 
         assert_eq!(expand.len(), 1);
         assert_eq!(expand[0].navigation_property, "_Entities");
@@ -2622,6 +2661,48 @@ mod tests {
         assert_eq!(
             expand[0].nested_query.expand[0].nested_query.select,
             vec!["name".to_string()]
+        );
+    }
+
+    #[test]
+    fn parses_orderby_list_with_directions() {
+        let items = parse_orderby("ID,Amount desc, name ASC").unwrap();
+
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].property, "ID");
+        assert_eq!(items[0].direction, SortDirection::Asc);
+        assert_eq!(items[1].property, "Amount");
+        assert_eq!(items[1].direction, SortDirection::Desc);
+        assert_eq!(items[2].property, "name");
+        assert_eq!(items[2].direction, SortDirection::Asc);
+    }
+
+    #[test]
+    fn invalid_orderby_direction_is_bad_request() {
+        assert!(parse_orderby("Amount sideways").is_err());
+        assert!(parse_orderby("Amount desc extra").is_err());
+    }
+
+    #[test]
+    fn build_query_passes_orderby_through() {
+        let mut params = HashMap::new();
+        params.insert("$orderby".to_string(), "ID desc".to_string());
+        let query = build_query(&params).unwrap();
+
+        assert_eq!(query.orderby.len(), 1);
+        assert_eq!(query.orderby[0].property, "ID");
+        assert_eq!(query.orderby[0].direction, SortDirection::Desc);
+    }
+
+    #[test]
+    fn expand_option_orderby_is_parsed() {
+        let expand = parse_expand_items("_Entities($orderby=name desc)").unwrap();
+
+        assert_eq!(expand[0].nested_query.orderby.len(), 1);
+        assert_eq!(expand[0].nested_query.orderby[0].property, "name");
+        assert_eq!(
+            expand[0].nested_query.orderby[0].direction,
+            SortDirection::Desc
         );
     }
 

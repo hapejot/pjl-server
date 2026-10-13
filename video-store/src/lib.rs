@@ -43,9 +43,11 @@
 //! Store als Text liegen (Dezimal, jsonb, Enums, vector).
 
 pub mod convert;
+pub mod formatting;
 pub mod import;
 pub mod introspect;
 pub mod map;
+pub mod player;
 pub mod tag_index;
 pub mod tags;
 pub mod thumbnails;

@@ -48,7 +48,27 @@ pub trait Extension: Send + Sync {
     fn actions(&self) -> Vec<BoundAction> {
         Vec::new()
     }
+
+    /// Felder der Hauptentitaet `entity`, die aus dem Formular der Standard-Object-Page
+    /// entfallen (z. B. weil eine Erweiterung sie in einem eigenen Abschnitt zeigt).
+    fn hidden_fields(&self, _entity: &str) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// UI5-Module, die mit der Komponente geladen werden, z. B. `video/ext/Format`
+    /// (Pfad ueber `ui5_paths` aufgeloest). Globale Formatter brauchen das.
+    fn ui5_modules(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Controller-Erweiterungen als `(Ziel-Controller, Controller-Name)`, z. B.
+    /// `("sap.fe.templates.ObjectPage.ObjectPageController", "video.ext.ObjectPageController")`.
+    /// Gehen ins Manifest unter `sap.ui5/extends/extensions/sap.ui.controllerExtensions`.
+    fn controller_extensions(&self) -> Vec<(String, String)> {
+        Vec::new()
+    }
 }
+
 
 pub type Extensions = Vec<Arc<dyn Extension>>;
 
@@ -135,6 +155,34 @@ pub fn object_page_content(extensions: &[Arc<dyn Extension>], entity: &str) -> O
     } else {
         Some(json!({ "body": { "sections": sections } }))
     }
+}
+
+/// Ausgeblendete Formularfelder der Hauptentitaet `entity` (alle Erweiterungen).
+pub fn hidden_fields(extensions: &[Arc<dyn Extension>], entity: &str) -> Vec<String> {
+    extensions
+        .iter()
+        .flat_map(|ext| ext.hidden_fields(entity))
+        .collect()
+}
+
+/// `sap.ui5/extends`-Block des Manifests fuer die Controller-Erweiterungen aller Erweiterungen.
+pub fn controller_extensions_manifest(extensions: &[Arc<dyn Extension>]) -> Value {
+    let mut map = serde_json::Map::new();
+    for ext in extensions {
+        for (target, controller) in ext.controller_extensions() {
+            map.insert(target, json!({ "controllerName": controller }));
+        }
+    }
+    if map.is_empty() {
+        json!({})
+    } else {
+        json!({ "extensions": { "sap.ui.controllerExtensions": map } })
+    }
+}
+
+/// UI5-Module aller Erweiterungen, in Registrierungsreihenfolge.
+pub fn ui5_modules(extensions: &[Arc<dyn Extension>]) -> Vec<String> {
+    extensions.iter().flat_map(|ext| ext.ui5_modules()).collect()
 }
 
 /// Zusaetzliche Listenspalten aller Erweiterungen, als `columns`-Objekt der

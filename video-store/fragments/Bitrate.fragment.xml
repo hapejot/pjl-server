@@ -1,0 +1,3 @@
+<core:FragmentDefinition xmlns:core="sap.ui.core" xmlns="sap.m">
+    <Text text="{path: 'bitrate', targetType: 'any', formatter: 'video.ext.Format.bitrate'}"/>
+</core:FragmentDefinition>

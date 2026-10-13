@@ -210,8 +210,6 @@ fn router(state: AppState, config: &ServerConfig) -> Router {
             get(flp::component_preload_handler),
         )
         .route("/apps/{app}/ext/Publish.js", get(flp::publish_ext_handler))
-        .route("/apps/{app}/ext/Format.js", get(flp::format_ext_handler))
-        .route("/apps/{app}/ext/fragments/{name}", get(flp::format_fragment_handler))
         .route("/", get(flp::index))
         .route("/sap/bc/lrep/flex/settings", get(flp::lrep_settings))
         .route("/sap/bc/lrep/flex/data/{*rest}", get(flp::lrep_flex_data))

@@ -303,6 +303,14 @@ impl Navigation {
     }
 }
 
+/// Eine Schreiboperation fuer [`DataStore::write_entities`].
+#[derive(Debug, Clone)]
+pub enum WriteOp {
+    Create(Value),
+    Patch(EntityKey, Value),
+    Delete(EntityKey),
+}
+
 #[async_trait::async_trait]
 pub trait DataStore: Send + Sync {
     fn component_info(&self) -> String;
@@ -364,6 +372,39 @@ pub trait DataStore: Send + Sync {
 
     // -- Persistence --
     async fn commit(&self);
+
+    // -- Batch-Schreiben (Default: Schleife ueber die Einzelmethoden) --
+
+    /// Fuehrt eine Liste von Schreiboperationen aus. Jede Operation liefert ihr
+    /// eigenes Ergebnis, ein Fehler bricht die Liste nicht ab. Create und Patch
+    /// liefern den vollstaendigen Satz (inklusive Hook-Aenderungen), Delete
+    /// liefert `None`.
+    async fn write_entities(
+        &self,
+        set_name: &str,
+        ops: Vec<WriteOp>,
+    ) -> Vec<Result<Option<DataRecord>, StoreError>> {
+        let mut results = Vec::with_capacity(ops.len());
+        for op in ops {
+            let result = match op {
+                WriteOp::Create(data) => self
+                    .create_entity(set_name, &data)
+                    .await
+                    .map(Some),
+                WriteOp::Patch(key, patch) => match self.patch_entity(set_name, &key, &patch).await
+                {
+                    Ok(_) => self
+                        .read_entity(set_name, &key, &ODataQuery::new())
+                        .await
+                        .map(Some),
+                    Err(e) => Err(e),
+                },
+                WriteOp::Delete(key) => self.delete_entity(set_name, &key).await.map(|()| None),
+            };
+            results.push(result);
+        }
+        results
+    }
 
     // -- Default-Methoden (kein Implementierungszwang) --
     async fn update_entities(

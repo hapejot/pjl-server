@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use thiserror::Error;
 use tracing::debug;
 
-use data_store::{DataRecord, DataStore, DraftDataStore, EntityKey, Navigation, StoreError};
+use data_store::{DataRecord, DataStore, DraftDataStore, EntityKey, Navigation, StoreError, WriteOp};
 
 /// Identifiziert eine durchlaufende Operation (für Logging/Vorschau im Hook).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -206,7 +206,7 @@ impl DataStore for Extender {
         self.hook
             .before(self, set_name, Operation::Create, &mut value)
             .await?;
-        let mut r = self.inner.create_entity(set_name, data).await?;
+        let mut r = self.inner.create_entity(set_name, &value).await?;
         self.hook
             .after(self, set_name, Operation::Create, &mut r)
             .await?;
@@ -223,7 +223,7 @@ impl DataStore for Extender {
         self.hook
             .before(self, set_name, Operation::Patch, &mut value)
             .await?;
-        let result = self.inner.patch_entity(set_name, key, patch).await?;
+        let result = self.inner.patch_entity(set_name, key, &value).await?;
         let mut record = self
             .inner
             .read_entity(set_name, key, &odata::query::ODataQuery::new())
@@ -246,6 +246,67 @@ impl DataStore for Extender {
             .after(self, set_name, Operation::Delete, &mut record)
             .await?;
         Ok(())
+    }
+
+    /// Batch-Variante: Before-Hooks laufen pro Satz, die verbliebenen Operationen
+    /// gehen als Liste an den inneren Store, danach laufen After-Hooks pro Satz.
+    /// Ein Hook-Fehler betrifft nur seinen Satz.
+    async fn write_entities(
+        &self,
+        set_name: &str,
+        ops: Vec<WriteOp>,
+    ) -> Vec<Result<Option<DataRecord>, StoreError>> {
+        let mut results: Vec<Option<Result<Option<DataRecord>, StoreError>>> =
+            (0..ops.len()).map(|_| None).collect();
+        // Pro weitergereichter Operation: Index in `ops`, Operationsart, Schluessel bei Delete.
+        let mut pending: Vec<(usize, Operation, Option<EntityKey>)> = Vec::new();
+        let mut inner_ops = Vec::new();
+
+        for (i, op) in ops.into_iter().enumerate() {
+            let (kind, mut value, key) = match op {
+                WriteOp::Create(data) => (Operation::Create, data, None),
+                WriteOp::Patch(key, patch) => (Operation::Patch, patch, Some(key)),
+                WriteOp::Delete(key) => (Operation::Delete, Self::key_value(&key), Some(key)),
+            };
+            if let Err(e) = self.hook.before(self, set_name, kind, &mut value).await {
+                results[i] = Some(Err(e.into()));
+                continue;
+            }
+            // Vom Before-Hook geaenderte Werte gehen an den inneren Store.
+            inner_ops.push(match (kind, &key) {
+                (Operation::Create, _) => WriteOp::Create(value),
+                (Operation::Patch, Some(k)) => WriteOp::Patch(k.clone(), value),
+                (Operation::Delete, Some(k)) => WriteOp::Delete(k.clone()),
+                _ => unreachable!("Patch und Delete haben immer einen Schluessel"),
+            });
+            pending.push((i, kind, key));
+        }
+
+        let inner_results = self.inner.write_entities(set_name, inner_ops).await;
+        for ((i, kind, key), result) in pending.into_iter().zip(inner_results) {
+            let result = match result {
+                Ok(Some(mut record)) => {
+                    match self.hook.after(self, set_name, kind, &mut record).await {
+                        Ok(()) => Ok(Some(record)),
+                        Err(e) => Err(e.into()),
+                    }
+                }
+                Ok(None) => {
+                    // Delete: After-Hook mit dem Schluessel-Datensatz, wie in delete_entity.
+                    let mut record = Self::key_record(key.as_ref().expect("Delete hat einen Schluessel"));
+                    match self.hook.after(self, set_name, kind, &mut record).await {
+                        Ok(()) => Ok(None),
+                        Err(e) => Err(e.into()),
+                    }
+                }
+                Err(e) => Err(e),
+            };
+            results[i] = Some(result);
+        }
+        results
+            .into_iter()
+            .map(|r| r.expect("jede Operation hat ein Ergebnis"))
+            .collect()
     }
 
     async fn delete_entity_tree_only(

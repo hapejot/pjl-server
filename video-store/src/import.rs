@@ -7,7 +7,7 @@
 use anyhow::{bail, Context};
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
-use data_store::DataStore;
+use data_store::{DataStore, WriteOp};
 use serde_json::{json, Map, Value};
 use tokio_postgres::Client;
 use tracing::{error, info};
@@ -62,13 +62,12 @@ pub async fn write_rows<S: DataStore>(
     rows: &[Map<String, Value>],
 ) -> anyhow::Result<usize> {
     let records = records_for_table(model, table, rows)?;
+    let ops: Vec<WriteOp> = records.iter().cloned().map(WriteOp::Create).collect();
     let mut rejected = 0usize;
-    for record in &records {
-        if let Err(e) = store
-            .create_entity(&table.set, record)
-            .await
-            .with_context(|| format!("{}: Zeile {} wurde abgelehnt", table.table, record["ID"]))
-        {
+    for (record, result) in records.iter().zip(store.write_entities(&table.set, ops).await) {
+        if let Err(e) = result.with_context(|| {
+            format!("{}: Zeile {} wurde abgelehnt", table.table, record["ID"])
+        }) {
             error!("create entity: {e:#}");
             rejected += 1;
         }

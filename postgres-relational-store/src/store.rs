@@ -13,7 +13,7 @@ use data_store::schema::{
 };
 use data_store::{
     json_to_param, param_to_json, DataRecord, DataStore, DraftDataStore, EntityKey, Navigation,
-    SqlParam, StoreError,
+    SqlParam, StoreError, WriteOp,
 };
 use deadpool_postgres::GenericClient;
 use deadpool_postgres::{Object, Pool};
@@ -79,10 +79,10 @@ macro_rules! conn {
 /// laufen hier echte Nebenlaeufer gegen dieselbe Datenbank. Ein abgebrochener
 /// Schreibvorgang darf keinen halben Zustand hinterlassen: scheitert `body`,
 /// wird die Transaktion beim Verlassen des Blocks verworfen.
-macro_rules! in_transaction {
-    ($self:expr, |$tx:ident| $body:block) => {{
-        let mut connection = conn!($self);
-        let $tx = connection
+/// Fuehrt `body` in einer Transaktion auf einer bereits geholten Verbindung aus.
+macro_rules! in_transaction_on {
+    ($conn:expr, |$tx:ident| $body:block) => {{
+        let $tx = $conn
             .transaction()
             .await
             .map_err(|e| sql_err!(Conversion, pg(&e)))?;
@@ -91,6 +91,14 @@ macro_rules! in_transaction {
             .await
             .map_err(|e| sql_err!(Conversion, pg(&e)))?;
         result
+    }};
+}
+
+/// Fuehrt `body` in einer Transaktion auf einer Verbindung aus dem Pool aus.
+macro_rules! in_transaction {
+    ($self:expr, |$tx:ident| $body:block) => {{
+        let mut connection = conn!($self);
+        in_transaction_on!(connection, |$tx| $body)
     }};
 }
 
@@ -778,6 +786,126 @@ async fn set_applied_revision(
     Ok(())
 }
 
+impl PostgresStore {
+    async fn create_on(
+        &self,
+        conn: &mut Object,
+        set_name: &str,
+        data: &Value,
+    ) -> Result<DataRecord, StoreError> {
+        let schema = self.entity_set(set_name)?;
+        let set = schema.set(set_name).expect("geprueft");
+        let mut record = DataRecord::from_json(data)?;
+
+        // Unbekannte Felder sind ein Fehler: im relationalen Modell gibt es
+        // keine Spalte, in der sie verschwinden koennten.
+        if let Some(object) = data.as_object() {
+            for field in object.keys() {
+                let known = set.has_column(field)
+                    || matches!(
+                        field.as_str(),
+                        "ID" | "IsActiveEntity"
+                            | "HasActiveEntity"
+                            | "HasDraftEntity"
+                            | "DraftAdministrativeData"
+                            | "DraftMessages"
+                    )
+                    || set.get_association(field).is_ok();
+                if !known {
+                    return Err(StoreError::PropertyNotFound(format!("{set_name}.{field}")));
+                }
+            }
+        }
+
+        // Pruefung des Parents und das Schreiben gehoeren zusammen: sonst
+        // koennte der Parent dazwischen aktiviert oder geloescht werden.
+        in_transaction_on!(conn, |tx| {
+            if let Some(parent) = set.composition_parent() {
+                let parent_set = schema
+                    .set(&parent.target_set)
+                    .map_err(|e| StoreError::Metadata(e.to_string()))?;
+                let fk = parent.foreign_key.column();
+                let parent_id = record
+                    .get(fk)
+                    .and_then(|v| v.as_str().map(str::to_string))
+                    .ok_or_else(|| StoreError::PropertyNotFound(format!("{set_name}.{fk}")))?;
+                let parent_uuid =
+                    Uuid::parse_str(&parent_id).map_err(|e| StoreError::Conflict(e.to_string()))?;
+                let parent_key = EntityKey::new(parent_uuid, record.is_active_entity());
+                let parent_record = self.load_one(&tx, parent_set, &parent_key).await?;
+
+                match (record.is_active_entity(), parent_record.draft_admin_data()) {
+                    (true, None) => {}
+                    (true, Some(_)) => return Err(StoreError::InvalidState),
+                    (false, None) => return Err(StoreError::InvalidState),
+                    (false, Some(admin)) => record.set_draft_uuid(admin.draft_uuid),
+                }
+            } else if !record.is_active_entity() {
+                record.create_draft();
+            }
+
+            self.write_record(&tx, set, &record).await?;
+            Ok::<_, StoreError>(())
+        });
+        Ok(record)
+    }
+
+    async fn patch_on(
+        &self,
+        conn: &mut Object,
+        set_name: &str,
+        key: &EntityKey,
+        patch: &Value,
+    ) -> Result<DataRecord, StoreError> {
+        let schema = self.entity_set(set_name)?;
+        let set = schema.set(set_name).expect("geprueft");
+        if let Some(object) = patch.as_object() {
+            for field in object.keys() {
+                if !set.has_column(field) {
+                    return Err(StoreError::PropertyNotFound(format!("{set_name}.{field}")));
+                }
+                let column = set
+                    .get_column(field)
+                    .map_err(|e| StoreError::Metadata(e.to_string()))?;
+                if column.is_immutable_on_change() {
+                    return Err(StoreError::Conflict(format!(
+                        "{set_name}.{field} ist unveraenderlich"
+                    )));
+                }
+            }
+        }
+        // Lesen, Zusammenfuehren und Schreiben sind ein Vorgang - sonst
+        // ueberschreibt der spaetere Patch die Aenderung des frueheren.
+        let record = in_transaction_on!(conn, |tx| {
+            let mut record = self.load_one(&tx, set, key).await?;
+            record.merge(patch);
+            self.write_record(&tx, set, &record).await?;
+            Ok::<_, StoreError>(record)
+        });
+        Ok(record)
+    }
+
+    async fn delete_on(
+        &self,
+        conn: &mut Object,
+        set_name: &str,
+        key: &EntityKey,
+    ) -> Result<(), StoreError> {
+        let schema = self.entity_set(set_name)?;
+        let set = schema.set(set_name).expect("geprueft");
+        // Ein Draft verwirft immer auch seinen aktiven Zwilling; beide
+        // Loeschungen gelten gemeinsam oder gar nicht.
+        in_transaction_on!(conn, |tx| {
+            self.delete_row(&tx, set, key).await?;
+            if !key.is_active_entity {
+                self.delete_row(&tx, set, &key.sibling()).await?;
+            }
+            Ok::<_, StoreError>(())
+        });
+        Ok(())
+    }
+}
+
 #[async_trait::async_trait]
 impl DataStore for PostgresStore {
     fn component_info(&self) -> String {
@@ -885,113 +1013,6 @@ impl DataStore for PostgresStore {
         Ok(row)
     }
 
-    async fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
-        let schema = self.entity_set(set_name)?;
-        let set = schema.set(set_name).expect("geprueft");
-        let mut record = DataRecord::from_json(data)?;
-
-        // Unbekannte Felder sind ein Fehler: im relationalen Modell gibt es
-        // keine Spalte, in der sie verschwinden koennten.
-        if let Some(object) = data.as_object() {
-            for field in object.keys() {
-                let known = set.has_column(field)
-                    || matches!(
-                        field.as_str(),
-                        "ID" | "IsActiveEntity"
-                            | "HasActiveEntity"
-                            | "HasDraftEntity"
-                            | "DraftAdministrativeData"
-                            | "DraftMessages"
-                    )
-                    || set.get_association(field).is_ok();
-                if !known {
-                    return Err(StoreError::PropertyNotFound(format!("{set_name}.{field}")));
-                }
-            }
-        }
-
-        // Pruefung des Parents und das Schreiben gehoeren zusammen: sonst
-        // koennte der Parent dazwischen aktiviert oder geloescht werden.
-        in_transaction!(self, |tx| {
-            if let Some(parent) = set.composition_parent() {
-                let parent_set = schema
-                    .set(&parent.target_set)
-                    .map_err(|e| StoreError::Metadata(e.to_string()))?;
-                let fk = parent.foreign_key.column();
-                let parent_id = record
-                    .get(fk)
-                    .and_then(|v| v.as_str().map(str::to_string))
-                    .ok_or_else(|| StoreError::PropertyNotFound(format!("{set_name}.{fk}")))?;
-                let parent_uuid =
-                    Uuid::parse_str(&parent_id).map_err(|e| StoreError::Conflict(e.to_string()))?;
-                let parent_key = EntityKey::new(parent_uuid, record.is_active_entity());
-                let parent_record = self.load_one(&tx, parent_set, &parent_key).await?;
-
-                match (record.is_active_entity(), parent_record.draft_admin_data()) {
-                    (true, None) => {}
-                    (true, Some(_)) => return Err(StoreError::InvalidState),
-                    (false, None) => return Err(StoreError::InvalidState),
-                    (false, Some(admin)) => record.set_draft_uuid(admin.draft_uuid),
-                }
-            } else if !record.is_active_entity() {
-                record.create_draft();
-            }
-
-            self.write_record(&tx, set, &record).await?;
-            Ok::<_, StoreError>(())
-        });
-        Ok(record)
-    }
-
-    async fn patch_entity(
-        &self,
-        set_name: &str,
-        key: &EntityKey,
-        patch: &Value,
-    ) -> Result<Value, StoreError> {
-        let schema = self.entity_set(set_name)?;
-        let set = schema.set(set_name).expect("geprueft");
-        if let Some(object) = patch.as_object() {
-            for field in object.keys() {
-                if !set.has_column(field) {
-                    return Err(StoreError::PropertyNotFound(format!("{set_name}.{field}")));
-                }
-                let column = set
-                    .get_column(field)
-                    .map_err(|e| StoreError::Metadata(e.to_string()))?;
-                if column.is_immutable_on_change() {
-                    return Err(StoreError::Conflict(format!(
-                        "{set_name}.{field} ist unveraenderlich"
-                    )));
-                }
-            }
-        }
-        // Lesen, Zusammenfuehren und Schreiben sind ein Vorgang - sonst
-        // ueberschreibt der spaetere Patch die Aenderung des frueheren.
-        in_transaction!(self, |tx| {
-            let mut record = self.load_one(&tx, set, key).await?;
-            record.merge(patch);
-            self.write_record(&tx, set, &record).await?;
-            Ok::<_, StoreError>(())
-        });
-        Ok(patch.clone())
-    }
-
-    async fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
-        let schema = self.entity_set(set_name)?;
-        let set = schema.set(set_name).expect("geprueft");
-        // Ein Draft verwirft immer auch seinen aktiven Zwilling; beide
-        // Loeschungen gelten gemeinsam oder gar nicht.
-        in_transaction!(self, |tx| {
-            self.delete_row(&tx, set, key).await?;
-            if !key.is_active_entity {
-                self.delete_row(&tx, set, &key.sibling()).await?;
-            }
-            Ok::<_, StoreError>(())
-        });
-        Ok(())
-    }
-
     async fn delete_entity_tree_only(
         &self,
         set_name: &str,
@@ -1027,6 +1048,59 @@ impl DataStore for PostgresStore {
             .await?
             .get(property)
             .ok_or_else(|| StoreError::PropertyNotFound(property.into()))
+    }
+
+    async fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
+        let mut conn = conn!(self);
+        self.create_on(&mut conn, set_name, data).await
+    }
+
+    async fn patch_entity(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+        patch: &Value,
+    ) -> Result<Value, StoreError> {
+        let mut conn = conn!(self);
+        self.patch_on(&mut conn, set_name, key, patch).await?;
+        Ok(patch.clone())
+    }
+
+    async fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
+        let mut conn = conn!(self);
+        self.delete_on(&mut conn, set_name, key).await
+    }
+
+    /// Batch-Variante: eine Verbindung fuer die ganze Liste. Jeder Satz laeuft
+    /// weiterhin in seiner eigenen Transaktion, Fehler betreffen nur ihren Satz.
+    async fn write_entities(
+        &self,
+        set_name: &str,
+        ops: Vec<WriteOp>,
+    ) -> Vec<Result<Option<DataRecord>, StoreError>> {
+        let mut conn = match self.pool.get().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                let msg = e.to_string();
+                return ops
+                    .iter()
+                    .map(|_| Err(sql_err!(Conversion, msg.clone())))
+                    .collect();
+            }
+        };
+        let mut results = Vec::with_capacity(ops.len());
+        for op in ops {
+            let result = match op {
+                WriteOp::Create(data) => self.create_on(&mut conn, set_name, &data).await.map(Some),
+                WriteOp::Patch(key, patch) => self
+                    .patch_on(&mut conn, set_name, &key, &patch)
+                    .await
+                    .map(Some),
+                WriteOp::Delete(key) => self.delete_on(&mut conn, set_name, &key).await.map(|()| None),
+            };
+            results.push(result);
+        }
+        results
     }
 
     async fn commit(&self) {}

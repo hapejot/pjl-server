@@ -131,6 +131,11 @@ impl DataRecord {
         }
     }
 
+    /// Entfernt ein Feld, das nur intern (z. B. fuer `$expand`) geladen wurde.
+    pub fn remove_field(&mut self, name: &str) {
+        self.fields.remove(name);
+    }
+
     pub fn touch(&mut self, s: &str) {
         if s == "ID"
             || s == "IsActiveEntity"

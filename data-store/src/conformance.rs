@@ -388,6 +388,25 @@ pub async fn expand_to_one_returns_parent<H: Harness>() {
     assert_eq!(r.get("Customer").expect("Customer")["Name"], json!("Mueller GmbH"));
 }
 
+pub async fn expand_to_one_survives_select<H: Harness>() {
+    let h = H::create().await;
+    seed(&h).await;
+    // $select nennt den Fremdschluessel Customer_ID nicht; die ToOne-Expansion
+    // muss ihn trotzdem lesen koennen. (Bewusst keine Komposition mit
+    // Gegenrichtung wie Item.Order: die Dokumenten-Stores fuehren sie unter
+    // dem FK-Namen, nicht unter der Navigation.)
+    let rows = h
+        .store().await
+        .get_collection(ORDERS, &q().select("Amount").expand("Customer")).await
+        .expect("collection");
+    assert_eq!(rows.len(), 2);
+    for row in &rows {
+        let customer = row.get("Customer").expect("Customer");
+        assert!(!customer.is_null(), "Customer ist null trotz gesetztem Fremdschluessel");
+        assert!(customer["Name"].is_string());
+    }
+}
+
 pub async fn expand_in_collection<H: Harness>() {
     let h = H::create().await;
     seed(&h).await;
@@ -644,6 +663,7 @@ macro_rules! conformance_tests {
             expand_to_many_returns_children,
             expand_to_one_returns_parent,
             expand_in_collection,
+            expand_to_one_survives_select,
             expand_unknown_navigation_is_an_error,
             expand_draft_administrative_data,
             draft_edit_activate_roundtrip,

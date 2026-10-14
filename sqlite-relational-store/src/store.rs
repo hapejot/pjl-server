@@ -850,6 +850,18 @@ impl DataStore for RelationalStore {
         for s in query.select.iter() {
             sql = sql.select(s);
         }
+        // Fremdschluessel fuer $expand mitlesen, auch wenn $select sie nicht nennt.
+        let helper_cols: Vec<String> = if query.select.is_empty() {
+            vec![]
+        } else {
+            data_store::query::expand_key_columns(set, query)
+                .into_iter()
+                .filter(|c| !query.select.contains(c))
+                .collect()
+        };
+        for c in helper_cols.iter() {
+            sql = sql.select(c);
+        }
         if !sql.select_is_empty() {
             sql = sql.select("DraftAdministrativeData_ID");
         }
@@ -875,6 +887,11 @@ impl DataStore for RelationalStore {
             }
         }
         self.expand_rows(&conn, set, &mut records, query, false)?;
+        for record in records.iter_mut() {
+            for c in helper_cols.iter() {
+                record.remove_field(c);
+            }
+        }
         Ok(records)
     }
 

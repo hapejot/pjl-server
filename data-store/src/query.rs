@@ -9,6 +9,21 @@ use serde_json::Value;
 
 use crate::datastore::DataRecord;
 use crate::filter_eval::evaluate;
+use crate::schema::{Cardinality, EntitySet};
+
+/// Fremdschluessel der ToOne-Navigationen aus `$expand`. Die Expansion liest sie
+/// aus der Elternzeile; fehlen sie wegen `$select`, werden die Navigationen null.
+/// Backends sollen sie deshalb mitlesen und mit [`DataRecord::remove_field`]
+/// wieder entfernen, wenn der Client sie nicht angefordert hat.
+pub fn expand_key_columns(set: &EntitySet, query: &ODataQuery) -> Vec<String> {
+    query
+        .expand
+        .iter()
+        .filter_map(|item| set.get_association(&item.navigation_property).ok())
+        .filter(|a| matches!(a.cardinality, Cardinality::ToOne))
+        .map(|a| a.foreign_key.column().to_string())
+        .collect()
+}
 
 /// Ordnungsrelation fuer JSON-Werte. `Null` sortiert vor allen anderen Werten,
 /// unvergleichbare Typen gelten als gleich (stabile Sortierung bleibt erhalten).

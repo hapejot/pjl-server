@@ -811,6 +811,18 @@ impl DataStore for PostgresStore {
         for s in query.select.iter() {
             sql = sql.select(s);
         }
+        // Fremdschluessel fuer $expand mitlesen, auch wenn $select sie nicht nennt.
+        let helper_cols: Vec<String> = if query.select.is_empty() {
+            vec![]
+        } else {
+            data_store::query::expand_key_columns(set, query)
+                .into_iter()
+                .filter(|c| !query.select.contains(c))
+                .collect()
+        };
+        for c in helper_cols.iter() {
+            sql = sql.select(c);
+        }
         // Wie beim SQLite-Store: ohne die Draft-Verwaltungsspalte fehlt bei
         // einem $select die Zuordnung zu DraftAdministrativeData.
         if !sql.select_is_empty() {
@@ -840,6 +852,11 @@ impl DataStore for PostgresStore {
         }
         self.expand_rows(&client, set, &mut records, query, false)
             .await?;
+        for record in records.iter_mut() {
+            for c in helper_cols.iter() {
+                record.remove_field(c);
+            }
+        }
         Ok(records)
     }
 

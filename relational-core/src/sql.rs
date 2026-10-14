@@ -133,7 +133,17 @@ pub mod query {
             self
         }
 
-        pub fn build(mut self) -> Result<Sql, StoreError> {
+        pub fn build(self) -> Result<Sql, StoreError> {
+            self.assemble(false)
+        }
+
+        /// Wie [`build`], liefert aber `SELECT COUNT(*)` mit denselben
+        /// Bedingungen. Es werden keine Zeilen uebertragen.
+        pub fn build_count(self) -> Result<Sql, StoreError> {
+            self.assemble(true)
+        }
+
+        fn assemble(mut self, count: bool) -> Result<Sql, StoreError> {
             // Reihenfolge: erst die Ausdrucksfilter (sie binden Parameter),
             // dann die bereits umnummerierten Rohfilter.
             let exprs = std::mem::take(&mut self.filter);
@@ -144,7 +154,9 @@ pub mod query {
             conditions.extend(self.raw_filters.iter().cloned());
             let condition_sql = conditions.join(" AND ");
 
-            let fields_sql = if self.select.is_empty() {
+            let fields_sql = if count {
+                "COUNT(*)".to_string()
+            } else if self.select.is_empty() {
                 "*".to_string()
             } else {
                 self.select

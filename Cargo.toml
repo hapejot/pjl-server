@@ -12,4 +12,6 @@ members = [
     "spec",
     "spec-schema",
     "video-store",
+    "video-3270",
+    "srv-3270",
 ]

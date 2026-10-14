@@ -215,6 +215,46 @@ pub fn build_model(catalog: &PgCatalog) -> anyhow::Result<Model> {
         None,
         Package::new(PACKAGE),
     ));
+    ddic.add_app(App::new(
+        "tags".into(),
+        "Tags".into(),
+        "Tag".into(),
+        Some("Manage Tags".into()),
+        None,
+        Package::new(PACKAGE),
+    ));
+    ddic.add_app(App::new(
+        "agents".into(),
+        "Agents".into(),
+        "Agent".into(),
+        Some("Manage Agents".into()),
+        None,
+        Package::new(PACKAGE),
+    ));
+    ddic.add_app(App::new(
+        "jobs".into(),
+        "Jobs".into(),
+        "VideoJob".into(),
+        Some("Monitor Jobs".into()),
+        None,
+        Package::new(PACKAGE),
+    ));
+    ddic.add_app(App::new(
+        "actors".into(),
+        "Actors".into(),
+        "Actor".into(),
+        Some("Manage Actors".into()),
+        None,
+        Package::new(PACKAGE),
+    ));
+    ddic.add_app(App::new(
+        "scenes".into(),
+        "Scenes".into(),
+        "Scene".into(),
+        Some("Manage Scenes".into()),
+        None,
+        Package::new(PACKAGE),
+    ));
 
     let model = Model { ddic, tables };
     // Validierung: ein Modell, das hier nicht als Schema gilt, wird nie gestartet.

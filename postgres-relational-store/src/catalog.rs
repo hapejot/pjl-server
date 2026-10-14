@@ -5,6 +5,7 @@
 //! (`current_schema()`), damit eine Datenbank mit mehreren isolierten
 //! Schemata sich nicht selbst ins Gehege kommt.
 
+use crate::sqltrace;
 use std::collections::HashSet;
 
 use data_store::StoreError;
@@ -28,10 +29,7 @@ fn catalog_err(e: impl std::fmt::Display) -> StoreError {
 #[async_trait::async_trait]
 impl<C: GenericClient + Sync> Catalog for PostgresCatalog<'_, C> {
     async fn table_exists(&self, table: &str) -> Result<bool, StoreError> {
-        let row = self
-            .client
-            .query_one(
-                "SELECT COUNT(*) FROM information_schema.tables \
+        let row = sqltrace::query_one(self.client, "SELECT COUNT(*) FROM information_schema.tables \
                  WHERE table_schema = current_schema() AND table_name = $1",
                 &[&table],
             )
@@ -42,10 +40,7 @@ impl<C: GenericClient + Sync> Catalog for PostgresCatalog<'_, C> {
     }
 
     async fn existing_columns(&self, table: &str) -> Result<HashSet<String>, StoreError> {
-        let rows = self
-            .client
-            .query(
-                "SELECT column_name FROM information_schema.columns \
+        let rows = sqltrace::query(self.client, "SELECT column_name FROM information_schema.columns \
                  WHERE table_schema = current_schema() AND table_name = $1",
                 &[&table],
             )

@@ -12,6 +12,7 @@
 //! streng. Beides faengt `relational_core::dialect::Postgres` ab.
 
 pub mod catalog;
+pub mod sqltrace;
 pub mod store;
 pub mod value;
 

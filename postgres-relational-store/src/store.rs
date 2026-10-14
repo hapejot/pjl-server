@@ -31,6 +31,7 @@ use tracing::{debug, trace};
 use uuid::Uuid;
 
 use crate::catalog::PostgresCatalog;
+use crate::sqltrace;
 use crate::value::{from_postgres, PgParam};
 
 macro_rules! sql_err {
@@ -65,9 +66,7 @@ fn pg(e: &tokio_postgres::Error) -> String {
 /// parallel.
 macro_rules! conn {
     ($self:expr) => {
-        $self
-            .pool
-            .get()
+        $crate::sqltrace::conn(&$self.pool)
             .await
             .map_err(|e| sql_err!(Conversion, e))?
     };
@@ -82,12 +81,11 @@ macro_rules! conn {
 /// Fuehrt `body` in einer Transaktion auf einer bereits geholten Verbindung aus.
 macro_rules! in_transaction_on {
     ($conn:expr, |$tx:ident| $body:block) => {{
-        let $tx = $conn
-            .transaction()
+        let $tx = $crate::sqltrace::begin(&mut *$conn)
             .await
             .map_err(|e| sql_err!(Conversion, pg(&e)))?;
         let result = async { $body }.await?;
-        $tx.commit()
+        $crate::sqltrace::commit($tx)
             .await
             .map_err(|e| sql_err!(Conversion, pg(&e)))?;
         result
@@ -147,7 +145,7 @@ impl PostgresStore {
             .schema()
             .map_err(|e| StoreError::Metadata(e.to_string()))?;
         {
-            let mut client = pool.get().await.map_err(|e| sql_err!(Metadata, e))?;
+            let mut client = sqltrace::conn(&pool).await.map_err(|e| sql_err!(Metadata, e))?;
             apply_schema(&mut client, &POSTGRES, &schema).await?;
             set_applied_revision(&client, &POSTGRES, schema_source.revision().0).await?;
         }
@@ -205,13 +203,11 @@ impl PostgresStore {
             return 0;
         };
         let set = schema.set(set_name).expect("geprueft");
-        let Ok(client) = self.pool.get().await else {
+        let Ok(client) = sqltrace::conn(&self.pool).await else {
             return 0;
         };
         let result = if set.draft_enabled {
-            client
-                .query_one(
-                    &format!(
+            sqltrace::query_one(&client, &format!(
                         "SELECT COUNT(*) FROM {} WHERE {} = $1",
                         quote(set_name),
                         quote(IS_ACTIVE_COLUMN)
@@ -220,8 +216,7 @@ impl PostgresStore {
                 )
                 .await
         } else if is_active {
-            client
-                .query_one(&format!("SELECT COUNT(*) FROM {}", quote(set_name)), &[])
+            sqltrace::query_one(&client, &format!("SELECT COUNT(*) FROM {}", quote(set_name)), &[])
                 .await
         } else {
             return 0;
@@ -231,12 +226,10 @@ impl PostgresStore {
 
     /// Anzahl der Draft-Verwaltungssaetze. Diagnose- und Testhilfe.
     pub async fn count_draft_admin(&self) -> usize {
-        let Ok(client) = self.pool.get().await else {
+        let Ok(client) = sqltrace::conn(&self.pool).await else {
             return 0;
         };
-        client
-            .query_one(
-                &format!("SELECT COUNT(*) FROM {}", quote(DRAFT_ADMIN_TABLE)),
+        sqltrace::query_one(&client, &format!("SELECT COUNT(*) FROM {}", quote(DRAFT_ADMIN_TABLE)),
                 &[],
             )
             .await
@@ -251,9 +244,7 @@ impl PostgresStore {
         conn: &impl GenericClient,
         draft_uuid: &str,
     ) -> Result<Option<Value>, StoreError> {
-        let rows = conn
-            .query(
-                &format!(
+        let rows = sqltrace::query(conn, &format!(
                     "SELECT {uuid}, {created}, {in_process}, {changed} FROM {table} \
                      WHERE {uuid} = $1",
                     uuid = quote("DraftUUID"),
@@ -286,7 +277,7 @@ impl PostgresStore {
             return Ok(None);
         };
         let uuid = admin.draft_uuid.to_string();
-        conn.execute(
+        sqltrace::execute(conn, 
             &format!(
                 "INSERT INTO {table} ({uuid}, {created}, {in_process}, {changed}) \
                  VALUES ($1, $2, $3, $4) \
@@ -368,7 +359,7 @@ impl PostgresStore {
         );
         trace!("write: {sql}");
         let bound = bind(&values);
-        conn.execute(&sql, &as_refs(&bound))
+        sqltrace::execute(conn, &sql, &as_refs(&bound))
             .await
             .map_err(|e| sql_err!(Metadata, pg(&e)))?;
         Ok(())
@@ -453,8 +444,7 @@ impl PostgresStore {
         debug!("query: {sql}");
 
         let bound = bind(&params);
-        let rows = conn
-            .query(&sql, &as_refs(&bound))
+        let rows = sqltrace::query(conn, &sql, &as_refs(&bound))
             .await
             .map_err(|e| sql_err!(Metadata, format!("{} in {sql}", pg(&e))))?;
 
@@ -530,8 +520,7 @@ impl PostgresStore {
                 params.push(SqlParam::Bool(key.is_active_entity));
             }
             let bound = bind(&params);
-            let rows = conn
-                .query(&sql, &as_refs(&bound))
+            let rows = sqltrace::query(conn, &sql, &as_refs(&bound))
                 .await
                 .map_err(|e| sql_err!(Metadata, pg(&e)))?;
             for row in rows {
@@ -565,7 +554,7 @@ impl PostgresStore {
         );
         let params = Self::key_params(set, key);
         let bound = bind(&params);
-        conn.execute(&sql, &as_refs(&bound))
+        sqltrace::execute(conn, &sql, &as_refs(&bound))
             .await
             .map_err(|e| sql_err!(Metadata, pg(&e)))?;
         Ok(())
@@ -650,7 +639,10 @@ impl PostgresStore {
                 continue;
             }
             match set.get_association(name) {
-                Ok(assoc) => self.expand_association(conn, rows, assoc).await?,
+                Ok(assoc) => {
+                    self.expand_association(conn, rows, assoc, &item.nested_query)
+                        .await?
+                }
                 Err(e) if strict => return Err(StoreError::Metadata(e.to_string())),
                 Err(_) => {}
             }
@@ -658,11 +650,15 @@ impl PostgresStore {
         Ok(())
     }
 
+    /// Laedt die Zielsaetze einer Navigation. Verschachtelte `$expand`-Teile
+    /// des Unterabfragen (z. B. `_VideoTags($expand=tag)`) werden auf den
+    /// geladenen Zielzeilen rekursiv ausgefuehrt, bevor sie eingebettet werden.
     async fn expand_association(
         &self,
         conn: &impl GenericClient,
         rows: &mut [DataRecord],
         assoc: &Association,
+        nested: &ODataQuery,
     ) -> Result<(), StoreError> {
         let schema = self.schema();
         let target = schema
@@ -694,9 +690,12 @@ impl PostgresStore {
                     .filter_raw(raw, params)
                     .shadow_drafts()
                     .build()?;
-                let found = self
+                let mut found = self
                     .query_records(conn, target, sql.text, sql.params, None, "")
                     .await?;
+                if !nested.expand.is_empty() {
+                    Box::pin(self.expand_rows(conn, target, &mut found, nested, false)).await?;
+                }
                 let by_id: HashMap<String, Value> = found
                     .iter()
                     .map(|r| (r.id().to_string(), r.core_json()))
@@ -723,9 +722,12 @@ impl PostgresStore {
                     .filter_raw(raw, params)
                     .shadow_drafts()
                     .build()?;
-                let found = self
+                let mut found = self
                     .query_records(conn, target, sql.text, sql.params, None, "")
                     .await?;
+                if !nested.expand.is_empty() {
+                    Box::pin(self.expand_rows(conn, target, &mut found, nested, false)).await?;
+                }
 
                 let mut grouped: HashMap<String, Vec<Value>> = HashMap::new();
                 for record in found.iter() {
@@ -754,8 +756,7 @@ async fn apply_schema(
     let plan = ddl::migration_plan(&PostgresCatalog::new(&*client), dialect, schema).await?;
     for statement in plan {
         debug!("DDL: {statement}");
-        client
-            .batch_execute(&statement)
+        sqltrace::batch_execute(client, &statement)
             .await
             .map_err(|e| sql_err!(Conversion, format!("{} in {statement}", pg(&e))))?;
     }
@@ -763,8 +764,7 @@ async fn apply_schema(
 }
 
 async fn applied_revision(client: &impl GenericClient) -> Option<u64> {
-    client
-        .query_one(&ddl::revision_select_sql(), &[])
+    sqltrace::query_one(client, &ddl::revision_select_sql(), &[])
         .await
         .ok()
         .map(|row| row.get::<_, i64>(0) as u64)
@@ -775,12 +775,10 @@ async fn set_applied_revision(
     dialect: &dyn Dialect,
     revision: u64,
 ) -> Result<(), StoreError> {
-    client
-        .execute(&ddl::revision_delete_sql(), &[])
+    sqltrace::execute(client, &ddl::revision_delete_sql(), &[])
         .await
         .map_err(|e| sql_err!(Conversion, pg(&e)))?;
-    client
-        .execute(&ddl::revision_insert_sql(dialect), &[&(revision as i64)])
+    sqltrace::execute(client, &ddl::revision_insert_sql(dialect), &[&(revision as i64)])
         .await
         .map_err(|e| sql_err!(Conversion, pg(&e)))?;
     Ok(())
@@ -989,12 +987,31 @@ impl DataStore for PostgresStore {
         Ok(records)
     }
 
+    /// `SELECT COUNT(*)` mit denselben Bedingungen wie `$filter`. Es werden
+    /// keine Zeilen uebertragen; Sortierung, Paging und Expand entfallen.
     async fn count(&self, set_name: &str, query: &ODataQuery) -> usize {
-        let mut q = data_store::query::count_query(query);
-        q.orderby.clear();
-        self.get_collection(set_name, &q)
+        let Ok(schema) = self.entity_set(set_name) else {
+            return 0;
+        };
+        let set = schema.set(set_name).expect("geprueft");
+        // Gleiche Translator-Kette wie in get_collection, damit Zaehlung und
+        // Seitenabfrage dieselben Saetze treffen (inkl. Draft-Schattierung).
+        let mut sql = Translator::new(set, self.dialect())
+            .with_schema(&schema)
+            .shadow_drafts();
+        if let Some(filter) = &query.filter {
+            sql = sql.filter(filter);
+        }
+        let Ok(sql) = sql.build_count() else {
+            return 0;
+        };
+        let Ok(client) = sqltrace::conn(&self.pool).await else {
+            return 0;
+        };
+        let bound = bind(&sql.params);
+        sqltrace::query_one(&client, &sql.text, &as_refs(&bound))
             .await
-            .map(|r| r.len())
+            .map(|r| r.get::<_, i64>(0) as usize)
             .unwrap_or(0)
     }
 
@@ -1079,7 +1096,7 @@ impl DataStore for PostgresStore {
         set_name: &str,
         ops: Vec<WriteOp>,
     ) -> Vec<Result<Option<DataRecord>, StoreError>> {
-        let mut conn = match self.pool.get().await {
+        let mut conn = match sqltrace::conn(&self.pool).await {
             Ok(conn) => conn,
             Err(e) => {
                 let msg = e.to_string();

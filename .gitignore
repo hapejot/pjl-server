@@ -14,3 +14,4 @@ rel-data/data.sqlite
 rel-data
 design-data
 video-store/ddic.json
+tmp.sql

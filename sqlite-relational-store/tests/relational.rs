@@ -558,3 +558,41 @@ async fn a_failed_patch_changes_nothing() {
     assert_eq!(record.get("Titel"), Some(json!("Drucker klemmt")));
     assert_eq!(store.count_draft_admin(), 1);
 }
+
+#[tokio::test]
+async fn select_keeps_is_active_entity_of_active_records() {
+    // Regression: `$select=ID` darf den aktiven Satz nicht als Draft ausgeben.
+    let store = seeded().await;
+    let query = ODataQuery::new().select("ID");
+    let rows = store.get_collection(ORDERS, &query).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].is_active_entity());
+    assert!(!rows[0].has_draft_entity());
+}
+
+#[tokio::test]
+async fn filter_on_computed_draft_flags_is_accepted() {
+    // Fiori schickt `HasActiveEntity eq false and HasDraftEntity eq false`.
+    let store = seeded().await;
+    let filter = Expr::BinaryOp {
+        op: BinOp::And,
+        left: Box::new(bin(BinOp::Eq, Expr::Identifier("HasActiveEntity".into()), Expr::Bool(false))),
+        right: Box::new(bin(BinOp::Eq, Expr::Identifier("HasDraftEntity".into()), Expr::Bool(false))),
+    };
+    let query = ODataQuery::new().filter(filter);
+    let rows = store.get_collection(ORDERS, &query).await.expect("Filter ist gueltig");
+    assert_eq!(rows.len(), 1);
+}
+
+#[tokio::test]
+async fn select_accepts_computed_draft_flags() {
+    let store = seeded().await;
+    let query = ODataQuery::new()
+        .select("ID")
+        .select("IsActiveEntity")
+        .select("HasActiveEntity")
+        .select("HasDraftEntity");
+    let rows = store.get_collection(ORDERS, &query).await.expect("$select ist gueltig");
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].is_active_entity());
+}

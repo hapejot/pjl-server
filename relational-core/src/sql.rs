@@ -210,6 +210,11 @@ pub mod query {
         }
 
         fn column(&self, name: &str) -> Result<String, StoreError> {
+            // Berechnete Draft-Flags stehen nicht im Schema, sondern werden in
+            // `build_inner` aus dem Sibling-Join erzeugt und sind dort verfuegbar.
+            if self.set.draft_enabled && is_computed_draft_flag(name) {
+                return Ok(quote(name));
+            }
             // Existenz gegen das Schema pruefen: ein Tippfehler soll auffallen,
             // nicht als "kein Treffer" durchgehen.
             self.set
@@ -401,7 +406,7 @@ pub mod query {
                 Expr::Identifier(name) => self.field(std::slice::from_ref(name))?,
                 Expr::Path(parts) => self.field(parts)?,
                 Expr::String(s) => self.push(SqlParam::Text(s.clone())),
-                Expr::Guid(g) => self.push(SqlParam::Text(g.clone())),
+                Expr::Guid(g) | Expr::DateTime(g) => self.push(SqlParam::Text(g.clone())),
                 Expr::Number(n) => {
                     if n.fract() == 0.0 && n.abs() < i64::MAX as f64 {
                         self.push(SqlParam::Int(*n as i64))
@@ -563,6 +568,29 @@ pub mod query {
             self
         }
 
+        /// Ergaenzt bei gesetztem `$select` die Schluesselspalten.
+        ///
+        /// Fehlt `IsActiveEntity` in der Projektion, setzt `DataRecord::from_json`
+        /// den Satz stillschweigend auf den Draft-Zustand. Fiori fragt dann einen
+        /// nicht existierenden Draft ab.
+        pub fn select_record_keys(mut self) -> Self {
+            if self.select.is_empty() {
+                return self;
+            }
+            // Nur physische Spalten: HasActiveEntity/HasDraftEntity sind berechnet
+            // und werden vom Translator als Schema-Spalten abgelehnt.
+            let mut keys = vec!["ID"];
+            if self.set.draft_enabled {
+                keys.push("IsActiveEntity");
+            }
+            for key in keys {
+                if !self.select.iter().any(|s| s == key) {
+                    self.select.push(key.to_string());
+                }
+            }
+            self
+        }
+
         pub fn select_is_empty(&self) -> bool {
             self.select.is_empty()
         }
@@ -665,6 +693,11 @@ pub mod query {
     /// Die Spalten werden ohne Tabellenalias referenziert. Das bleibt auch
     /// richtig, wenn das aeussere `SELECT ... FROM (...)` einen Alias traegt
     /// (bei Lambda-Ausdruecken): die Klausel hat nur diese eine Quelle.
+    /// Berechnete Draft-Flags, die nur ueber den Sibling-Join existieren.
+    pub fn is_computed_draft_flag(name: &str) -> bool {
+        matches!(name, "HasActiveEntity" | "HasDraftEntity")
+    }
+
     pub fn order_by_clause(
         set: &EntitySet,
         dialect: &dyn Dialect,
@@ -678,8 +711,10 @@ pub mod query {
             if item.property.contains('/') {
                 return Err(unsupported(format!("$orderby {}", item.property)));
             }
-            set.get_column(&item.property)
-                .map_err(|e| StoreError::Metadata(e.to_string()))?;
+            if !(set.draft_enabled && is_computed_draft_flag(&item.property)) {
+                set.get_column(&item.property)
+                    .map_err(|e| StoreError::Metadata(e.to_string()))?;
+            }
             // Die NULL-Ordnung gehoert zur Richtung: sie muss zu
             // `data_store::query::compare_json` passen, und die Datenbanken
             // sind sich darin nicht einig.

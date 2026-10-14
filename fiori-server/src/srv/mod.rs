@@ -403,7 +403,9 @@ pub struct Annotations {
     pub annotations: Vec<Annotation>,
 }
 impl Annotations {
-    fn from_entity(x: &EntitySpec, hidden: &[String]) -> Vec<Annotations> {
+    /// `app_entities`: Namen der Hauptentitaeten aller Apps. Ein Verweis auf eine
+    /// dieser Entitaeten wird als semantische Verlinkung (Intent) ausgegeben.
+    fn from_entity(x: &EntitySpec, hidden: &[String], app_entities: &[String]) -> Vec<Annotations> {
         let mut annotations = Vec::new();
         let mut main_annotations = Annotations {
             target: format!("Service.{}", x.name()),
@@ -456,7 +458,7 @@ impl Annotations {
             .annotations
             .push(Annotation::new("UI.Facets").collection(facets));
 
-        let main_field_group = prepare_field_group(x, hidden);
+        let main_field_group = prepare_field_group(x, hidden, app_entities);
         main_annotations.annotations.push(main_field_group);
 
         annotations.push(main_annotations);
@@ -661,7 +663,23 @@ fn list_facet_records(x: &EntitySpec) -> Vec<Record> {
 }
 
 /// `hidden`: Felder, die aus der Standard-FieldGroup fehlen (z. B. wenn eine Erweiterung sie als eigenen Abschnitt zeigt).
-fn prepare_field_group(x: &EntitySpec, hidden: &[String]) -> Annotation {
+/// Einzel-Verweis auf eine App-Entitaet als semantische Verlinkung:
+/// `UI.DataFieldWithIntentBasedNavigation` mit Intent `<Entitaet>-display`,
+/// Parameter `ID` aus dem Fremdschluessel.
+fn lookup_intent_field(name: &str, entity: &str) -> Record {
+    let fk = format!("{name}_ID");
+    Record::new("UI.DataFieldWithIntentBasedNavigation")
+        .add(PropertyValue::new("Value").path(&fk))
+        .add(PropertyValue::new("SemanticObject").string(entity))
+        .add(PropertyValue::new("Action").string("display"))
+        .add(PropertyValue::new("Mapping").collection(Collection::new().add_record(
+            Record::new("Common.SemanticObjectMappingType")
+                .add(PropertyValue::new("LocalProperty").property_path(&fk))
+                .add(PropertyValue::new("SemanticObjectProperty").string("ID")),
+        )))
+}
+
+fn prepare_field_group(x: &EntitySpec, hidden: &[String], app_entities: &[String]) -> Annotation {
     let mut main_data = Collection::new();
     // main_data = main_data
     //     .add_record(Record::new("UI.DataField")
@@ -670,9 +688,14 @@ fn prepare_field_group(x: &EntitySpec, hidden: &[String]) -> Annotation {
     for f in x.fields() {
         match f {
             FieldSpec::Lookup {
-                name, collection, ..
+                name,
+                entity,
+                collection,
+                ..
             } => {
                 if *collection {
+                } else if app_entities.iter().any(|a| a == entity) {
+                    main_data = main_data.add_record(lookup_intent_field(name, entity));
                 } else {
                     let name = format!("{name}_ID");
                     main_data = main_data.add_record(
@@ -2243,6 +2266,13 @@ async fn index(State(state): State<AppState>) -> Json<Value> {
       "value": value
     }))
 }
+/// Namen der Hauptentitaeten aller Apps (Ziele der semantischen Verlinkung).
+fn app_entity_names(ddic: &DataDictionary) -> Vec<String> {
+    ddic.apps()
+        .map(|app| app.main_entity(ddic).name().to_string())
+        .collect()
+}
+
 async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
     let ddic = state.ddic();
     let entity_lst: Vec<EntityType> = ddic
@@ -2253,9 +2283,10 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
         .active_entities()
         .map(|x| EntitySet::from_entity(&ddic, x))
         .collect();
+    let app_entities = app_entity_names(&ddic);
     let annotation_lst: Vec<Annotations> = ddic
         .active_entities()
-        .map(|x| Annotations::from_entity(x, &crate::extension::hidden_fields(&state.extensions, x.name())))
+        .map(|x| Annotations::from_entity(x, &crate::extension::hidden_fields(&state.extensions, x.name()), &app_entities))
         .flatten()
         .collect();
     // let _sample_entity = sample::sample_entity();
@@ -2536,13 +2567,44 @@ mod tests {
     }
 
     #[test]
+    fn lookup_to_app_entity_gets_intent_based_navigation() {
+        let mut ddic = DataDictionary::new();
+        ddic.activate();
+        let (entity, target, name) = ddic
+            .active_entities()
+            .find_map(|e| {
+                e.fields().find_map(|f| match f {
+                    FieldSpec::Lookup {
+                        name,
+                        entity,
+                        collection: false,
+                        ..
+                    } => Some((e.clone(), entity.clone(), name.clone())),
+                    _ => None,
+                })
+            })
+            .expect("ein Einzel-Lookup im Standard-Dictionary");
+        let fk = format!("{name}_ID");
+
+        let linked = Annotations::from_entity(&entity, &[], std::slice::from_ref(&target));
+        let xml = format!("{linked:?}");
+        assert!(xml.contains("UI.DataFieldWithIntentBasedNavigation"));
+        assert!(xml.contains(&target));
+
+        let plain = Annotations::from_entity(&entity, &[], &[]);
+        let xml = format!("{plain:?}");
+        assert!(!xml.contains("UI.DataFieldWithIntentBasedNavigation"));
+        assert!(xml.contains(&fk));
+    }
+
+    #[test]
     fn facets_include_a_list_section_per_to_many_navigation() {
         let mut ddic = DataDictionary::new();
         ddic.activate();
         // "Entity" has to-many lookups _Fields, _Many, _One after activation.
         let entity = ddic.active_entity("Entity").unwrap();
 
-        let annotations = Annotations::from_entity(entity, &[]);
+        let annotations = Annotations::from_entity(entity, &[], &[]);
         let main = annotations
             .iter()
             .find(|a| a.target == "Service.Entity")

@@ -939,6 +939,7 @@ impl DataStore for PostgresStore {
         for s in query.select.iter() {
             sql = sql.select(s);
         }
+        sql = sql.select_record_keys();
         // Fremdschluessel fuer $expand mitlesen, auch wenn $select sie nicht nennt.
         let helper_cols: Vec<String> = if query.select.is_empty() {
             vec![]

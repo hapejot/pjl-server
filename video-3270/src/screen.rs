@@ -7,8 +7,7 @@ use srv_3270::{Attribute, Color, Command, DataStream, FieldAttribute, Order, Wcc
 pub enum FieldId {
     Select(usize),
     Command,
-    Title,
-    Reviewed,
+    Named(&'static str),
 }
 
 #[derive(Debug, Clone)]
@@ -82,9 +81,22 @@ impl Screen {
 
     /// Ungeschuetztes Eingabefeld der Laenge `len`, Datenbeginn bei col+1.
     pub fn input(&mut self, id: FieldId, row: u16, col: u16, len: u16, initial: &str) {
+        self.input_with(id, row, col, len, initial, FieldAttribute::unprotected_normal());
+    }
+
+    /// Wie `input`, aber mit eigenem Feldattribut (z.B. numerisch).
+    pub fn input_with(
+        &mut self,
+        id: FieldId,
+        row: u16,
+        col: u16,
+        len: u16,
+        initial: &str,
+        fa: FieldAttribute,
+    ) {
         let data = pad(&ascii(initial), len as usize);
         self.orders.push(Order::SetBufferAddress { row, col });
-        self.orders.push(Order::StartField(FieldAttribute::unprotected_normal()));
+        self.orders.push(Order::StartField(fa));
         self.orders.push(Order::Text(data));
         self.inputs.push(InputField {
             id,

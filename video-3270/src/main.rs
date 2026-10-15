@@ -7,6 +7,7 @@
 //!   RUST_LOG        Log-Filter (Standard video_3270=info); z.B. RUST_LOG=debug
 
 mod context;
+mod form;
 mod odata;
 mod screen;
 mod session;

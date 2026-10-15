@@ -131,6 +131,8 @@ pub enum Display {
 pub struct FieldAttribute {
     pub protection: Protection,
     pub display: Display,
+    #[serde(default)]
+    pub numeric: bool,
     pub modified: bool,
 }
 
@@ -139,6 +141,7 @@ impl FieldAttribute {
         FieldAttribute {
             protection: Protection::Protected,
             display: Display::Detectable,
+            numeric: false,
             modified: false,
         }
     }
@@ -146,6 +149,7 @@ impl FieldAttribute {
         FieldAttribute {
             protection: Protection::Protected,
             display: Display::Intensified,
+            numeric: false,
             modified: false,
         }
     }
@@ -153,6 +157,7 @@ impl FieldAttribute {
         FieldAttribute {
             protection: Protection::Unprotected,
             display: Display::Normal,
+            numeric: false,
             modified: false,
         }
     }
@@ -160,6 +165,7 @@ impl FieldAttribute {
         FieldAttribute {
             protection: Protection::Unprotected,
             display: Display::NonDisplay,
+            numeric: false,
             modified: false,
         }
     }
@@ -168,6 +174,7 @@ impl FieldAttribute {
         FieldAttribute {
             protection: Protection::Protected,
             display: Display::Normal,
+            numeric: false,
             modified: false,
         }
     }
@@ -179,11 +186,19 @@ impl FieldAttribute {
         self.modified = true;
         self
     }
+    /// Nur Ziffern. Das Terminal lehnt andere Zeichen ab.
+    pub const fn numeric(mut self) -> Self {
+        self.numeric = true;
+        self
+    }
 
     fn to_byte(self) -> u8 {
         let mut b: u8 = 0x00;
         if matches!(self.protection, Protection::Protected) {
             b |= 0x20;
+        }
+        if self.numeric {
+            b |= 0x10;
         }
         b |= match self.display {
             Display::Normal => 0x00,
@@ -607,6 +622,16 @@ mod tests {
         assert!(bytes.windows(3).any(|w| w == [ORDER_SA, 0x41, 0xF4]));
         // Stichprobe: Foreground-SA fuer Yellow (X'28' X'42' X'F6')
         assert!(bytes.windows(3).any(|w| w == [ORDER_SA, 0x42, 0xF6]));
+    }
+
+    #[test]
+    fn numeric_attribute_sets_bit_4() {
+        assert_eq!(FieldAttribute::unprotected_normal().to_byte(), 0x00);
+        assert_eq!(
+            FieldAttribute::unprotected_normal().numeric().to_byte(),
+            0x10
+        );
+        assert_eq!(FieldAttribute::normal().numeric().to_byte(), 0x30);
     }
 
     #[test]

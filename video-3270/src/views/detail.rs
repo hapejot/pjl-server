@@ -9,6 +9,7 @@ use srv_3270::{Color, FieldAttribute};
 use tracing::info;
 
 use super::{fmt_duration, fmt_size, fmt_ts, val, Action, App, View, P_ITEMS};
+use crate::form::{Field, FieldKind};
 use crate::screen::{ascii, clip, FieldId, Screen};
 use crate::tn3270::Aid;
 
@@ -23,7 +24,36 @@ const P_DETAIL_VIDEO_TITLE: &str = "/detail/video/title";
 const P_DETAIL_VIDEO_REVIEWED: &str = "/detail/video/is_reviewed";
 const P_DETAIL_VIDEO_ID: &str = "/detail/video/ID";
 
+const FIELD_TITLE: &str = "title";
+const FIELD_REVIEWED: &str = "reviewed";
+
 pub struct DetailView;
+
+/// Bearbeitbare Felder des Details. Anzeige und Pruefung nutzen dieselbe Liste.
+fn edit_fields(app: &App) -> Vec<Field> {
+    let reviewed = app.ctx.get(P_DETAIL_REVIEWED).as_bool().unwrap_or(false);
+    vec![
+        Field {
+            key: FIELD_TITLE,
+            label: "Titel",
+            len: 56,
+            kind: FieldKind::Text,
+            value: app
+                .ctx
+                .get(P_DETAIL_TITLE)
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
+        },
+        Field {
+            key: FIELD_REVIEWED,
+            label: "Gesehen (J/N)",
+            len: 1,
+            kind: FieldKind::Choice(&["J", "N"]),
+            value: if reviewed { "J" } else { "N" }.to_string(),
+        },
+    ]
+}
 
 fn has_detail(app: &App) -> bool {
     app.ctx.get(P_DETAIL_VIDEO).is_object()
@@ -88,19 +118,25 @@ fn apply_inputs(app: &mut App, values: &[(FieldId, String)]) {
     if !has_detail(app) {
         return;
     }
-    if let Some(t) = val(values, FieldId::Title) {
-        app.ctx.set(P_DETAIL_TITLE, json!(clip(t, 512)));
-    }
-    if let Some(r) = val(values, FieldId::Reviewed) {
-        let reviewed = match r.to_uppercase().as_str() {
-            "J" | "Y" | "1" => true,
-            "N" | "0" => false,
-            _ => {
-                app.msg = "Gesehen: J oder N eingeben".into();
+    let mut checked = Vec::new();
+    for f in edit_fields(app) {
+        let Some(raw) = val(values, FieldId::Named(f.key)) else {
+            continue;
+        };
+        match f.check(raw) {
+            Ok(v) => checked.push((f.key, v)),
+            Err(e) => {
+                app.msg = e;
                 return;
             }
-        };
-        app.ctx.set(P_DETAIL_REVIEWED, json!(reviewed));
+        }
+    }
+    for (key, v) in checked {
+        match key {
+            FIELD_TITLE => app.ctx.set(P_DETAIL_TITLE, json!(clip(&v, 512))),
+            FIELD_REVIEWED => app.ctx.set(P_DETAIL_REVIEWED, json!(v == "J")),
+            _ => {}
+        }
     }
     app.msg = if detail_dirty(app) {
         "Uebernommen - PF5 speichert".into()
@@ -185,23 +221,7 @@ impl DetailView {
         );
 
         let fa = FieldAttribute::normal();
-        s.text(3, 2, "Titel", fa, None);
-        s.input(
-            FieldId::Title,
-            3,
-            20,
-            56,
-            app.ctx.get(P_DETAIL_TITLE).as_str().unwrap_or(""),
-        );
-        s.text(4, 2, "Gesehen (J/N)", fa, None);
-        let reviewed = app.ctx.get(P_DETAIL_REVIEWED).as_bool().unwrap_or(false);
-        s.input(
-            FieldId::Reviewed,
-            4,
-            20,
-            1,
-            if reviewed { "J" } else { "N" },
-        );
+        s.form(3, &edit_fields(app));
 
         let res = match (v["width"].as_i64(), v["height"].as_i64()) {
             (Some(w), Some(h)) => format!("{w}x{h}"),
@@ -266,7 +286,7 @@ impl DetailView {
             None,
         );
         s.text(rows - 1, 0, KEYS_DETAIL, FieldAttribute::normal(), None);
-        s.focus(FieldId::Title);
+        s.focus(FieldId::Named(FIELD_TITLE));
         s
     }
 }
@@ -333,5 +353,33 @@ mod tests {
     fn tag_names_reads_nested_tags() {
         let v = json!({ "_VideoTags": [{ "tag": { "name": "Doku" } }, { "tag": null }] });
         assert_eq!(tag_names(&v), vec!["Doku".to_string()]);
+    }
+
+    #[test]
+    fn invalid_reviewed_value_is_rejected_and_keeps_state() {
+        let mut a = app();
+        set_detail(
+            &mut a,
+            0,
+            json!({ "ID": "a", "title": "Film", "is_reviewed": true }),
+        );
+        let values = [(FieldId::Named(FIELD_REVIEWED), "X".to_string())];
+        apply_inputs(&mut a, &values);
+        assert!(a.msg.contains("J, N"));
+        assert_eq!(a.ctx.get(P_DETAIL_REVIEWED).as_bool(), Some(true));
+    }
+
+    #[test]
+    fn valid_reviewed_value_updates_state() {
+        let mut a = app();
+        set_detail(
+            &mut a,
+            0,
+            json!({ "ID": "a", "title": "Film", "is_reviewed": true }),
+        );
+        let values = [(FieldId::Named(FIELD_REVIEWED), "n".to_string())];
+        apply_inputs(&mut a, &values);
+        assert_eq!(a.ctx.get(P_DETAIL_REVIEWED).as_bool(), Some(false));
+        assert!(detail_dirty(&a));
     }
 }

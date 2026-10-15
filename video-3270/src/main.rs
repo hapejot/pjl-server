@@ -6,10 +6,12 @@
 //!   ODATA_USER      Wert fuer den Header X-Forwarded-User (Standard 3270)
 //!   RUST_LOG        Log-Filter (Standard video_3270=info); z.B. RUST_LOG=debug
 
+mod context;
 mod odata;
 mod screen;
 mod session;
 mod tn3270;
+mod views;
 
 use anyhow::Result;
 use tokio::net::TcpListener;

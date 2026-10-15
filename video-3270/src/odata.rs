@@ -3,60 +3,15 @@
 use anyhow::{anyhow, bail, Result};
 use reqwest::RequestBuilder;
 use serde::Deserialize;
+use serde_json::Value;
 use std::time::Instant;
 use tracing::{info, warn};
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct Video {
-    #[serde(rename = "ID")]
-    pub id: String,
-    #[serde(default)]
-    pub name: Option<String>,
-    #[serde(default)]
-    pub title: Option<String>,
-    #[serde(default)]
-    pub duration_seconds: Option<f64>,
-    #[serde(default)]
-    pub width: Option<i64>,
-    #[serde(default)]
-    pub height: Option<i64>,
-    #[serde(default)]
-    pub codec: Option<String>,
-    #[serde(default)]
-    pub bitrate: Option<i64>,
-    #[serde(default)]
-    pub file_size: Option<i64>,
-    #[serde(default)]
-    pub file_path: Option<String>,
-    #[serde(default)]
-    pub is_reviewed: Option<bool>,
-    #[serde(default)]
-    pub thumbnail_count: Option<i64>,
-    #[serde(default)]
-    pub created_at: Option<String>,
-    #[serde(default)]
-    pub updated_at: Option<String>,
-    #[serde(default)]
-    pub last_seen: Option<String>,
-    #[serde(rename = "_VideoTags", default)]
-    pub tags: Vec<VideoTagRow>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct VideoTagRow {
-    pub tag: Option<TagRef>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct TagRef {
-    pub name: Option<String>,
-}
 
 #[derive(Deserialize)]
 struct ListResponse {
     #[serde(rename = "@odata.count", default)]
     count: Option<i64>,
-    value: Vec<Video>,
+    value: Vec<Value>,
 }
 
 /// Listenfilter, wie er im 3270-Befehl gesetzt wird.
@@ -175,13 +130,13 @@ impl Odata {
         }
     }
 
-    /// Liefert (Seite, Gesamtanzahl).
+    /// Liefert (Seite als JSON-Objekte, Gesamtanzahl).
     pub async fn list(
         &self,
         filter: &Filter,
         skip: usize,
         top: usize,
-    ) -> Result<(Vec<Video>, Option<i64>)> {
+    ) -> Result<(Vec<Value>, Option<i64>)> {
         let skip = skip.to_string();
         let top = top.to_string();
         let filter = filter.to_odata();
@@ -210,7 +165,7 @@ impl Odata {
         ))
     }
 
-    pub async fn get(&self, id: &str) -> Result<Video> {
+    pub async fn get(&self, id: &str) -> Result<Value> {
         let rb = self
             .http
             .get(self.key_url(id)?)

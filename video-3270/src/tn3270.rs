@@ -4,9 +4,13 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use srv_3270::{build_read_partition_query_implicit_partition, parse_implicit_partition_reply};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
+
+/// Wartezeit auf die Query Reply. Terminals ohne Query-Unterstützung antworten nicht.
+const QUERY_TIMEOUT: Duration = Duration::from_secs(2);
 
 const IAC: u8 = 0xFF;
 const DONT: u8 = 0xFE;
@@ -93,7 +97,33 @@ impl Terminal {
         let _ = timeout(Duration::from_secs(5), negotiate_inner(&mut io, &mut st)).await;
         let term_type = st.term.unwrap_or_else(|| "IBM-3278-2".to_string());
         let (rows, cols) = dimensions_for(&term_type);
-        Ok(Self { io, rows, cols })
+        let mut term = Self { io, rows, cols };
+        term.detect_size().await?;
+        Ok(term)
+    }
+
+    /// Ermittelt die Alternate-Groesse per Read Partition Query. Der Terminaltyp
+    /// dient nur als Fallback, falls keine gueltige Antwort kommt.
+    async fn detect_size(&mut self) -> Result<()> {
+        self.write_record(&build_read_partition_query_implicit_partition())
+            .await?;
+        if let Ok(Ok(Some((cols, rows)))) = timeout(QUERY_TIMEOUT, self.read_query_reply()).await {
+            if cols > 0 && rows > 0 {
+                self.cols = cols;
+                self.rows = rows;
+            }
+        }
+        Ok(())
+    }
+
+    /// Verwirft Records, bis eine Implicit-Partition-Antwort eintrifft.
+    async fn read_query_reply(&mut self) -> Result<Option<(u16, u16)>> {
+        while let Some(rec) = self.read_record().await? {
+            if let Some(size) = parse_implicit_partition_reply(&rec) {
+                return Ok(Some(size));
+            }
+        }
+        Ok(None)
     }
 
     /// Liest ein Record bis IAC EOR. `None` = Verbindung geschlossen.
@@ -331,5 +361,64 @@ mod tests {
         let inb = parse_inbound(&rec);
         assert_eq!(inb.aid, Aid::Enter);
         assert_eq!(inb.fields, vec![(16 * 1 + 0 + 64, "AB".to_string())]);
+    }
+
+    #[test]
+    fn query_reply_yields_alternate_size() {
+        // AID 0x88, SF 0x81/QCODE A6, SDP 0x0B/SDPID 01: WD 80x24, WA 80x43 (cols x rows).
+        let rec = [
+            0x88, 0x00, 0x11, 0x81, 0xA6, 0x00, 0x00, 0x0B, 0x01, 0x00, 0x00, 0x50, 0x00, 0x18,
+            0x00, 0x50, 0x00, 0x2B,
+        ];
+        assert_eq!(parse_implicit_partition_reply(&rec), Some((80, 43)));
+    }
+
+    #[test]
+    fn non_query_record_is_ignored() {
+        assert_eq!(parse_implicit_partition_reply(&[0x7D, 0x40, 0x40]), None);
+    }
+
+    /// Simuliert ein Terminal: verhandelt TTYPE/EOR/BINARY und antwortet optional
+    /// auf die Read Partition Query mit einer Implicit-Partition-Antwort.
+    async fn fake_terminal(addr: std::net::SocketAddr, answer_query: bool) {
+        let mut c = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let mut hello = vec![IAC, WILL, OPT_TTYPE, IAC, SB, OPT_TTYPE, TTYPE_IS];
+        hello.extend_from_slice(b"IBM-3278-2");
+        hello.extend_from_slice(&[IAC, SE, IAC, WILL, OPT_EOR, IAC, WILL, OPT_BINARY]);
+        c.write_all(&hello).await.unwrap();
+
+        // Die Abfrage endet mit IAC EOR; davor liegen nur Telnet-Verhandlungsbytes.
+        let mut seen = Vec::new();
+        while !seen.ends_with(&[IAC, EOR]) {
+            seen.push(c.read_u8().await.unwrap());
+        }
+        if answer_query {
+            let reply = [
+                0x88, 0x00, 0x11, 0x81, 0xA6, 0x00, 0x00, 0x0B, 0x01, 0x00, 0x00, 0x50, 0x00, 0x18,
+                0x00, 0x50, 0x00, 0x2B, IAC, EOR,
+            ];
+            c.write_all(&reply).await.unwrap();
+        }
+        tokio::time::sleep(Duration::from_secs(3)).await;
+    }
+
+    async fn negotiate_with(answer_query: bool) -> Terminal {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(fake_terminal(addr, answer_query));
+        let (stream, _) = listener.accept().await.unwrap();
+        Terminal::negotiate(stream).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn negotiate_uses_query_reply_size() {
+        let term = negotiate_with(true).await;
+        assert_eq!((term.rows, term.cols), (43, 80));
+    }
+
+    #[tokio::test]
+    async fn negotiate_falls_back_to_terminal_type() {
+        let term = negotiate_with(false).await;
+        assert_eq!((term.rows, term.cols), (24, 80));
     }
 }

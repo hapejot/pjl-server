@@ -694,6 +694,7 @@ fn prepare_field_group(x: &EntitySpec, hidden: &[String], app_entities: &[String
                 ..
             } => {
                 if *collection {
+                } else if x.object_page_hidden().iter().any(|h| h == name) {
                 } else if app_entities.iter().any(|a| a == entity) {
                     main_data = main_data.add_record(lookup_intent_field(name, entity));
                 } else {
@@ -704,7 +705,9 @@ fn prepare_field_group(x: &EntitySpec, hidden: &[String], app_entities: &[String
                 }
             }
             FieldSpec::Atom { name, .. } => {
-                if hidden.iter().any(|h| h == name) {
+                if hidden.iter().any(|h| h == name)
+                    || x.object_page_hidden().iter().any(|h| h == name)
+                {
                     continue;
                 }
                 main_data = main_data.add_record(
@@ -2862,6 +2865,21 @@ mod list_view_annotation_tests {
                     .unwrap()
             })
             .collect()
+    }
+
+    #[test]
+    fn object_page_hidden_removes_field_only_from_the_object_page() {
+        let mut e = active_video(vec![]);
+        e.object_page_hidden = vec!["title".into()];
+
+        let fg = serde_json::to_string(&prepare_field_group(&e, &[], &[])).unwrap();
+        assert!(fg.contains("\"name\""), "name bleibt in der ObjectPage");
+        assert!(!fg.contains("\"title\""), "title ist ausgeblendet");
+
+        // Listen und Entitaetsfelder bleiben unberuehrt.
+        assert!(e.fields().any(|f| f.name() == "title"));
+        let anns = line_item_annotations(&e);
+        assert_eq!(datafield_paths(&anns[0]), vec!["name"]);
     }
 
     #[test]

@@ -260,22 +260,22 @@ impl DetailView {
 
         info!(?v);
 
-        let tags = tag_names(v);
-        let tag_text = if tags.is_empty() {
-            "-".to_string()
-        } else {
-            tags.join(", ")
-        };
+        let mut tags = tag_names(v);
+        tags.sort();
         let mut row = 17u16;
         s.text(row, 2, "Tags", fa, None);
-        let text = ascii(&tag_text);
-        let chars: Vec<char> = text.chars().collect();
-        for chunk in chars.chunks(56) {
-            if row >= rows - 5 {
-                break;
+        if tags.is_empty() {
+                s.text(row, 20, "-", fa, None);
+        } else {
+            let mut col = 0;
+            for tag in tags.iter() {
+                s.text(row, 20 + col * 20, tag, fa, None);
+                col += 1;
+                if col > 2 {
+                    col = 0;
+                    row += 1;
+                }
             }
-            s.text(row, 20, &chunk.iter().collect::<String>(), fa, None);
-            row += 1;
         }
 
         s.text(

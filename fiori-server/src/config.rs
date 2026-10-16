@@ -77,6 +77,11 @@ pub struct Cli {
     #[arg(long, env = "DDIC")]
     pub ddic: Option<PathBuf>,
 
+    /// Optionales Overlay zur `ddic.json` (nur Laufzeit). Ergaenzt oder
+    /// ueberschreibt Eigenschaften einzelner Entitaeten, siehe `overlay.rs`.
+    #[arg(long, env = "DDIC_OVERLAY")]
+    pub ddic_overlay: Option<PathBuf>,
+
     /// Vorgegebenes Speicher-Schema (JSON). Ohne Angabe wird das Schema aus
     /// dem Dictionary abgeleitet, inklusive Migration neuer Tabellen.
     #[arg(long, env = "SCHEMA")]
@@ -118,6 +123,10 @@ impl Cli {
             ),
             ServerMode::Designer => self.ddic,
         };
+        let ddic_overlay = match mode {
+            ServerMode::Runtime => self.ddic_overlay,
+            ServerMode::Designer => None,
+        };
         ServerConfig {
             mode,
             port: self.port.unwrap_or(default_port),
@@ -125,6 +134,7 @@ impl Cli {
             data_dir: self.data_dir.unwrap_or_else(|| default_data_dir.into()),
             web_root: self.web_root,
             ddic,
+            ddic_overlay,
             schema: self.schema,
             export_dir: self.export_dir,
             export_metamodel: self.export_metamodel,
@@ -145,6 +155,8 @@ pub struct ServerConfig {
     pub data_dir: PathBuf,
     pub web_root: PathBuf,
     pub ddic: Option<PathBuf>,
+    /// Overlay zur `ddic.json`; nur im Laufzeitmodus wirksam.
+    pub ddic_overlay: Option<PathBuf>,
     pub schema: Option<PathBuf>,
     pub export_dir: PathBuf,
     pub export_metamodel: bool,
@@ -173,6 +185,7 @@ impl ServerConfig {
             data_dir: data_dir.into(),
             web_root: "web".into(),
             ddic: None,
+            ddic_overlay: None,
             schema: None,
             export_dir: "export".into(),
             export_metamodel: false,

@@ -1,0 +1,16 @@
+{
+  "entities": [
+    {
+      "name": "Video",
+      "list_views": [
+        { "name": "default", "columns": ["name", "file_size", "scene", "agent"] }
+      ]
+    },
+    {
+      "name": "VideoTag",
+      "list_views": [
+        { "name": "default", "columns": ["tag", "source"] }
+      ]
+    }
+  ]
+}

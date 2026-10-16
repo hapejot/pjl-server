@@ -112,6 +112,15 @@ fn load_dictionary(config: &ServerConfig) -> anyhow::Result<DataDictionary> {
             info!("loading ddic from {}", path.display());
             let ddic: DataDictionary = serde_json::from_reader(std::io::BufReader::new(file))
                 .with_context(|| format!("'{}' is not a valid data dictionary", path.display()))?;
+            let ddic = match &config.ddic_overlay {
+                Some(path) => {
+                    info!("applying ddic overlay {}", path.display());
+                    let overlay = crate::overlay::load(path)?;
+                    crate::overlay::apply(ddic, &overlay)
+                        .with_context(|| format!("ddic overlay '{}'", path.display()))?
+                }
+                None => ddic,
+            };
             ddic.validate_list_views().map_err(|e| {
                 anyhow::anyhow!("'{}': ungueltige Listenansicht: {e}", path.display())
             })?;

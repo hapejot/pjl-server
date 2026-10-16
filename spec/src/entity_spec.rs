@@ -324,6 +324,11 @@ pub struct EntitySpec {
     /// Benannte Listenansichten (Spaltenauswahl). Leer = Standard (nur `name`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub list_views: Vec<ListView>,
+
+    /// Felder, die nur aus der ObjectPage-FieldGroup ausgeblendet werden.
+    /// Listen und das OData-Modell sind davon nicht betroffen.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub object_page_hidden: Vec<String>,
 }
 
 /// Eine benannte Listenansicht einer Entitaet.
@@ -386,7 +391,12 @@ impl EntitySpec {
             type_name_plural: type_name_plural.into(),
             fields: vec![],
             list_views: vec![],
+            object_page_hidden: vec![],
         }
+    }
+
+    pub fn object_page_hidden(&self) -> &[String] {
+        &self.object_page_hidden
     }
 
     pub fn list_view(mut self, view: ListView) -> Self {

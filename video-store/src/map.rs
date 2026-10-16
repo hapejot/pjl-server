@@ -64,16 +64,6 @@ pub const FORCE_ASSOCIATION: &[(&str, &str)] = &[
 /// `name` hat. Sonst wird `name` aus den Schluesseln abgeleitet.
 pub const NAME_SOURCE: &[(&str, &str)] = &[("videos", "file_name"), ("scenes", "title")];
 
-/// Listenansichten je Quelltabelle: `(tabelle, ansicht, spalten)`. Spalten sind
-/// Feldnamen des Modells (Atome oder einwertige Navigationen). Die Ansicht
-/// `default` ist die Standardtabelle. Pflege hier, nicht in `ddic.json`: die Datei
-/// wird bei jeder Migration neu erzeugt.
-pub const LIST_VIEWS: &[(&str, &str, &[&str])] = &[
-    ("videos", "default", &["name", "file_size", "scene", "agent"]),
-    // Tag-Zuordnungen zeigen den Tag-Namen (Navigation `tag` -> `tag/name`) statt der IDs.
-    ("video_tags", "default", &["tag", "source"]),
-];
-
 /// Wie der Primaerschluessel einer Quelltabelle in die Store-ID uebergeht.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyMode {
@@ -164,12 +154,6 @@ pub fn build_model(catalog: &PgCatalog) -> anyhow::Result<Model> {
     let fks = effective_fks(catalog)?;
     let compositions = choose_compositions(catalog, &fks)?;
 
-    for (table, _, _) in LIST_VIEWS {
-        if !catalog.tables.contains_key(*table) {
-            bail!("LIST_VIEWS: Tabelle '{table}' fehlt");
-        }
-    }
-
     let mut ddic = DataDictionary::empty();
     ddic.add_package(Package::new(PACKAGE));
 
@@ -179,9 +163,6 @@ pub fn build_model(catalog: &PgCatalog) -> anyhow::Result<Model> {
         let mut entity = EntitySpec::new(&map.entity, PACKAGE, pascal(&table.name));
         for atom in &map.atoms {
             entity = entity.field(atom_field(atom));
-        }
-        for (_, view, columns) in LIST_VIEWS.iter().filter(|(t, _, _)| *t == table.name) {
-            entity = entity.list_view(spec::ListView::new(*view, columns));
         }
         if !ddic.add_entity(entity) {
             bail!("Entitaet '{}' doppelt", map.entity);
@@ -203,9 +184,6 @@ pub fn build_model(catalog: &PgCatalog) -> anyhow::Result<Model> {
             bail!("Relationship fuer '{}.{}' doppelt", fk.child, fk.child_col);
         }
     }
-
-    ddic.validate_list_views()
-        .map_err(|e| anyhow::anyhow!("LIST_VIEWS ungueltig: {e}"))?;
 
     ddic.add_app(App::new(
         "videos".into(),

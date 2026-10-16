@@ -138,13 +138,19 @@ fn ddic_round_trips_through_json() {
 }
 
 #[test]
-fn list_views_from_constant_reach_the_video_entity() {
+fn overlay_list_views_reach_the_video_entities() {
     let model = model();
-    let video = model.ddic.entities().into_iter().find(|e| e.name() == "Video").unwrap();
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/overlay/ddic.overlay.json");
+    let overlay = fiori_server::overlay::load(std::path::Path::new(path)).expect("overlay lesbar");
+    let ddic = fiori_server::overlay::apply(model.ddic.clone(), &overlay).expect("overlay passt");
+    ddic.validate_list_views().expect("Overlay-Listenansichten valide");
+
+    let video = ddic.entities().into_iter().find(|e| e.name() == "Video").unwrap();
     let views = video.list_views();
     assert_eq!(views.len(), 1);
     assert_eq!(views[0].name, "default");
     assert_eq!(views[0].columns, vec!["name", "file_size", "scene", "agent"]);
-    // Die Konstante ist gegen das aktivierte Modell validiert.
-    model.ddic.validate_list_views().expect("LIST_VIEWS valide");
+
+    let tag = ddic.entities().into_iter().find(|e| e.name() == "VideoTag").unwrap();
+    assert_eq!(tag.list_views()[0].columns, vec!["tag", "source"]);
 }

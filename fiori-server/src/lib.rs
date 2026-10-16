@@ -11,6 +11,7 @@ pub mod export;
 pub mod extension;
 pub mod flp;
 pub mod hook;
+pub mod overlay;
 pub mod server;
 pub mod srv;
 

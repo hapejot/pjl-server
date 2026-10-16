@@ -31,10 +31,10 @@ pjl-runtime --ddic ddic.json --data-dir <dir>
 
 Die Kette ist in zwei Phasen aufgeteilt (`video-store/docker/migrate.sh`, `compose.yaml`):
 
-| Phase | Dienst | Aufgabe |
-|---|---|---|
+| Phase                | Dienst    | Aufgabe                                                                                                                       |
+| -------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | Migration (one-shot) | `migrate` | `video-ddic` schreibt `ddic.json`, `video-import` schreibt die Daten in den SQLite-Store. Idempotent über `.migrated`-Marker. |
-| Laufzeit (dauerhaft) | `runtime` | `pjl-runtime` liest nur `ddic.json` und den Store, liefert OData und die Fiori-App. |
+| Laufzeit (dauerhaft) | `runtime` | `pjl-runtime` liest nur `ddic.json` und den Store, liefert OData und die Fiori-App.                                           |
 
 Die Quelldatenbank wird nur lesend benutzt.
 
@@ -222,15 +222,44 @@ Die Spalten der Liste sind explizit und benannt an der Entität definiert:
   erzeugt `UI.LineItem#<name>` und `UI.PresentationVariant#<name>`.
 * Mehr als eine Ansicht: ListReport zeigt eine View-Leiste (`options.settings.views.paths`).
 * Ohne Ansichten bleibt das frühere Verhalten (nur `name`).
-* Validierung: `DataDictionary::validate_list_views()`, aufgerufen beim Bauen des Video-Modells
-  und beim Laden von `ddic.json` im Runtime-Server.
-* Pflege für den Video-Store in `map.rs`:
+* Validierung: `DataDictionary::validate_list_views()`, beim Laden von `ddic.json` im
+  Runtime-Server (nach Anwendung des Overlays).
+* Pflege für den Video-Store im Overlay (Abschnitt 6.5), nicht in `map.rs`.
 
-  ```rust
-  pub const LIST_VIEWS: &[(&str, &str, &[&str])] = &[(
-      "videos", "default", &["name", "file_size", "scene", "agent"],
-  )];
-  ```
+### 6.5 Overlay zur `ddic.json` (nur Runtime)
+
+`ddic.json` wird bei jeder Migration neu erzeugt. Eigene Anpassungen liegen deshalb in einer
+separaten Datei, die die Runtime optional einliest:
+
+* Datei: `video-store/overlay/ddic.overlay.json`. Compose bindet sie read-only nach
+  `/app/overlay/ddic.overlay.json` ein; `DDIC_OVERLAY` (oder `--ddic-overlay`) zeigt darauf.
+  Ohne Angabe läuft die Runtime ohne Overlay. Änderungen wirken nach `docker compose restart runtime`.
+* Format: `{"entities": [{ "name": ... }]}`. Die Entität wird über `name` gefunden.
+* Regeln (Merge in `fiori-server/src/overlay.rs`):
+  * `package`, `type_name_plural`: überschreiben die Basis.
+  * `list_views`: je Ansicht per `name`. Gleichnamige ersetzen die Basis, neue werden angehängt.
+  * `object_page_hidden`: Feldnamen, die nur aus der ObjectPage-FieldGroup entfernt werden.
+    Listen und das OData-Modell bleiben unberührt. Die Liste wird vereinigt, ein Overlay kann
+    also nur ausblenden.
+  * Unbekannte Entitäten, Pakete, Felder in `object_page_hidden` sowie unbekannte Schlüssel
+    (z. B. Tippfehler) führen zum Startfehler.
+  * `fields` ist im Overlay nicht zulässig.
+
+```json
+{
+  "entities": [
+    {
+      "name": "Video",
+      "list_views": [
+        { "name": "default", "columns": ["name", "file_size", "scene", "agent"] }
+      ],
+      "object_page_hidden": ["file_size"]
+    }
+  ]
+}
+```
+
+Die Konstante `LIST_VIEWS` in `map.rs` existiert nicht mehr.
 
 ## 7. Beobachtete Lücken im Ist-Zustand
 
@@ -239,7 +268,7 @@ Stellen, an denen die Erzeugung nicht so weit geht wie die Typdefinitionen vermu
 
 | # | Befund | Beleg |
 |---|---|---|
-| L1 | ~~Die Listenansicht zeigt nur die Spalte `name`.~~ **Behoben:** explizite Listenansichten (`EntitySpec.list_views`, Konstante `LIST_VIEWS` in `map.rs`). Siehe Abschnitt 6.4. | `spec/src/entity_spec.rs` `ListView`, `srv/mod.rs` `line_item_annotations` |
+| L1 | ~~Die Listenansicht zeigt nur die Spalte `name`.~~ **Behoben:** explizite Listenansichten (`EntitySpec.list_views`, Pflege im Overlay `ddic.overlay.json`). Siehe Abschnitte 6.4 und 6.5. | `spec/src/entity_spec.rs` `ListView`, `srv/mod.rs` `line_item_annotations` |
 | L2 | ~~`PresentationOverrides` wurde nicht ausgewertet.~~ **Entfernt:** das Konstrukt `PresentationOverrides` samt Feld `presentation` an Atomen und Measures ist abgeschafft. Listenspalten werden über `EntitySpec.list_views` gesteuert (Abschnitt 6.4). | `spec/src/entity_spec.rs` |
 | L3 | Labels sind die rohen Spaltennamen (`file_name`, `agent_id`), keine lesbaren Texte. | `map.rs` `atom_field()`: `label: atom.name` |
 | L4 | `_`-Präfix soll laut Doku die TableFacet-Generierung unterdrücken. Der Code in `flp.rs` prüft das nicht; alle to-many Navigationen bekommen eine Kind-Route. | `spec/src/relationship.rs:9` vs. `flp.rs` ca. Zeile 303-308 |
@@ -602,16 +631,16 @@ Zellen-Fragment `fragments/PreviewColumn.fragment.xml`:
 
 ### 10.9 Fallstricke aus der Praxis
 
-| Symptom | Ursache | Lösung |
-|---|---|---|
-| Section erscheint nicht, kein Fehler | Template-Name falsch oder Fragment-Route fehlt | Namen und Route abgleichen (10.4 Schritt 3) |
-| 404 auf `.../Component-preload.js` oder `.../i18n_*.properties` | Namespace nicht gemappt oder Datei fehlt | Mapping über `ui5_paths`, Routen für i18n anlegen |
-| Bild-URL mit `null` (`/thumbnail/null/...`) | `$expand` im Draft liefert kein `video` | Fremdschlüssel direkt lesen (`video_ID`, `${ID}`) |
-| `FormatException` bei Datum | Mikrosekunden oder leerer String | Normalisierung im Import (`datetime_offset`) |
-| CORS/Private-Network-Fehler im Browser | Seite lädt Bild direkt von fremdem Host (`nuc:9000`) | Proxy same-origin über eigene Route |
-| Änderung an Fragment wirkt nicht | Eingebettet per `include_str!`, altes Image läuft | Image neu bauen |
-| Alte Oberfläche trotz neuem Image | Browser-Cache | Strg+F5 |
-| Schlüssel statt Text in der Oberfläche | i18n-Schlüssel in einer Sprachdatei fehlt | in allen Dateien ergänzen |
+| Symptom                                                         | Ursache                                              | Lösung                                            |
+| --------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------- |
+| Section erscheint nicht, kein Fehler                            | Template-Name falsch oder Fragment-Route fehlt       | Namen und Route abgleichen (10.4 Schritt 3)       |
+| 404 auf `.../Component-preload.js` oder `.../i18n_*.properties` | Namespace nicht gemappt oder Datei fehlt             | Mapping über `ui5_paths`, Routen für i18n anlegen |
+| Bild-URL mit `null` (`/thumbnail/null/...`)                     | `$expand` im Draft liefert kein `video`              | Fremdschlüssel direkt lesen (`video_ID`, `${ID}`) |
+| `FormatException` bei Datum                                     | Mikrosekunden oder leerer String                     | Normalisierung im Import (`datetime_offset`)      |
+| CORS/Private-Network-Fehler im Browser                          | Seite lädt Bild direkt von fremdem Host (`nuc:9000`) | Proxy same-origin über eigene Route               |
+| Änderung an Fragment wirkt nicht                                | Eingebettet per `include_str!`, altes Image läuft    | Image neu bauen                                   |
+| Alte Oberfläche trotz neuem Image                               | Browser-Cache                                        | Strg+F5                                           |
+| Schlüssel statt Text in der Oberfläche                          | i18n-Schlüssel in einer Sprachdatei fehlt            | in allen Dateien ergänzen                         |
 
 ### 10.10 Regeln für Bilder und Fremddienste
 

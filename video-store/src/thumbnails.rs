@@ -139,33 +139,73 @@ async fn preview_fragment() -> impl IntoResponse {
     )
 }
 
+/// Fehlerantwort mit Begruendung im Body und Log-Eintrag mit allen Details.
+fn fail(status: StatusCode, video: &str, n: u32, reason: impl std::fmt::Display) -> Response {
+    tracing::warn!(video, n, %status, "thumbnail: {reason}");
+    (status, format!("thumbnail {video}/{n}: {reason}\n")).into_response()
+}
+
 async fn thumbnail(
     State(st): State<Arc<ProxyState>>,
     user: Option<axum::Extension<fiori_server::auth::CurrentUser>>,
     Path((video_id, n)): Path<(String, u32)>,
-) -> Result<Response, StatusCode> {
+) -> Response {
     let user = user.map(|u| u.0 .0).unwrap_or_else(|| "-".into());
-    let id = Uuid::parse_str(&video_id).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let agent = agent_of(&st.app, id).await.ok_or(StatusCode::NOT_FOUND)?;
+    let id = match Uuid::parse_str(&video_id) {
+        Ok(id) => id,
+        Err(e) => return fail(StatusCode::BAD_REQUEST, &video_id, n, format!("keine gueltige UUID ({e})")),
+    };
     tracing::debug!(%user, video = %id, n, "thumbnail requested");
 
+    let agent = match agent_of(&st.app, id).await {
+        Ok(agent) => agent,
+        Err(reason) => return fail(StatusCode::NOT_FOUND, &video_id, n, reason),
+    };
+
     let url = format!("{}/{}/thumbnail/{}/{}", st.upstream, agent, id, n);
-    let resp = st
-        .client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?;
-    if !resp.status().is_success() {
-        return Err(StatusCode::NOT_FOUND);
+    let resp = match st.client.get(&url).send().await {
+        Ok(resp) => resp,
+        Err(e) => {
+            return fail(
+                StatusCode::BAD_GATEWAY,
+                &video_id,
+                n,
+                format!("Upstream nicht erreichbar: GET {url}: {e:?}"),
+            )
+        }
+    };
+    let upstream_status = resp.status();
+    if !upstream_status.is_success() {
+        // 404 vom Upstream bleibt 404 (Bild existiert nicht); alles andere ist ein Gateway-Fehler.
+        let status = if upstream_status == reqwest::StatusCode::NOT_FOUND {
+            StatusCode::NOT_FOUND
+        } else {
+            StatusCode::BAD_GATEWAY
+        };
+        return fail(
+            status,
+            &video_id,
+            n,
+            format!("Upstream antwortet {upstream_status} fuer GET {url}"),
+        );
     }
     let content_type = resp
         .headers()
         .get(header::CONTENT_TYPE)
         .cloned()
         .unwrap_or_else(|| header::HeaderValue::from_static("image/jpeg"));
-    let bytes = resp.bytes().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
-    Ok((
+    let bytes = match resp.bytes().await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            return fail(
+                StatusCode::BAD_GATEWAY,
+                &video_id,
+                n,
+                format!("Upstream-Body unlesbar von {url}: {e:?}"),
+            )
+        }
+    };
+    (
         [
             (header::CONTENT_TYPE, content_type),
             (
@@ -175,22 +215,33 @@ async fn thumbnail(
         ],
         bytes,
     )
-        .into_response())
+        .into_response()
 }
 
 /// Agent-ID des Videos. Liest zuerst die aktive Version, sonst den Draft.
-async fn agent_of(app: &AppState, id: Uuid) -> Option<String> {
+/// Im Fehlerfall die Begruendung als Text.
+async fn agent_of(app: &AppState, id: Uuid) -> Result<String, String> {
+    let mut last_err = String::new();
     for active in [true, false] {
         let key = EntityKey::new(id, active);
-        if let Ok(record) = app
+        match app
             .store
             .read_entity(VIDEO_SET, &key, &ODataQuery::default())
             .await
         {
-            return record
-                .get("agent_ID")
-                .and_then(|v| v.as_str().map(str::to_string));
+            Ok(record) => {
+                return match record.get("agent_ID") {
+                    Some(v) => v
+                        .as_str()
+                        .map(str::to_string)
+                        .ok_or_else(|| format!("agent_ID ist kein Text: {v}")),
+                    None => Err(format!(
+                        "Video {id} hat kein Feld agent_ID (active={active})"
+                    )),
+                };
+            }
+            Err(e) => last_err = format!("Video {id} nicht lesbar (active={active}): {e:?}"),
         }
     }
-    None
+    Err(last_err)
 }

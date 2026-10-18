@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
@@ -329,6 +330,23 @@ pub struct EntitySpec {
     /// Listen und das OData-Modell sind davon nicht betroffen.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub object_page_hidden: Vec<String>,
+
+    /// Vorbelegte Filterwerte je Atom-Feld (`Common.FilterDefaultValue`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub filter_defaults: BTreeMap<String, FilterDefault>,
+
+    /// Felder der Filterleiste in dieser Reihenfolge (`UI.SelectionFields`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub selection_fields: Vec<String>,
+}
+
+/// Konstanter Standardwert fuer einen Filter. Zahlen und Datumswerte sind
+/// bewusst nicht enthalten (eigener Literal-Typ noetig).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum FilterDefault {
+    Text(String),
+    Flag(bool),
 }
 
 /// Eine benannte Listenansicht einer Entitaet.
@@ -392,7 +410,17 @@ impl EntitySpec {
             fields: vec![],
             list_views: vec![],
             object_page_hidden: vec![],
+            filter_defaults: BTreeMap::new(),
+            selection_fields: vec![],
         }
+    }
+
+    pub fn selection_fields(&self) -> &[String] {
+        &self.selection_fields
+    }
+
+    pub fn filter_defaults(&self) -> &BTreeMap<String, FilterDefault> {
+        &self.filter_defaults
     }
 
     pub fn object_page_hidden(&self) -> &[String] {

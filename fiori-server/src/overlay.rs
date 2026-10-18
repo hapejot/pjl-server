@@ -13,12 +13,13 @@
 //! - Unbekannte Entitaeten, Pakete und Felder sind Fehler.
 //! - `fields` ist nicht Teil des Overlays (unbekannte Schluessel werden abgelehnt).
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{bail, Context};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use spec::{data_dictionary::DataDictionary, ListView};
+use spec::{data_dictionary::DataDictionary, FilterDefault, ListView};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -39,6 +40,10 @@ pub struct OverlayEntity {
     pub list_views: Vec<ListView>,
     #[serde(default)]
     pub object_page_hidden: Vec<String>,
+    #[serde(default)]
+    pub filter_defaults: BTreeMap<String, FilterDefault>,
+    #[serde(default)]
+    pub selection_fields: Vec<String>,
 }
 
 /// Overlay-Datei lesen und parsen.
@@ -112,6 +117,34 @@ pub fn apply(base: DataDictionary, overlay: &Overlay) -> anyhow::Result<DataDict
                 }
             }
         }
+
+        if !oe.selection_fields.is_empty() {
+            let fields = obj
+                .as_object_mut()
+                .context("ddic: Entitaet ist kein Objekt")?
+                .entry("selection_fields")
+                .or_insert_with(|| json!([]))
+                .as_array_mut()
+                .context("ddic: 'selection_fields' ist kein Array")?;
+            for field in &oe.selection_fields {
+                if !fields.iter().any(|f| f.as_str() == Some(field.as_str())) {
+                    fields.push(json!(field));
+                }
+            }
+        }
+
+        if !oe.filter_defaults.is_empty() {
+            let defaults = obj
+                .as_object_mut()
+                .context("ddic: Entitaet ist kein Objekt")?
+                .entry("filter_defaults")
+                .or_insert_with(|| json!({}))
+                .as_object_mut()
+                .context("ddic: 'filter_defaults' ist kein Objekt")?;
+            for (field, value) in &oe.filter_defaults {
+                defaults.insert(field.clone(), serde_json::to_value(value)?);
+            }
+        }
     }
 
     Ok(serde_json::from_value(value)?)
@@ -119,7 +152,9 @@ pub fn apply(base: DataDictionary, overlay: &Overlay) -> anyhow::Result<DataDict
 
 /// Prueft Referenzen gegen das Basis-Dictionary, bevor etwas veraendert wird.
 fn validate(base: &DataDictionary, overlay: &Overlay) -> anyhow::Result<()> {
-    let entities = base.entities();
+    // Aktivierter Stand: einwertige Navigationen (Lookups) entstehen erst aus den Relationships.
+    let mut active = base.clone();
+    active.activate();
     let mut seen: Vec<&str> = Vec::new();
     for oe in &overlay.entities {
         if seen.contains(&oe.name.as_str()) {
@@ -127,7 +162,7 @@ fn validate(base: &DataDictionary, overlay: &Overlay) -> anyhow::Result<()> {
         }
         seen.push(&oe.name);
 
-        let Some(entity) = entities.iter().find(|e| e.name() == oe.name) else {
+        let Some(entity) = active.active_entity(&oe.name) else {
             bail!("overlay: Entitaet '{}' fehlt in der ddic.json", oe.name);
         };
         if let Some(package) = &oe.package {
@@ -139,6 +174,30 @@ fn validate(base: &DataDictionary, overlay: &Overlay) -> anyhow::Result<()> {
             if !entity.fields().any(|f| f.name() == field) {
                 bail!(
                     "overlay: Entitaet '{}': object_page_hidden nennt unbekanntes Feld '{field}'",
+                    oe.name
+                );
+            }
+        }
+        for field in &oe.selection_fields {
+            let ok = entity.fields().any(|f| match f {
+                spec::FieldSpec::Atom { name, .. } => name == field,
+                spec::FieldSpec::Lookup { name, collection, .. } => name == field && !collection,
+                spec::FieldSpec::Measure { .. } => false,
+            });
+            if !ok {
+                bail!(
+                    "overlay: Entitaet '{}': selection_fields nennt '{field}', das weder Atom noch einwertige Navigation ist",
+                    oe.name
+                );
+            }
+        }
+        for field in oe.filter_defaults.keys() {
+            let is_atom = entity
+                .fields()
+                .any(|f| f.name() == field && matches!(f, spec::FieldSpec::Atom { .. }));
+            if !is_atom {
+                bail!(
+                    "overlay: Entitaet '{}': filter_defaults nennt '{field}', das kein Atom-Feld ist",
                     oe.name
                 );
             }
@@ -197,6 +256,56 @@ mod tests {
         let once = apply(base(), &overlay).unwrap();
         let twice = apply(once, &overlay).unwrap();
         assert_eq!(video(&twice).object_page_hidden(), &["file_size".to_string()]);
+    }
+
+    #[test]
+    fn filter_defaults_are_set_and_overridable() {
+        let first = parse(r#"{"entities":[{"name":"Video","filter_defaults":{"name":"Demo"}}]}"#).unwrap();
+        let d = apply(base(), &first).unwrap();
+        assert_eq!(video(&d).filter_defaults()["name"], FilterDefault::Text("Demo".into()));
+
+        let second = parse(r#"{"entities":[{"name":"Video","filter_defaults":{"name":"Neu"}}]}"#).unwrap();
+        let d = apply(d, &second).unwrap();
+        assert_eq!(video(&d).filter_defaults()["name"], FilterDefault::Text("Neu".into()));
+        assert_eq!(video(&d).filter_defaults().len(), 1);
+    }
+
+    #[test]
+    fn filter_default_on_unknown_or_non_atom_field_is_an_error() {
+        let unknown = parse(r#"{"entities":[{"name":"Video","filter_defaults":{"nope":"x"}}]}"#).unwrap();
+        assert!(apply(base(), &unknown).is_err());
+    }
+
+    #[test]
+    fn filter_default_numbers_are_rejected() {
+        assert!(parse(r#"{"entities":[{"name":"Video","filter_defaults":{"name":5}}]}"#).is_err());
+    }
+
+    #[test]
+    fn selection_fields_are_ordered_and_unique() {
+        let o = parse(r#"{"entities":[{"name":"Video","selection_fields":["name","file_size"]}]}"#).unwrap();
+        let d = apply(base(), &o).unwrap();
+        let d = apply(d, &parse(r#"{"entities":[{"name":"Video","selection_fields":["file_size"]}]}"#).unwrap()).unwrap();
+        assert_eq!(video(&d).selection_fields(), &["name".to_string(), "file_size".to_string()]);
+    }
+
+    #[test]
+    fn selection_fields_accept_to_one_navigation() {
+        let mut base = base();
+        base.add_entity(EntitySpec::new("Agent", "core", "Agents").field(FieldSpec::atom("name", "Name", "Edm.String")));
+        base.add_relationship(
+            spec::Relationship::new("videos_agent", "core")
+                .with_one("Agent", "_Videos")
+                .with_many("Video", "agent"),
+        );
+        let o = parse(r#"{"entities":[{"name":"Video","selection_fields":["agent"]}]}"#).unwrap();
+        assert!(apply(base, &o).is_ok());
+    }
+
+    #[test]
+    fn selection_field_must_be_atom() {
+        let o = parse(r#"{"entities":[{"name":"Video","selection_fields":["gibts_nicht"]}]}"#).unwrap();
+        assert!(apply(base(), &o).is_err());
     }
 
     #[test]

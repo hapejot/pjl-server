@@ -428,6 +428,20 @@ impl Annotations {
             Annotation::new("Common.SemanticKey")
                 .collection(Collection::new().add_property_path("ID")),
         );
+        if !x.selection_fields().is_empty() {
+            let mut paths = Collection::new();
+            for field in x.selection_fields() {
+                // Einwertige Navigation filtert ueber den Fremdschluessel.
+                let is_to_one = x.fields().any(|f| {
+                    matches!(f, FieldSpec::Lookup { name, collection: false, .. } if name == field)
+                });
+                let path = if is_to_one { format!("{field}_ID") } else { field.clone() };
+                paths = paths.add_property_path(path);
+            }
+            main_annotations
+                .annotations
+                .push(Annotation::new("UI.SelectionFields").collection(paths));
+        }
         // Kein Common.Messages: DraftMessages ist im $metadata keine Navigation
         // (nur eine JSON-Spalte im Store). Der Verweis wuerde FE-Fehler
         // "does not point to a property" ausloesen.
@@ -480,6 +494,16 @@ impl Annotations {
         ));
         for f in x.fields() {
             annotations.push(Self::from_field(x.name(), f));
+        }
+        for (field, value) in x.filter_defaults() {
+            let annotation = match value {
+                spec::FilterDefault::Text(t) => Annotation::new("Common.FilterDefaultValue").string(t),
+                spec::FilterDefault::Flag(b) => Annotation::new("Common.FilterDefaultValue").boolean(*b),
+            };
+            annotations.push(Annotations {
+                target: format!("Service.{}/{}", x.name(), field),
+                annotations: vec![annotation],
+            });
         }
         annotations
     }
@@ -2865,6 +2889,41 @@ mod list_view_annotation_tests {
                     .unwrap()
             })
             .collect()
+    }
+
+    #[test]
+    fn selection_fields_become_ui_selection_fields() {
+        let mut e = active_video(vec![]);
+        e.selection_fields = vec!["title".into(), "name".into()];
+        let anns = Annotations::from_entity(&e, &[], &[]);
+        let main = anns.iter().find(|a| a.target == "Service.Video").unwrap();
+        let sel = main
+            .annotations
+            .iter()
+            .find(|a| a.term == "UI.SelectionFields")
+            .expect("UI.SelectionFields fehlt");
+        assert_eq!(datafield_paths_of_property_paths(sel), vec!["title", "name"]);
+    }
+
+    fn datafield_paths_of_property_paths(a: &Annotation) -> Vec<String> {
+        a.collection.as_ref().unwrap().property_paths.clone()
+    }
+
+    #[test]
+    fn filter_defaults_become_property_annotations() {
+        let mut e = active_video(vec![]);
+        e.filter_defaults.insert("name".into(), spec::FilterDefault::Text("Demo".into()));
+        e.filter_defaults.insert("title".into(), spec::FilterDefault::Flag(true));
+        let anns = Annotations::from_entity(&e, &[], &[]);
+        let on = |target: &str| {
+            anns.iter()
+                .filter(|a| a.target == target)
+                .flat_map(|a| a.annotations.iter())
+                .find(|a| a.term == "Common.FilterDefaultValue")
+                .expect("FilterDefaultValue fehlt")
+        };
+        assert_eq!(on("Service.Video/name").string.as_deref(), Some("Demo"));
+        assert_eq!(on("Service.Video/title").bool_, Some(true));
     }
 
     #[test]

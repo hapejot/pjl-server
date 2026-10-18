@@ -243,6 +243,11 @@ separaten Datei, die die Runtime optional einliest:
     also nur ausblenden.
   * Unbekannte Entitäten, Pakete, Felder in `object_page_hidden` sowie unbekannte Schlüssel
     (z. B. Tippfehler) führen zum Startfehler.
+  * `filter_defaults`: Feldname -> Standardwert für die Filterleiste (`Common.FilterDefaultValue`).
+    Nur Atom-Felder, Werte als Text oder `true`/`false`. Zahlen und Datumswerte sind nicht
+    unterstützt. Gleichnamige Felder ersetzen den bisherigen Wert.
+  * `selection_fields`: geordnete Liste von Atom-Feldern oder einwertigen Navigationen für die Filterleiste (`UI.SelectionFields`). Navigationen filtern über den Fremdschlüssel (`agent` -> `agent_ID`).
+    Felder brauchen keinen Standardwert. Bei mehreren Overlays werden neue Felder angehängt.
   * `fields` ist im Overlay nicht zulässig.
 
 ```json
@@ -260,6 +265,20 @@ separaten Datei, die die Runtime optional einliest:
 ```
 
 Die Konstante `LIST_VIEWS` in `map.rs` existiert nicht mehr.
+
+Beispiel mit Filterleiste und Filtervorgabe:
+
+```json
+{
+  "entities": [
+    {
+      "name": "Video",
+      "selection_fields": ["name", "file_size"],
+      "filter_defaults": { "name": "2026" }
+    }
+  ]
+}
+```
 
 ## 7. Beobachtete Lücken im Ist-Zustand
 

@@ -40,6 +40,9 @@ RUN mkdir -p /app/export && chown -R appuser /app/export
 USER appuser
 ENV PORT=8080 \
     EXPORT_DIR=/app/export \
-    WEB_ROOT=/app/web
-EXPOSE 8080
+    WEB_ROOT=/app/web \
+    TERM3270_PORT=3270 \
+    TERM3270_BIND=0.0.0.0
+# 8080: OData/Launchpad, 3270: Statusansichten (Zugriff ueber Port-Mapping steuern)
+EXPOSE 8080 3270
 ENTRYPOINT ["/app/video-runtime"]

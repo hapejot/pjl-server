@@ -86,6 +86,8 @@ services:
       RUST_LOG: info
     ports:
       - "3035:8080"
+      # 3270-Statusansichten nur lokal erreichbar. Fuer Netzzugriff hier anpassen.
+      - "127.0.0.1:3270:3270"
     volumes:
       - video-export:/app/export:ro
       - ./overlay/ddic.overlay.json:/app/overlay/ddic.overlay.json:ro

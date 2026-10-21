@@ -51,6 +51,24 @@ struct ProxyState {
 }
 
 impl Extension for VideoThumbnails {
+    fn status_views(&self) -> Vec<(&'static str, fiori_server::term3270::ViewFactory)> {
+        let thumb = self.upstream.clone();
+        let stream = crate::player::stream_upstream();
+        vec![(
+            "video",
+            fiori_server::term3270::section_view("Video-Dienste (Proxy)", move || {
+                crate::status::overview_json(&thumb, &stream)
+            }),
+        )]
+    }
+
+    fn status(&self) -> Option<(String, Value)> {
+        Some((
+            "video.thumbnails".into(),
+            crate::status::thumbnails_json(&self.upstream),
+        ))
+    }
+
     fn routes(&self, app: AppState) -> Router {
         let state = Arc::new(ProxyState {
             app,
@@ -146,6 +164,16 @@ fn fail(status: StatusCode, video: &str, n: u32, reason: impl std::fmt::Display)
 }
 
 async fn thumbnail(
+    state: State<Arc<ProxyState>>,
+    user: Option<axum::Extension<fiori_server::auth::CurrentUser>>,
+    path: Path<(String, u32)>,
+) -> Response {
+    let res = thumbnail_inner(state, user, path).await;
+    crate::status::thumbnail_result(res.status().as_u16());
+    res
+}
+
+async fn thumbnail_inner(
     State(st): State<Arc<ProxyState>>,
     user: Option<axum::Extension<fiori_server::auth::CurrentUser>>,
     Path((video_id, n)): Path<(String, u32)>,

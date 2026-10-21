@@ -38,12 +38,16 @@ pub struct VideoPlayer {
     upstream: String,
 }
 
+/// Basis-URL des Video-Streams (`VIDEO_STREAM_BASE_URL`).
+pub fn stream_upstream() -> String {
+    std::env::var("VIDEO_STREAM_BASE_URL").unwrap_or_else(|_| DEFAULT_UPSTREAM.to_string())
+}
+
 impl VideoPlayer {
     /// Upstream aus `VIDEO_STREAM_BASE_URL`, Default wie beim Thumbnail-Dienst.
     pub fn from_env() -> Self {
         Self {
-            upstream: std::env::var("VIDEO_STREAM_BASE_URL")
-                .unwrap_or_else(|_| DEFAULT_UPSTREAM.to_string()),
+            upstream: stream_upstream(),
         }
     }
 }
@@ -55,6 +59,13 @@ struct PlayerState {
 }
 
 impl Extension for VideoPlayer {
+    fn status(&self) -> Option<(String, Value)> {
+        Some((
+            "video.player".into(),
+            crate::status::stream_json(&self.upstream),
+        ))
+    }
+
     fn routes(&self, app: AppState) -> Router {
         let state = Arc::new(PlayerState {
             app,
@@ -107,6 +118,20 @@ async fn controller_js() -> impl IntoResponse {
 }
 
 async fn stream(
+    state: State<Arc<PlayerState>>,
+    path: Path<String>,
+    req_headers: HeaderMap,
+) -> Result<Response, StatusCode> {
+    let res = stream_inner(state, path, req_headers).await;
+    let code = match &res {
+        Ok(r) => r.status().as_u16(),
+        Err(s) => s.as_u16(),
+    };
+    crate::status::stream_result(code);
+    res
+}
+
+async fn stream_inner(
     State(st): State<Arc<PlayerState>>,
     Path(video_id): Path<String>,
     req_headers: HeaderMap,

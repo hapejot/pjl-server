@@ -69,6 +69,10 @@ impl Default for VideoTagFacets {
 }
 
 impl Extension for VideoTagFacets {
+    fn status(&self) -> Option<(String, Value)> {
+        Some(("video.tags".into(), crate::status::tags_json()))
+    }
+
     fn ui5_modules(&self) -> Vec<String> {
         vec!["video/ext/TagSearch".into()]
     }
@@ -267,6 +271,7 @@ async fn ranking(st: &FacetState, client: &deadpool_postgres::Object) -> Result<
     let mut cache = st.ranking.lock().await;
     if let Some((at, r)) = cache.as_ref() {
         if at.elapsed() < Duration::from_secs(TAG_CACHE_SECS) {
+            crate::status::tag_cache_hit();
             return Ok(r.clone());
         }
     }
@@ -303,6 +308,7 @@ async fn ranking(st: &FacetState, client: &deadpool_postgres::Object) -> Result<
     tags.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.name.cmp(&b.name)));
     let result = Arc::new(Ranking { total, tags });
     *cache = Some((Instant::now(), result.clone()));
+    crate::status::tag_cache_refreshed();
     Ok(result)
 }
 

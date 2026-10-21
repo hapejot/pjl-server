@@ -16,7 +16,8 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 async fn main() -> std::process::ExitCode {
     tracing_subscriber::registry()
         .with(fmt::layer().with_file(true).with_line_number(true))
-        .with(EnvFilter::from_default_env())
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with(fiori_server::status::log_layer())
         .init();
 
     let config = ServerConfig::parse(ServerMode::Designer);

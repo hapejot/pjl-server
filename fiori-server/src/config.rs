@@ -111,6 +111,15 @@ pub struct Cli {
     /// Ohne Angabe laeuft der SQLite-Store in `DATA_DIR`.
     #[arg(long, env = "STORE_PG_URL")]
     pub store_pg_url: Option<String>,
+
+    /// Port der 3270-Terminal-Schnittstelle (Statusansichten). Ohne Angabe aus.
+    #[arg(long, env = "TERM3270_PORT")]
+    pub term3270_port: Option<u16>,
+
+    /// Interface der 3270-Schnittstelle. Im Container `0.0.0.0` setzen und
+    /// den Zugriff ueber das Port-Mapping steuern.
+    #[arg(long, env = "TERM3270_BIND", default_value = "127.0.0.1")]
+    pub term3270_bind: IpAddr,
 }
 
 impl Cli {
@@ -141,6 +150,8 @@ impl Cli {
             auth_user_header: self.auth_user_header,
             auth_required: self.auth_required,
             store_pg_url: self.store_pg_url,
+            term3270_port: self.term3270_port,
+            term3270_bind: self.term3270_bind,
         }
     }
 }
@@ -164,6 +175,9 @@ pub struct ServerConfig {
     pub auth_required: bool,
     /// Ziel-Datenbank des Stores. `None`: SQLite in `data_dir`.
     pub store_pg_url: Option<String>,
+    /// 3270-Schnittstelle nur aktiv, wenn gesetzt.
+    pub term3270_port: Option<u16>,
+    pub term3270_bind: IpAddr,
 }
 
 impl ServerConfig {
@@ -192,6 +206,8 @@ impl ServerConfig {
             auth_user_header: "X-Forwarded-User".into(),
             auth_required: false,
             store_pg_url: None,
+            term3270_port: None,
+            term3270_bind: IpAddr::from([127, 0, 0, 1]),
         }
     }
 }

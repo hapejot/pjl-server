@@ -14,6 +14,8 @@ pub mod hook;
 pub mod overlay;
 pub mod server;
 pub mod srv;
+pub mod status;
+pub mod term3270;
 
 use config::{ServerConfig, ServerMode};
 use tracing::info;

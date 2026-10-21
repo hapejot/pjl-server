@@ -38,6 +38,7 @@ pub async fn run_with(
     extensions: crate::extension::Extensions,
 ) -> anyhow::Result<()> {
     let config = Arc::new(config);
+    crate::status::hub().set_config(crate::status::config_json(&config));
     info!("starting {} server", config.mode.label());
 
     let base = load_dictionary(&config)?;
@@ -47,6 +48,7 @@ pub async fn run_with(
 
     let state = AppState::new(store, config.clone(), base).with_extensions(extensions);
     state.reload();
+    crate::term3270::spawn(&config, state.extensions.clone());
 
     let app = router(state, &config);
 
@@ -220,6 +222,7 @@ fn router(state: AppState, config: &ServerConfig) -> Router {
         )
         .route("/apps/{app}/ext/Publish.js", get(flp::publish_ext_handler))
         .route("/", get(flp::index))
+        .merge(crate::status::router())
         .route("/sap/bc/lrep/flex/settings", get(flp::lrep_settings))
         .route("/sap/bc/lrep/flex/data/{*rest}", get(flp::lrep_flex_data))
         .with_state(state.clone());
@@ -231,5 +234,6 @@ fn router(state: AppState, config: &ServerConfig) -> Router {
             identity_config,
             crate::auth::identity,
         ))
+        .layer(axum::middleware::from_fn(crate::status::count_requests))
         .layer(TraceLayer::new_for_http())
 }

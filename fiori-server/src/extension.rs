@@ -68,6 +68,18 @@ pub trait Extension: Send + Sync {
         Vec::new()
     }
 
+    /// Statusabschnitt fuer `/status`: `(Abschnittsname, JSON)`. Nur Lesewerte,
+    /// keine Geheimnisse. `None` = kein Beitrag.
+    fn status(&self) -> Option<(String, Value)> {
+        None
+    }
+
+    /// Eigene 3270-Ansichten: `(Befehlsname, Fabrik)`. Der Name wird in der
+    /// Befehlszeile der Startseite eingegeben, z. B. `cache`.
+    fn status_views(&self) -> Vec<(&'static str, crate::term3270::ViewFactory)> {
+        Vec::new()
+    }
+
     /// Controller-Erweiterungen als `(Ziel-Controller, Controller-Name)`, z. B.
     /// `("sap.fe.templates.ObjectPage.ObjectPageController", "video.ext.ObjectPageController")`.
     /// Gehen ins Manifest unter `sap.ui5/extends/extensions/sap.ui.controllerExtensions`.

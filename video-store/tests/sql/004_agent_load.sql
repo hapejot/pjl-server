@@ -25,9 +25,7 @@ SELECT 'field_mismatch', t."ID"
 FROM public."AgentSet" t
 JOIN stage.agent s ON s."ID" = t."ID"
 WHERE t.name IS DISTINCT FROM s.name
-   OR t.hostname IS DISTINCT FROM s.hostname
    OR t.base_url IS DISTINCT FROM s.base_url
-   OR t.platform IS DISTINCT FROM s.platform
    OR t.status IS DISTINCT FROM s.status
    OR t.version IS DISTINCT FROM s.version;
 

@@ -30,6 +30,8 @@ use uuid::Uuid;
 use crate::thumbnails::DEFAULT_UPSTREAM;
 
 const VIDEO_SET: &str = "VideoSet";
+const FILE_SET: &str = "FileSet";
+const VOLUME_SET: &str = "VolumeSet";
 const FRAGMENT: &str = include_str!("../fragments/Player.fragment.xml");
 const PLAYER_JS: &str = include_str!("../ui5/Player.js");
 const CONTROLLER_JS: &str = include_str!("../ui5/ObjectPageController.js");
@@ -179,19 +181,69 @@ async fn stream_inner(
         .into_response())
 }
 
-/// Agent-ID und Dateipfad des Videos. Liest zuerst die aktive Version, sonst den Draft.
+/// Agent-ID und absoluter Dateipfad des Videos. Liest zuerst die aktive Version,
+/// sonst den Draft. Der Pfad ergibt sich aus Volume-Mount und relativem Pfad der
+/// ersten Datei des Videos (Trennzeichen je nach Mount: `\` bei Laufwerken).
 async fn source_of(app: &AppState, id: Uuid) -> Option<(String, String)> {
     for active in [true, false] {
         let key = EntityKey::new(id, active);
-        if let Ok(record) = app
+        let Ok(record) = app
             .store
             .read_entity(VIDEO_SET, &key, &ODataQuery::default())
             .await
-        {
-            let agent = record.get("agent_ID")?.as_str()?.to_string();
-            let path = record.get("file_path")?.as_str()?.to_string();
-            return Some((agent, path));
-        }
+        else {
+            continue;
+        };
+        let agent = record.get("agent_ID")?.as_str()?.to_string();
+        let files = app
+            .store
+            .get_collection(FILE_SET, &ODataQuery::new().filter(video_filter(id)))
+            .await
+            .ok()?;
+        let file = files.iter().find(|f| f.is_active_entity() == active)?;
+        let relative = file.get("relative_path")?.as_str()?.to_string();
+        let volume_id = Uuid::parse_str(file.get("volume_ID")?.as_str()?).ok()?;
+        let volume = app
+            .store
+            .read_entity(VOLUME_SET, &EntityKey::new(volume_id, true), &ODataQuery::default())
+            .await
+            .ok()?;
+        let mount = volume.get("mount_path")?.as_str()?.to_string();
+        return Some((agent, absolute_path(&mount, &relative)));
     }
     None
+}
+
+/// `video_ID eq <id>` als OData-Filter.
+fn video_filter(id: Uuid) -> odata::query::Expr {
+    use odata::query::{BinOp, Expr};
+    Expr::BinaryOp {
+        op: BinOp::Eq,
+        left: Box::new(Expr::Identifier("video_ID".into())),
+        right: Box::new(Expr::Guid(id.to_string())),
+    }
+}
+
+/// Mount plus relativer Pfad. Laufwerke (`F:\`) bekommen Backslashes, Unix-Mounts `/`.
+fn absolute_path(mount: &str, relative: &str) -> String {
+    if mount.ends_with(":\\") {
+        format!("{}{}", mount, relative.replace('/', "\\"))
+    } else {
+        format!("{}/{}", mount.trim_end_matches('/'), relative)
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::absolute_path;
+
+    #[test]
+    fn unix_mount_joins_with_slash() {
+        assert_eq!(absolute_path("/mnt/33/peter", "cb/a.mp4"), "/mnt/33/peter/cb/a.mp4");
+    }
+
+    #[test]
+    fn drive_mount_uses_backslashes() {
+        assert_eq!(absolute_path("F:\\", "d/chaturbate/x.mp4"), "F:\\d\\chaturbate\\x.mp4");
+    }
 }

@@ -7,11 +7,6 @@ FROM (SELECT count(*) AS n FROM public."VideoSet" WHERE "IsActiveEntity") t,
      (SELECT count(*) AS n FROM stage.video_set) s
 WHERE t.n <> s.n;
 
-SELECT 'sum_file_size', t.x, s.x
-FROM (SELECT sum(file_size) AS x FROM public."VideoSet") t,
-     (SELECT sum(file_size) AS x FROM stage.video_set) s
-WHERE t.x IS DISTINCT FROM s.x;
-
 -- Jede ID aus dem Staging ist im Ziel (aktive Instanz), und umgekehrt.
 SELECT 'missing_in_target', s."ID"
 FROM stage.video_set s
@@ -50,7 +45,5 @@ FROM public."VideoSet" t
 JOIN stage.video_set s ON s."ID" = t."ID"
 WHERE t."agent_ID" IS DISTINCT FROM s.agent_id
    OR t."scene_ID" IS DISTINCT FROM s.scene_id
-   OR t.file_path IS DISTINCT FROM s.file_path
    OR t.name IS DISTINCT FROM s.name
-   OR t.sha256_checksum IS DISTINCT FROM s.sha256_checksum
    OR t.is_reviewed IS DISTINCT FROM s.is_reviewed;

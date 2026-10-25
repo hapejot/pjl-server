@@ -31,18 +31,18 @@ AS $$
 $$;
 
 INSERT INTO public."VideoSet" (
-    "ID", "IsActiveEntity", file_path, name, file_size, duration_seconds,
+    "ID", "IsActiveEntity", name, duration_seconds,
     width, height, codec, bitrate, is_streamable, thumbnail_path,
     created_at, updated_at, last_seen, thumbnail_count, deleted_at,
-    pending_physical_delete, title, is_reviewed, sha256_checksum,
+    pending_physical_delete, title, is_reviewed,
     "agent_ID", "scene_ID"
 )
 SELECT
-    s."ID", true, s.file_path, s.name, s.file_size,
+    s."ID", true, s.name,
     s.duration_seconds::text,
     s.width, s.height, s.codec, s.bitrate, s.is_streamable, s.thumbnail_path,
     stage.odata_ts(s.created_at), stage.odata_ts(s.updated_at),
     stage.odata_ts(s.last_seen), s.thumbnail_count, stage.odata_ts(s.deleted_at),
-    s.pending_physical_delete, s.title, s.is_reviewed, s.sha256_checksum,
+    s.pending_physical_delete, s.title, s.is_reviewed,
     s.agent_id, s.scene_id
 FROM stage.video_set s;

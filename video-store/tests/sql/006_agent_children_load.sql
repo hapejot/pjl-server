@@ -43,16 +43,17 @@ FROM public."AgentVideoDirectorySet" t
 JOIN stage.agent_video_directory s ON s."ID" = t."ID"
 WHERE t.created_at::timestamptz IS DISTINCT FROM date_trunc('milliseconds', s.created_at);
 
--- Settings und Verzeichnisse: fachliche Felder und Referenz.
-SELECT 'field_mismatch_setting', t."ID"
+-- Einstellungen: gleiche Anzahl und gleiche Werte wie im Staging.
+SELECT 'row_count_setting_kv', t.n, s.n
+FROM (SELECT count(*) AS n FROM public."AgentSettingSet" WHERE "IsActiveEntity") t,
+     (SELECT count(*) AS n FROM stage.agent_setting) s
+WHERE t.n <> s.n;
+
+SELECT 'value_setting', t."ID"
 FROM public."AgentSettingSet" t
 JOIN stage.agent_setting s ON s."ID" = t."ID"
-WHERE t.scan_interval_secs IS DISTINCT FROM s.scan_interval_secs
-   OR t.heartbeat_interval_secs IS DISTINCT FROM s.heartbeat_interval_secs
-   OR t.thumbnail_dir IS DISTINCT FROM s.thumbnail_dir
-   OR t.max_concurrent_jobs IS DISTINCT FROM s.max_concurrent_jobs
-   OR t.job_poll_interval_seconds IS DISTINCT FROM s.job_poll_interval_seconds
-   OR t.max_job_history IS DISTINCT FROM s.max_job_history
+WHERE t."value"::jsonb IS DISTINCT FROM s."value"::jsonb
+   OR t."key" IS DISTINCT FROM s."key"
    OR t."agent_ID" IS DISTINCT FROM s.agent_id;
 
 SELECT 'field_mismatch_video_directory', t."ID"

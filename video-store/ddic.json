@@ -429,7 +429,7 @@
             "label": "name",
             "edm_type": "Edm.String",
             "package": null,
-            "max_length": null,
+            "max_length": 255,
             "precision": null,
             "scale": null,
             "computed": false,
@@ -439,11 +439,11 @@
         },
         {
           "Atom": {
-            "name": "scan_interval_secs",
-            "label": "scan_interval_secs",
-            "edm_type": "Edm.Int32",
+            "name": "key",
+            "label": "key",
+            "edm_type": "Edm.String",
             "package": null,
-            "max_length": null,
+            "max_length": 100,
             "precision": null,
             "scale": null,
             "computed": false,
@@ -453,9 +453,9 @@
         },
         {
           "Atom": {
-            "name": "heartbeat_interval_secs",
-            "label": "heartbeat_interval_secs",
-            "edm_type": "Edm.Int32",
+            "name": "value",
+            "label": "value",
+            "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
             "precision": null,
@@ -470,62 +470,6 @@
             "name": "updated_at",
             "label": "updated_at",
             "edm_type": "Edm.DateTimeOffset",
-            "package": null,
-            "max_length": null,
-            "precision": null,
-            "scale": null,
-            "computed": false,
-            "immutable": false,
-            "value_list": null
-          }
-        },
-        {
-          "Atom": {
-            "name": "thumbnail_dir",
-            "label": "thumbnail_dir",
-            "edm_type": "Edm.String",
-            "package": null,
-            "max_length": null,
-            "precision": null,
-            "scale": null,
-            "computed": false,
-            "immutable": false,
-            "value_list": null
-          }
-        },
-        {
-          "Atom": {
-            "name": "max_concurrent_jobs",
-            "label": "max_concurrent_jobs",
-            "edm_type": "Edm.Int32",
-            "package": null,
-            "max_length": null,
-            "precision": null,
-            "scale": null,
-            "computed": false,
-            "immutable": false,
-            "value_list": null
-          }
-        },
-        {
-          "Atom": {
-            "name": "job_poll_interval_seconds",
-            "label": "job_poll_interval_seconds",
-            "edm_type": "Edm.Int32",
-            "package": null,
-            "max_length": null,
-            "precision": null,
-            "scale": null,
-            "computed": false,
-            "immutable": false,
-            "value_list": null
-          }
-        },
-        {
-          "Atom": {
-            "name": "max_job_history",
-            "label": "max_job_history",
-            "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
             "precision": null,
@@ -621,39 +565,11 @@
         },
         {
           "Atom": {
-            "name": "hostname",
-            "label": "hostname",
-            "edm_type": "Edm.String",
-            "package": null,
-            "max_length": 255,
-            "precision": null,
-            "scale": null,
-            "computed": false,
-            "immutable": false,
-            "value_list": null
-          }
-        },
-        {
-          "Atom": {
             "name": "base_url",
             "label": "base_url",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 512,
-            "precision": null,
-            "scale": null,
-            "computed": false,
-            "immutable": false,
-            "value_list": null
-          }
-        },
-        {
-          "Atom": {
-            "name": "platform",
-            "label": "platform",
-            "edm_type": "Edm.String",
-            "package": null,
-            "max_length": 50,
             "precision": null,
             "scale": null,
             "computed": false,
@@ -710,6 +626,55 @@
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 255,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "Host",
+      "package": "video",
+      "type_name_plural": "Hosts",
+      "fields": [
+        {
+          "Atom": {
+            "name": "name",
+            "label": "name",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": 255,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "name": "hostname",
+            "label": "hostname",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": 255,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "name": "platform",
+            "label": "platform",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": 50,
             "precision": null,
             "scale": null,
             "computed": false,
@@ -2889,39 +2854,11 @@
       "fields": [
         {
           "Atom": {
-            "name": "file_path",
-            "label": "file_path",
-            "edm_type": "Edm.String",
-            "package": null,
-            "max_length": null,
-            "precision": null,
-            "scale": null,
-            "computed": false,
-            "immutable": false,
-            "value_list": null
-          }
-        },
-        {
-          "Atom": {
             "name": "name",
             "label": "name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 512,
-            "precision": null,
-            "scale": null,
-            "computed": false,
-            "immutable": false,
-            "value_list": null
-          }
-        },
-        {
-          "Atom": {
-            "name": "file_size",
-            "label": "file_size",
-            "edm_type": "Edm.Int64",
-            "package": null,
-            "max_length": null,
             "precision": null,
             "scale": null,
             "computed": false,
@@ -3130,6 +3067,90 @@
             "name": "is_reviewed",
             "label": "is_reviewed",
             "edm_type": "Edm.Boolean",
+            "package": null,
+            "max_length": null,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "Volume",
+      "package": "video",
+      "type_name_plural": "Volumes",
+      "fields": [
+        {
+          "Atom": {
+            "name": "name",
+            "label": "name",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": 512,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "name": "mount_path",
+            "label": "mount_path",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": 512,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "File",
+      "package": "video",
+      "type_name_plural": "Files",
+      "fields": [
+        {
+          "Atom": {
+            "name": "name",
+            "label": "name",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": 512,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "name": "relative_path",
+            "label": "relative_path",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": 1024,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "name": "size",
+            "label": "size",
+            "edm_type": "Edm.Int64",
             "package": null,
             "max_length": null,
             "precision": null,
@@ -3450,6 +3471,42 @@
       "one": "Video",
       "one_field": "_TrainingImages",
       "many": "TrainingImage",
+      "many_property": "video",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "name": "agents_host_id",
+      "one": "Host",
+      "one_field": "_Agents",
+      "many": "Agent",
+      "many_property": "host",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "name": "volumes_host_id",
+      "one": "Host",
+      "one_field": "_Volumes",
+      "many": "Volume",
+      "many_property": "host",
+      "owned": true,
+      "package": "video"
+    },
+    {
+      "name": "files_volume_id",
+      "one": "Volume",
+      "one_field": "_Files",
+      "many": "File",
+      "many_property": "volume",
+      "owned": true,
+      "package": "video"
+    },
+    {
+      "name": "files_video_id",
+      "one": "Video",
+      "one_field": "_Files",
+      "many": "File",
       "many_property": "video",
       "owned": false,
       "package": "video"

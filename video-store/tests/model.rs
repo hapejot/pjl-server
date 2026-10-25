@@ -150,7 +150,7 @@ fn overlay_list_views_reach_the_video_entities() {
     let views = video.list_views();
     assert_eq!(views.len(), 1);
     assert_eq!(views[0].name, "default");
-    assert_eq!(views[0].columns, vec!["name", "file_size", "scene", "agent"]);
+    assert_eq!(views[0].columns, vec!["name", "scene", "agent"]);
 
     let tag = ddic.entities().into_iter().find(|e| e.name() == "VideoTag").unwrap();
     assert_eq!(tag.list_views()[0].columns, vec!["tag", "source"]);

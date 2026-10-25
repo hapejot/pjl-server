@@ -26,7 +26,6 @@ const FORMATTED_FIELDS_FRAGMENT: &str = include_str!("../fragments/FormattedFiel
 
 /// Formatierte Felder der Entitaet `Video`: (Rohfeld, Spalten-Schluessel, Spaltenueberschrift).
 const VIDEO_FIELDS: &[(&str, &str, &str)] = &[
-    ("file_size", "Bytes", "Größe"),
     ("bitrate", "Bitrate", "Bitrate"),
     ("duration_seconds", "Duration", "Dauer"),
 ];

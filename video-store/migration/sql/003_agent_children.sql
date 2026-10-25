@@ -26,25 +26,31 @@ SELECT c.id::text, true, c.id::text, c.job_type, c.schema_version,
        c.registered_at, c.updated_at, c.agent_id::text
 FROM src.agent_capabilities c;
 
+-- Einstellungen sind Schluessel-Wert-Paare je Agent. Die Quelle hat heute feste
+-- Spalten; jede Spalte wird eine Zeile. Der Wert ist JSON-Text (Zahl, Text, auch
+-- komplexe JSON-Objekte). ID = UUID v5 aus Agent und Schluessel.
 CREATE TABLE stage.agent_setting (
-    "ID"                       text        PRIMARY KEY,
-    "IsActiveEntity"           boolean     NOT NULL,
-    name                       text        NOT NULL,
-    scan_interval_secs         integer     NOT NULL,
-    heartbeat_interval_secs    integer     NOT NULL,
-    updated_at                 timestamptz NOT NULL,
-    thumbnail_dir              text        NOT NULL,
-    max_concurrent_jobs        integer     NOT NULL,
-    job_poll_interval_seconds  integer     NOT NULL,
-    max_job_history            integer     NOT NULL,
-    agent_id                   text        NOT NULL UNIQUE
+    "ID"             text        PRIMARY KEY,
+    "IsActiveEntity" boolean     NOT NULL,
+    name             text        NOT NULL,
+    "key"            text        NOT NULL,
+    "value"          text        NOT NULL,
+    updated_at       timestamptz NOT NULL,
+    agent_id         text        NOT NULL,
+    UNIQUE (agent_id, "key")
 );
 
 INSERT INTO stage.agent_setting
-SELECT s.id::text, true, s.id::text, s.scan_interval_secs, s.heartbeat_interval_secs,
-       s.updated_at, s.thumbnail_dir, s.max_concurrent_jobs,
-       s.job_poll_interval_seconds, s.max_job_history, s.agent_id::text
-FROM src.agent_settings s;
+SELECT stage.uuid_v5('agent_settings', s.agent_id::text || '|' || kv.key), true,
+       kv.key, kv.key, kv.value::text, s.updated_at, s.agent_id::text
+FROM src.agent_settings s
+CROSS JOIN LATERAL jsonb_each(jsonb_build_object(
+    'scan_interval_secs',         s.scan_interval_secs,
+    'heartbeat_interval_secs',    s.heartbeat_interval_secs,
+    'thumbnail_dir',              s.thumbnail_dir,
+    'max_concurrent_jobs',        s.max_concurrent_jobs,
+    'job_poll_interval_seconds',  s.job_poll_interval_seconds,
+    'max_job_history',            s.max_job_history)) AS kv(key, value);
 
 CREATE TABLE stage.agent_video_directory (
     "ID"             text        PRIMARY KEY,

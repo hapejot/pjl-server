@@ -27,14 +27,10 @@ SELECT
 FROM stage.agent_capability s;
 
 INSERT INTO public."AgentSettingSet" (
-    "ID", "IsActiveEntity", name, scan_interval_secs, heartbeat_interval_secs,
-    updated_at, thumbnail_dir, max_concurrent_jobs, job_poll_interval_seconds,
-    max_job_history, "agent_ID"
+    "ID", "IsActiveEntity", name, "key", "value", updated_at, "agent_ID"
 )
 SELECT
-    s."ID", true, s.name, s.scan_interval_secs, s.heartbeat_interval_secs,
-    stage.odata_ts(s.updated_at), s.thumbnail_dir, s.max_concurrent_jobs,
-    s.job_poll_interval_seconds, s.max_job_history, s.agent_id
+    s."ID", true, s.name, s."key", s."value", stage.odata_ts(s.updated_at), s.agent_id
 FROM stage.agent_setting s;
 
 INSERT INTO public."AgentVideoDirectorySet" (

@@ -6,11 +6,6 @@ FROM (SELECT count(*) AS n FROM stage.agent_capability) s,
      (SELECT count(*) AS n FROM src.agent_capabilities) q
 WHERE s.n <> q.n;
 
-SELECT 'row_count_setting', s.n, q.n
-FROM (SELECT count(*) AS n FROM stage.agent_setting) s,
-     (SELECT count(*) AS n FROM src.agent_settings) q
-WHERE s.n <> q.n;
-
 SELECT 'row_count_video_directory', s.n, q.n
 FROM (SELECT count(*) AS n FROM stage.agent_video_directory) s,
      (SELECT count(*) AS n FROM src.agent_video_directories) q
@@ -29,18 +24,24 @@ WHERE s.job_type IS DISTINCT FROM c.job_type
    OR s.updated_at IS DISTINCT FROM c.updated_at
    OR s.agent_id IS DISTINCT FROM c.agent_id::text;
 
--- Felder: Settings.
-SELECT 'field_mismatch_setting', q.id::text
+-- Einstellungen: jede Quellzeile ergibt sechs Schluessel-Wert-Paare.
+SELECT 'row_count_setting_kv', s.n, 6 * q.n
+FROM (SELECT count(*) AS n FROM stage.agent_setting) s,
+     (SELECT count(*) AS n FROM src.agent_settings) q
+WHERE s.n <> 6 * q.n;
+
+-- Jeder Wert ist inhaltlich gleich dem Quellfeld (JSON-Vergleich).
+SELECT 'setting_value', q.agent_id::text, kv.key
 FROM src.agent_settings q
-JOIN stage.agent_setting s ON s."ID" = q.id::text
-WHERE s.scan_interval_secs IS DISTINCT FROM q.scan_interval_secs
-   OR s.heartbeat_interval_secs IS DISTINCT FROM q.heartbeat_interval_secs
-   OR s.updated_at IS DISTINCT FROM q.updated_at
-   OR s.thumbnail_dir IS DISTINCT FROM q.thumbnail_dir
-   OR s.max_concurrent_jobs IS DISTINCT FROM q.max_concurrent_jobs
-   OR s.job_poll_interval_seconds IS DISTINCT FROM q.job_poll_interval_seconds
-   OR s.max_job_history IS DISTINCT FROM q.max_job_history
-   OR s.agent_id IS DISTINCT FROM q.agent_id::text;
+CROSS JOIN LATERAL jsonb_each(jsonb_build_object(
+    'scan_interval_secs',         q.scan_interval_secs,
+    'heartbeat_interval_secs',    q.heartbeat_interval_secs,
+    'thumbnail_dir',              q.thumbnail_dir,
+    'max_concurrent_jobs',        q.max_concurrent_jobs,
+    'job_poll_interval_seconds',  q.job_poll_interval_seconds,
+    'max_job_history',            q.max_job_history)) AS kv(key, value)
+JOIN stage.agent_setting s ON s.agent_id = q.agent_id::text AND s."key" = kv.key
+WHERE s."value"::jsonb IS DISTINCT FROM kv.value;
 
 -- Felder: Video-Verzeichnisse.
 SELECT 'field_mismatch_video_directory', q.id::text

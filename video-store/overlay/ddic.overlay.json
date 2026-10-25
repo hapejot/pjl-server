@@ -4,7 +4,7 @@
       "name": "Video",
       "selection_fields": ["name", "is_reviewed", "is_streamable", "agent"],
       "list_views": [
-        { "name": "default", "columns": ["name", "file_size", "scene", "agent"] }
+        { "name": "default", "columns": ["name", "scene", "agent"] }
       ]
     },
     {

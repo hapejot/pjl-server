@@ -68,9 +68,10 @@ fn cascade_on_not_null_becomes_composition_once_per_child() {
 }
 
 #[test]
-fn override_forces_video_jobs_under_agent() {
+fn video_jobs_agent_is_optional_association() {
     let schema = model().schema().unwrap();
-    assert_eq!(assoc(&schema, "VideoJobSet", "agent").ownership, Ownership::Composition);
+    assert_eq!(assoc(&schema, "VideoJobSet", "agent").ownership, Ownership::Association);
+    assert!(schema.set("VideoJobSet").unwrap().has_column("agent_ID"));
     assert_eq!(assoc(&schema, "VideoJobSet", "video").ownership, Ownership::Association);
 }
 

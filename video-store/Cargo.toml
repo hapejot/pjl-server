@@ -32,6 +32,7 @@ uuid = { version = "1", features = ["v5"] }
 docker-tests = []
 
 [dev-dependencies]
+relational-core = { version = "0.1.0", path = "../relational-core" }
 tempfile = "=3.10.1"
 odata = { version = "0.1.0", path = "../odata" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

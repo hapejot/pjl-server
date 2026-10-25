@@ -46,17 +46,20 @@ pub const IMPLICIT_FKS: &[(&str, &str, &str)] = &[
 ];
 
 /// Komposition erzwingen, obwohl die Datenbank keine CASCADE-Regel hat.
-/// `video_jobs.agent_id` ist NOT NULL, hat aber kein ON DELETE.
-pub const FORCE_COMPOSITION: &[(&str, &str)] = &[("video_jobs", "agent_id")];
+/// Leer: keine Komposition erzwungen.
+pub const FORCE_COMPOSITION: &[(&str, &str)] = &[];
 
 /// Komposition verbieten, obwohl die Datenbank CASCADE hat.
 /// `video_jobs.video_id` ist nullable (Agent-Jobs ohne Video) und darf daher
 /// kein Kind einer Komposition sein.
+/// `video_jobs.agent_id` ist nullable (Jobs ohne Agent sind erlaubt). Als
+/// Komposition verlangt der Store beim Anlegen einen Agenten, daher Assoziation.
 /// `videos.agent_id` ist NOT NULL mit CASCADE, soll aber nur eine Assoziation sein:
 /// Sonst waere `Video` ein DraftNode unter `Agent`, und die App mit Hauptentitaet
 /// `Video` bietet keine Bearbeitung an. Dadurch ist `Video` DraftRoot.
 pub const FORCE_ASSOCIATION: &[(&str, &str)] = &[
     ("video_jobs", "video_id"),
+    ("video_jobs", "agent_id"),
     ("videos", "agent_id"),
 ];
 

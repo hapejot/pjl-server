@@ -11,6 +11,7 @@ use std::sync::Mutex;
 
 use data_store::StoreError;
 use relational_core::ddl::quote;
+use relational_core::catalog::ExistingForeignKey;
 use relational_core::Catalog;
 use rusqlite::Connection;
 
@@ -58,6 +59,11 @@ impl Catalog for SqliteCatalog<'_> {
             columns.insert(row.map_err(catalog_err)?);
         }
         Ok(columns)
+    }
+
+    /// SQLite kann Constraints nicht nachtraeglich aendern: kein Abgleich.
+    async fn foreign_keys(&self, _table: &str) -> Result<Vec<ExistingForeignKey>, StoreError> {
+        Ok(vec![])
     }
 }
 

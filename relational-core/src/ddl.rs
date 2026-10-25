@@ -78,12 +78,55 @@ pub fn internal_columns(dialect: &dyn Dialect, set: &EntitySet) -> Vec<(String, 
     }
 }
 
-/// `CREATE TABLE` fuer ein Entity-Set.
+/// Der Fremdschluessel, den die Schema-Seite fuer ein Set verlangt.
 ///
-/// Fremdschluessel werden **nur fuer Kompositionen** erzeugt, und zwar
-/// inklusive `IsActiveEntity`: damit kann ein aktiver Parent strukturell kein
-/// Draft-Kind haben. Lose Assoziationen bekommen keinen Constraint - sonst
-/// muesste ein Draft-Auftrag auf einen Draft-Kunden zeigen.
+/// Nur Kompositionen haben einen. Lose Assoziationen bekommen keinen
+/// Constraint - sonst muesste ein Draft-Auftrag auf einen Draft-Kunden zeigen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForeignKeySpec {
+    /// Name, unter dem `ALTER TABLE ... ADD CONSTRAINT` ihn anlegt.
+    pub name: String,
+    /// Spalten der eigenen Tabelle, sortiert.
+    pub columns: Vec<String>,
+    pub target_table: String,
+    /// `FOREIGN KEY (...) REFERENCES ... ON DELETE CASCADE`, ohne Constraint-Namen.
+    pub clause: String,
+}
+
+pub fn desired_foreign_key(schema: &Schema, set: &EntitySet) -> Result<Option<ForeignKeySpec>, StoreError> {
+    let Some(parent) = set.composition_parent() else {
+        return Ok(None);
+    };
+    let target = schema
+        .set(&parent.target_set)
+        .map_err(|e| StoreError::Metadata(format!("DDL: {e}")))?;
+    let fk_column = parent.foreign_key.column();
+    let (columns, referenced) = if set.draft_enabled && target.draft_enabled {
+        (
+            vec![fk_column.to_string(), IS_ACTIVE_COLUMN.to_string()],
+            vec![ID_COLUMN.to_string(), IS_ACTIVE_COLUMN.to_string()],
+        )
+    } else {
+        (vec![fk_column.to_string()], vec![ID_COLUMN.to_string()])
+    };
+    let clause = format!(
+        "FOREIGN KEY ({}) REFERENCES {} ({}) ON DELETE CASCADE",
+        columns.iter().map(|c| quote(c)).collect::<Vec<_>>().join(", "),
+        quote(&target.name),
+        referenced.iter().map(|c| quote(c)).collect::<Vec<_>>().join(", "),
+    );
+    let mut sorted = columns.clone();
+    sorted.sort();
+    Ok(Some(ForeignKeySpec {
+        name: format!("fk_{}_{}", set.name, fk_column),
+        columns: sorted,
+        target_table: target.name.clone(),
+        clause,
+    }))
+}
+
+/// `CREATE TABLE` fuer ein Entity-Set. Fremdschluessel nur fuer Kompositionen,
+/// siehe [`desired_foreign_key`].
 pub fn create_table_sql(
     dialect: &dyn Dialect,
     schema: &Schema,
@@ -97,28 +140,8 @@ pub fn create_table_sql(
     let keys: Vec<String> = set.key_columns().iter().map(|c| quote(&c.name)).collect();
     parts.push(format!("PRIMARY KEY ({})", keys.join(", ")));
 
-    if let Some(parent) = set.composition_parent() {
-        let target = schema
-            .set(&parent.target_set)
-            .map_err(|e| StoreError::Metadata(format!("DDL: {e}")))?;
-        let fk_column = parent.foreign_key.column();
-        if set.draft_enabled && target.draft_enabled {
-            parts.push(format!(
-                "FOREIGN KEY ({}, {}) REFERENCES {} ({}, {}) ON DELETE CASCADE",
-                quote(fk_column),
-                quote(IS_ACTIVE_COLUMN),
-                quote(&target.name),
-                quote(ID_COLUMN),
-                quote(IS_ACTIVE_COLUMN)
-            ));
-        } else {
-            parts.push(format!(
-                "FOREIGN KEY ({}) REFERENCES {} ({}) ON DELETE CASCADE",
-                quote(fk_column),
-                quote(&target.name),
-                quote(ID_COLUMN)
-            ));
-        }
+    if let Some(fk) = desired_foreign_key(schema, set)? {
+        parts.push(fk.clause);
     }
 
     Ok(format!(
@@ -126,6 +149,64 @@ pub fn create_table_sql(
         quote(&set.name),
         parts.join(",\n  ")
     ))
+}
+
+/// Gleicht die Fremdschluessel bestehender Tabellen mit der Schema-Seite ab.
+///
+/// Verwaltet werden die Spalten der to-one-Assoziationen. Ein Fremdschluessel
+/// auf einer solchen Spalte, den das Schema nicht (mehr) verlangt, wird
+/// entfernt; ein fehlender wird angelegt. Fremdschluessel auf anderen Spalten
+/// werden nicht angefasst. Nur fuer Backends, die Constraints aendern koennen.
+pub async fn foreign_key_plan(
+    catalog: &dyn Catalog,
+    schema: &Schema,
+) -> Result<Vec<String>, StoreError> {
+    let mut plan = vec![];
+    for set in schema.sets() {
+        if !catalog.table_exists(&set.name).await? {
+            continue;
+        }
+        let managed: HashSet<String> = set
+            .associations()
+            .filter(|a| a.cardinality == data_store::Cardinality::ToOne)
+            .map(|a| a.foreign_key.column().to_string())
+            .collect();
+        let desired = desired_foreign_key(schema, set)?;
+        let existing = catalog.foreign_keys(&set.name).await?;
+
+        let mut has_desired = false;
+        for fk in &existing {
+            let touches_managed = fk.columns.iter().any(|c| managed.contains(c) && c != IS_ACTIVE_COLUMN);
+            if !touches_managed {
+                continue;
+            }
+            let matches = desired.as_ref().is_some_and(|d| {
+                d.columns == fk.columns && d.target_table == fk.target_table
+            });
+            if matches {
+                has_desired = true;
+                continue;
+            }
+            info!("Migration: Fremdschluessel {} auf {} entfaellt", fk.name, set.name);
+            plan.push(format!(
+                "ALTER TABLE {} DROP CONSTRAINT {}",
+                quote(&set.name),
+                quote(&fk.name)
+            ));
+        }
+        if let Some(d) = desired {
+            if !has_desired {
+                info!("Migration: Fremdschluessel {} auf {} wird angelegt", d.name, set.name);
+                plan.push(format!(
+                    "ALTER TABLE {} ADD CONSTRAINT {} {}",
+                    quote(&set.name),
+                    quote(&d.name),
+                    d.clause
+                ));
+            }
+        }
+    }
+    Ok(plan)
 }
 
 /// Indizes auf allen Fremdschluesselspalten.
@@ -334,6 +415,45 @@ mod tests {
             findings,
             vec!["OrderSet.Vergessen existiert in der Datenbank, aber nicht im Schema"]
         );
+    }
+
+    /// Eine Assoziation darf keinen Fremdschluessel mehr haben: der bestehende
+    /// wird entfernt, auch wenn er einmal als Komposition angelegt wurde.
+    #[tokio::test]
+    async fn stale_association_constraint_is_dropped() {
+        let catalog = FakeCatalog::default()
+            .with_table("OrderSet", &["ID", "IsActiveEntity", "Customer_ID"])
+            .with_foreign_key("OrderSet", "alt_fk", &["Customer_ID", "IsActiveEntity"], "CustomerSet");
+        let plan = foreign_key_plan(&catalog, &schema()).await.unwrap();
+        assert_eq!(plan, vec![r#"ALTER TABLE "OrderSet" DROP CONSTRAINT "alt_fk""#.to_string()]);
+    }
+
+    /// Eine Komposition ohne Fremdschluessel bekommt einen - mit CASCADE.
+    #[tokio::test]
+    async fn missing_composition_constraint_is_added() {
+        let catalog = FakeCatalog::default().with_table("ItemSet", &["ID", "IsActiveEntity", "Order_ID"]);
+        let plan = foreign_key_plan(&catalog, &schema()).await.unwrap();
+        assert_eq!(plan.len(), 1, "{plan:?}");
+        assert!(plan[0].starts_with(r#"ALTER TABLE "ItemSet" ADD CONSTRAINT "fk_ItemSet_Order_ID" FOREIGN KEY"#));
+        assert!(plan[0].ends_with("ON DELETE CASCADE"));
+    }
+
+    /// Stimmt der bestehende Fremdschluessel bereits, bleibt alles unangetastet.
+    #[tokio::test]
+    async fn matching_composition_constraint_is_left_alone() {
+        let catalog = FakeCatalog::default()
+            .with_table("ItemSet", &["ID", "IsActiveEntity", "Order_ID"])
+            .with_foreign_key("ItemSet", "x", &["IsActiveEntity", "Order_ID"], "OrderSet");
+        assert!(foreign_key_plan(&catalog, &schema()).await.unwrap().is_empty());
+    }
+
+    /// Fremdschluessel auf Spalten, die kein verwaltetes Feld sind, bleiben.
+    #[tokio::test]
+    async fn unmanaged_constraints_are_left_alone() {
+        let catalog = FakeCatalog::default()
+            .with_table("OrderSet", &["ID", "IsActiveEntity", "Customer_ID", "Eigen"])
+            .with_foreign_key("OrderSet", "eigen_fk", &["Eigen"], "Anderes");
+        assert!(foreign_key_plan(&catalog, &schema()).await.unwrap().is_empty());
     }
 
     /// Kompositionen bekommen einen Fremdschluessel inklusive

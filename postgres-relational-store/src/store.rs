@@ -843,7 +843,11 @@ async fn apply_schema(
     dialect: &dyn Dialect,
     schema: &Schema,
 ) -> Result<(), StoreError> {
-    let plan = ddl::migration_plan(&PostgresCatalog::new(&*client), dialect, schema).await?;
+    let catalog = PostgresCatalog::new(&*client);
+    let mut plan = ddl::migration_plan(&catalog, dialect, schema).await?;
+    // Fremdschluessel bestehender Tabellen an die Ownership der (uebersteuerten)
+    // ddic angleichen. Neu angelegte Tabellen tragen ihren Constraint schon im CREATE.
+    plan.extend(ddl::foreign_key_plan(&catalog, schema).await?);
     for statement in plan {
         debug!("DDL: {statement}");
         sqltrace::batch_execute(client, &statement)

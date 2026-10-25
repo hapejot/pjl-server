@@ -1474,6 +1474,12 @@ impl ODataError {
     fn from_store(e: StoreError) -> Self {
         match e {
             StoreError::NotFound { .. } => Self::not_found(e.to_string()),
+            StoreError::Conflict(msg) => Self {
+                status: StatusCode::CONFLICT,
+                code: "Conflict",
+                message: msg,
+            },
+            StoreError::PropertyNotFound(_) => Self::bad_request(e.to_string()),
             _ => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 code: "InternalError",
@@ -2145,24 +2151,34 @@ async fn children_of(
 
 async fn patch_handler(
     path: Path<String>,
-    _state: State<AppState>,
+    state: State<AppState>,
     params: Query<HashMap<String, String>>,
     payload: Option<Json<Value>>,
-) -> impl IntoResponse {
+) -> Response {
     let _p = build_query(&params);
-    let _path_struct = parse_odata_path(&path).unwrap();
-    let _body = payload.map(|Json(v)| v).unwrap_or_else(|| json!({}));
-    let key = _path_struct.segments.first().unwrap();
-    let ekey = EntityKey::new(key.id().unwrap(), key.is_active_entity());
-    _state
-        .store
-        .patch_entity(&key.name, &ekey, &_body)
-        .await
-        .unwrap();
-    (
-        [content_type_json(), odata_version()],
-        json!([]).to_string(),
-    )
+    let path_struct = match parse_odata_path(&path) {
+        Ok(p) => p,
+        Err(e) => {
+            return ODataError::bad_request(format!("Invalid path '{}': {}", e.segment, e.message))
+                .into_response();
+        }
+    };
+    let body = payload.map(|Json(v)| v).unwrap_or_else(|| json!({}));
+    let Some(key) = path_struct.segments.first() else {
+        return ODataError::bad_request("Missing entity segment in path").into_response();
+    };
+    let Some(id) = key.id() else {
+        return ODataError::bad_request(format!("Invalid key for '{}'", key.name)).into_response();
+    };
+    let ekey = EntityKey::new(id, key.is_active_entity());
+    match state.store.patch_entity(&key.name, &ekey, &body).await {
+        Ok(_) => (
+            [content_type_json(), odata_version()],
+            json!([]).to_string(),
+        )
+            .into_response(),
+        Err(e) => ODataError::from_store(e).into_response(),
+    }
 }
 
 async fn delete_handler(path: Path<String>, state: State<AppState>) -> Response {

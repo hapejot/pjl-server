@@ -1,5 +1,4 @@
-# Ein Image fuer beide Phasen von video-store (Store: PostgreSQL ueber STORE_PG_URL):
-#   /app/migrate.sh      Migration (one-shot), siehe docker/migrate.sh
+# Image fuer video-store (Laufzeit, Store: PostgreSQL ueber STORE_PG_URL):
 #   /app/video-runtime   OData-Laufzeitserver (pjl-runtime + Video-Erweiterungen)
 #
 # Build-Kontext ist das Workspace-Wurzelverzeichnis (die Crates haengen per
@@ -32,7 +31,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY --from=build /out/ /app/
-COPY video-store/docker/migrate.sh /app/migrate.sh
 COPY web /app/web
 
 RUN mkdir -p /app/export && chown -R appuser /app/export

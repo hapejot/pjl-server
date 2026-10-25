@@ -1,34 +1,31 @@
-# video-store: eigene PostgreSQL-Instanz fuer den Store, Migration und Laufzeit.
+# video-store: Laufzeit-Stack.
 #
-#   db       (dauerhaft)  PostgreSQL 17 nur fuer die Video-Anwendung. Laeuft in
-#                         einem eigenen Container, NICHT auf dem Host.
-#   migrate  (one-shot)   liest die bestehende Video-Datenbank nur lesend und
-#                         schreibt ddic.json und die Daten in `db`. Ist die
-#                         Migration bereits erledigt, endet der Dienst sofort.
-#   runtime  (dauerhaft)  startet erst, wenn `db` gesund und migrate erfolgreich
-#                         war. Liest und schreibt nur in `db`.
+#   db       (dauerhaft)  PostgreSQL 17 mit pgvector. Enthaelt den Store der
+#                         Anwendung (Datenbank `video`). Die Migration arbeitet
+#                         in einer eigenen Datenbank `video_mig` auf derselben
+#                         Instanz, siehe scripts/stage.sh.
+#   runtime  (dauerhaft)  OData-Server. Liest das Modell aus ddic.json (von Hand
+#                         gepflegt, KEINE Generierung aus der Quelle) und
+#                         schreibt nur in `db`.
+#
+# Die Quelldatenbank ist nicht Teil dieses Stacks. Sie wird nur ueber
+# scripts/stage.sh (pg_dump) gelesen.
 #
 # Start:
-#   export VIDEO_PG_URL='postgres://USER:PASSWORT@host.docker.internal:5432/video'
-#   export VIDEO_DB_PASSWORD='ein-geheimes-passwort'
-#   docker compose -f video-store/compose.yaml up --build
+#   docker compose -f video-store/compose.yaml up -d --build
 #   OData -> http://localhost:3035/Service/$metadata
-#
-# Neue Migration (verwirft den bestehenden Store in `db`):
-#   docker compose -f video-store/compose.yaml run --rm migrate --force
-#   docker compose -f video-store/compose.yaml up -d runtime
 #
 # Komplett neu aufsetzen (inkl. Datenbank-Volume):
 #   docker compose -f video-store/compose.yaml down -v
 #
 # Overlay: video-store/overlay/ddic.overlay.json wird nur von `runtime` gelesen
-# (Bind-Mount, ohne Migration neu wirksam nach Neustart von `runtime`).
+# (Bind-Mount, wirksam nach `docker compose restart runtime`).
 #
 # Die Zugangsdaten gehoeren in die Umgebung, nicht in diese Datei.
 
 services:
   db:
-    image: postgres:17-alpine
+    image: pgvector/pgvector:pg17
     restart: unless-stopped
     environment:
       POSTGRES_USER: video
@@ -44,27 +41,6 @@ services:
     ports:
       - "5001:5432"
 
-  migrate:
-    build:
-      context: ..
-      dockerfile: video-store/Dockerfile
-      target: run
-    entrypoint: ["/app/migrate.sh"]
-    environment:
-      VIDEO_PG_URL: postgres://peter:peter@nuc/xstreaming
-      STORE_PG_URL: postgres://video:video@db:5432/video
-      EXPORT_DIR: /app/export
-#     RUST_BACKTRACE: 1
-    depends_on:
-      db:
-        condition: service_healthy
-    volumes:
-      - video-export:/app/export
-    # Damit die Quelldatenbank auf dem Host erreichbar ist (Linux braucht das).
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: "no"
-
   runtime:
     build:
       context: ..
@@ -73,12 +49,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
     environment:
-      DDIC: /app/export/ddic.json
+      DDIC: /app/model/ddic.json
       # Optionales Overlay (Listenansichten, ausgeblendete ObjectPage-Felder).
-      # Datei auf dem Host bearbeiten, dann `docker compose restart runtime`.
       DDIC_OVERLAY: /app/overlay/ddic.overlay.json
       STORE_PG_URL: postgres://video:video@db:5432/video
       EXPORT_DIR: /app/export
@@ -89,11 +62,10 @@ services:
       # 3270-Statusansichten nur lokal erreichbar. Fuer Netzzugriff hier anpassen.
       - "127.0.0.1:3270:3270"
     volumes:
-      - video-export:/app/export:ro
+      - ./ddic.json:/app/model/ddic.json:ro
       - ./overlay/ddic.overlay.json:/app/overlay/ddic.overlay.json:ro
     entrypoint: ["/app/video-runtime"]
     restart: unless-stopped
 
 volumes:
   video-db:
-  video-export:

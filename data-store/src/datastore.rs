@@ -77,11 +77,20 @@ impl DataRecord {
         let fields = fields
             .as_object_mut()
             .ok_or_else(|| StoreError::Serialize("as object".into()))?;
-        let id = fields
-            .remove("ID")
-            .and_then(|x| x.as_str().map(|s| s.to_string()))
-            .and_then(|x| Uuid::parse_str(&x).ok())
-            .unwrap_or_else(|| Uuid::new_v4());
+        // Fehlt die ID (Neuanlage), wird eine UUID vergeben. Eine vorhandene,
+        // aber ungueltige ID ist ein Fehler: frueher wurde sie stillschweigend
+        // durch eine zufaellige UUID ersetzt, bei jedem Lesen eine andere.
+        let id = match fields.remove("ID") {
+            None | Some(Value::Null) => Uuid::new_v4(),
+            Some(Value::String(s)) => Uuid::parse_str(&s).map_err(|_| {
+                StoreError::Serialize(format!("ID '{s}' ist keine gueltige UUID"))
+            })?,
+            Some(other) => {
+                return Err(StoreError::Serialize(format!(
+                    "ID muss eine UUID-Zeichenkette sein, erhalten: {other}"
+                )))
+            }
+        };
         let is_active_entity = fields
             .remove("IsActiveEntity")
             .and_then(|x| x.as_bool())
@@ -437,4 +446,32 @@ pub trait DataStore: Send + Sync {
 #[async_trait::async_trait]
 pub trait DataStoreDebugExt: DataStore {
     async fn get_records(&self, set_name: &str) -> Vec<Value>;
+}
+
+#[cfg(test)]
+mod from_json_id_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn valid_uuid_id_is_kept() {
+        let r = DataRecord::from_json(&json!({
+            "ID": "00000000-0000-0000-0000-000000000042",
+            "IsActiveEntity": true
+        }))
+        .unwrap();
+        assert_eq!(r.id.to_string(), "00000000-0000-0000-0000-000000000042");
+    }
+
+    #[test]
+    fn invalid_id_is_rejected_not_replaced() {
+        let err = DataRecord::from_json(&json!({ "ID": "3963451", "IsActiveEntity": true }));
+        assert!(matches!(err, Err(StoreError::Serialize(_))));
+    }
+
+    #[test]
+    fn missing_id_gets_new_uuid() {
+        let r = DataRecord::from_json(&json!({ "IsActiveEntity": false })).unwrap();
+        assert!(!r.is_active_entity);
+    }
 }

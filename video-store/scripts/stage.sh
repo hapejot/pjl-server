@@ -16,6 +16,7 @@
 #   load              migration/load/*.sql (stage -> public, nur auf leerem Ziel)
 #   validate          tests/sql/*.sql. Jede Pruefung gibt nur bei Fehlern Zeilen aus.
 #   rebuild [datei]   restore + migrate + schema + load + validate
+#   cutover [--yes]   video_mig wird Runtime-Datenbank video (altes video wird geloescht)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -136,6 +137,38 @@ cmd_load() {
     return "$fail"
 }
 
+cmd_cutover() {
+    # Umschaltung: video_mig wird zur Runtime-Datenbank `video`. Die bisherige
+    # Datenbank `video` wird geloescht. Ohne --yes nur Trockenlauf.
+    local yes="${1:-}"
+    local runtime_url="${RUNTIME_ADMIN_URL:-$ADMIN_URL}"
+    local state
+    state="$(psql "$ADMIN_URL" -At -c "SELECT string_agg(datname, ',') FROM pg_database WHERE datname IN ('video','video_mig')")"
+    echo "cutover: vorhandene Datenbanken: ${state:-keine}"
+    case ",$state," in
+        *,video_mig,*) ;;
+        *) echo "cutover: video_mig fehlt - zuerst rebuild" >&2; exit 1 ;;
+    esac
+    echo "cutover: validate der Migrations-Datenbank"
+    cmd_validate >/dev/null || { echo "cutover: validate fehlgeschlagen - Abbruch" >&2; exit 1; }
+    echo "cutover: Runtime -> video (bisheriges video wird geloescht)"
+    if [ "$yes" != "--yes" ]; then
+        echo "cutover: Trockenlauf. Mit 'cutover --yes' ausfuehren."
+        return 0
+    fi
+    docker compose -f "$ROOT/compose.yaml" stop runtime
+    psql "$runtime_url" -v ON_ERROR_STOP=1 -q \
+        -c "DROP DATABASE IF EXISTS video WITH (FORCE)" \
+        -c "ALTER DATABASE video_mig RENAME TO video"
+    docker compose -f "$ROOT/compose.yaml" up -d --build runtime
+    sleep 20
+    local code
+    code="$(curl -s -o /dev/null -w '%{http_code}' 'http://localhost:3035/Service/$metadata')"
+    echo "cutover: \$metadata HTTP $code"
+    [ "$code" = "200" ] || { echo "cutover: Runtime antwortet nicht korrekt" >&2; exit 1; }
+    echo "cutover: fertig"
+}
+
 cmd_validate() {
     cmd_up
     local f out fail=0
@@ -147,7 +180,7 @@ cmd_validate() {
         return 0
     fi
     for f in "${files[@]}"; do
-        out="$(psql "$MIG_URL" -v ON_ERROR_STOP=1 -At -f "$f")"
+        out="$(psql "$MIG_URL" -v ON_ERROR_STOP=1 -q -At -f "$f")"
         if [ -n "$out" ]; then
             echo "FAIL   $(basename "$f")"
             echo "$out"
@@ -170,6 +203,7 @@ main() {
         schema)   cmd_schema ;;
         load)     cmd_load ;;
         validate) cmd_validate ;;
+        cutover)  cmd_cutover "$@" ;;
         rebuild)  cmd_restore "$@"; cmd_migrate; cmd_schema; cmd_load; cmd_validate ;;
         ""|-h|--help|help) usage ;;
         *) echo "unbekannter Befehl: $cmd" >&2; usage >&2; exit 2 ;;

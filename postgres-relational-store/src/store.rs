@@ -535,12 +535,99 @@ impl PostgresStore {
         Ok(result)
     }
 
+    /// Verwaltungszeile (`DraftAdministrativeData_ID`) eines Entwurfssatzes.
+    async fn draft_admin_of(
+        &self,
+        conn: &impl GenericClient,
+        set: &EntitySet,
+        key: &EntityKey,
+    ) -> Result<Option<String>, StoreError> {
+        let sql = format!(
+            "SELECT {} FROM {} WHERE {} = $1 AND {} = $2",
+            quote(DRAFT_ADMIN_COLUMN),
+            quote(&set.name),
+            quote(ID_COLUMN),
+            quote(IS_ACTIVE_COLUMN)
+        );
+        let params = Self::key_params(set, key);
+        let bound = bind(&params);
+        let rows = sqltrace::query(conn, &sql, &as_refs(&bound))
+            .await
+            .map_err(|e| sql_err!(Metadata, pg(&e)))?;
+        Ok(rows.first().and_then(|r| r.get::<_, Option<String>>(0)))
+    }
+
+    /// Entfernt die Verwaltungszeile, sobald kein Satz in einem Draft-Set mehr
+    /// darauf verweist. Gilt fuer Abbruch (DELETE) und Aktivierung gleichermassen,
+    /// denn beide entfernen die Draft-Zeile ueber `delete_row`.
+    async fn purge_orphan_draft_admin(
+        &self,
+        conn: &impl GenericClient,
+        draft_uuid: &str,
+    ) -> Result<(), StoreError> {
+        let schema = self.schema();
+        let unreferenced: Vec<String> = schema
+            .sets()
+            .filter(|s| s.draft_enabled)
+            .map(|s| {
+                format!(
+                    "NOT EXISTS (SELECT 1 FROM {} WHERE {} = $1)",
+                    quote(&s.name),
+                    quote(DRAFT_ADMIN_COLUMN)
+                )
+            })
+            .collect();
+        if unreferenced.is_empty() {
+            return Ok(());
+        }
+        let sql = format!(
+            "DELETE FROM {} WHERE {} = $1 AND {}",
+            quote(DRAFT_ADMIN_TABLE),
+            quote("DraftUUID"),
+            unreferenced.join(" AND ")
+        );
+        sqltrace::execute(conn, &sql, &[&draft_uuid])
+            .await
+            .map_err(|e| sql_err!(Metadata, pg(&e)))?;
+        Ok(())
+    }
+
+    /// Verwaltungszeilen eines Entwurfsbaums (Satz und Kinder, rekursiv). Die
+    /// Kinder fallen beim Loeschen des Parents per CASCADE, ihre Zeilen muessen
+    /// deshalb vorher eingesammelt werden.
+    fn draft_tree_admins<'a>(
+        &'a self,
+        conn: &'a impl GenericClient,
+        set_name: &'a str,
+        key: &'a EntityKey,
+        out: &'a mut Vec<String>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), StoreError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            let schema = self.entity_set(set_name)?;
+            let set = schema.set(set_name).expect("geprueft");
+            if let Some(uuid) = self.draft_admin_of(conn, set, key).await? {
+                out.push(uuid);
+            }
+            for (child_set, child_key) in self.child_keys(conn, set, key).await? {
+                self.draft_tree_admins(conn, &child_set, &child_key, out).await?;
+            }
+            Ok(())
+        })
+    }
+
     async fn delete_row(
         &self,
         conn: &impl GenericClient,
         set: &EntitySet,
         key: &EntityKey,
     ) -> Result<(), StoreError> {
+        // Verwaltungszeilen des Teilbaums vor dem Loeschen merken, danach aufraeumen.
+        let mut admin_uuids = Vec::new();
+        if set.draft_enabled && !key.is_active_entity {
+            self.draft_tree_admins(conn, &set.name, key, &mut admin_uuids)
+                .await?;
+        }
         // ON DELETE CASCADE raeumt die Kompositionskinder ab.
         let sql = format!(
             "DELETE FROM {} WHERE {} = $1{}",
@@ -557,6 +644,9 @@ impl PostgresStore {
         sqltrace::execute(conn, &sql, &as_refs(&bound))
             .await
             .map_err(|e| sql_err!(Metadata, pg(&e)))?;
+        for uuid in admin_uuids {
+            self.purge_orphan_draft_admin(conn, &uuid).await?;
+        }
         Ok(())
     }
 

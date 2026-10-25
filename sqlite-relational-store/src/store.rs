@@ -584,12 +584,93 @@ impl RelationalStore {
         Ok(result)
     }
 
+    /// Verwaltungszeile (`DraftAdministrativeData_ID`) eines Entwurfssatzes.
+    fn draft_admin_of(
+        &self,
+        conn: &Connection,
+        set: &EntitySet,
+        key: &EntityKey,
+    ) -> Result<Option<String>, StoreError> {
+        let sql = format!(
+            "SELECT {} FROM {} WHERE {} = ?1 AND {} = ?2",
+            quote(DRAFT_ADMIN_COLUMN),
+            quote(&set.name),
+            quote(ID_COLUMN),
+            quote(IS_ACTIVE_COLUMN)
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| sql_err!(Metadata, e))?;
+        let mut rows = stmt
+            .query(params_from_iter(
+                Self::key_params(set, key).iter().map(to_sqlite),
+            ))
+            .map_err(|e| sql_err!(Metadata, e))?;
+        match rows.next().map_err(|e| sql_err!(Metadata, e))? {
+            Some(row) => row
+                .get::<_, Option<String>>(0)
+                .map_err(|e| sql_err!(Metadata, e)),
+            None => Ok(None),
+        }
+    }
+
+    /// Verwaltungszeilen eines Entwurfsbaums (Satz und Kinder, rekursiv). Die
+    /// Kinder fallen beim Loeschen des Parents per CASCADE, ihre Zeilen muessen
+    /// deshalb vorher eingesammelt werden.
+    fn draft_tree_admins(
+        &self,
+        conn: &Connection,
+        set_name: &str,
+        key: &EntityKey,
+        out: &mut Vec<String>,
+    ) -> Result<(), StoreError> {
+        let schema = self.entity_set(set_name)?;
+        let set = schema.set(set_name).expect("geprueft");
+        if let Some(uuid) = self.draft_admin_of(conn, set, key)? {
+            out.push(uuid);
+        }
+        for (child_set, child_key) in self.child_keys(conn, set, key)? {
+            self.draft_tree_admins(conn, &child_set, &child_key, out)?;
+        }
+        Ok(())
+    }
+
+    /// Entfernt die Verwaltungszeile, sobald kein Satz in einem Draft-Set mehr
+    /// darauf verweist.
+    fn purge_orphan_draft_admin(&self, conn: &Connection, draft_uuid: &str) -> Result<(), StoreError> {
+        let schema = self.schema();
+        let unreferenced: Vec<String> = schema
+            .sets()
+            .filter(|s| s.draft_enabled)
+            .map(|s| {
+                format!(
+                    "NOT EXISTS (SELECT 1 FROM {} WHERE {} = ?1)",
+                    quote(&s.name),
+                    quote(DRAFT_ADMIN_COLUMN)
+                )
+            })
+            .collect();
+        if unreferenced.is_empty() {
+            return Ok(());
+        }
+        let sql = format!(
+            "DELETE FROM {} WHERE \"DraftUUID\" = ?1 AND {}",
+            quote(DRAFT_ADMIN_TABLE),
+            unreferenced.join(" AND ")
+        );
+        conn.execute(&sql, [draft_uuid]).map_err(|e| sql_err!(Metadata, e))?;
+        Ok(())
+    }
+
     fn delete_row(
         &self,
         conn: &Connection,
         set: &EntitySet,
         key: &EntityKey,
     ) -> Result<(), StoreError> {
+        // Verwaltungszeilen des Teilbaums vor dem Loeschen merken, danach aufraeumen.
+        let mut admin_uuids = Vec::new();
+        if set.draft_enabled && !key.is_active_entity {
+            self.draft_tree_admins(conn, &set.name, key, &mut admin_uuids)?;
+        }
         // ON DELETE CASCADE raeumt die Kompositionskinder ab - im Gegensatz
         // zum Dokumentenstore gibt es hier keine Rekursion in Rust.
         let sql = format!(
@@ -607,6 +688,9 @@ impl RelationalStore {
             params_from_iter(Self::key_params(set, key).iter().map(to_sqlite)),
         )
         .map_err(|e| sql_err!(Metadata, e))?;
+        for uuid in admin_uuids {
+            self.purge_orphan_draft_admin(conn, &uuid)?;
+        }
         Ok(())
     }
 

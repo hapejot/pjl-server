@@ -596,3 +596,27 @@ async fn select_accepts_computed_draft_flags() {
     assert_eq!(rows.len(), 1);
     assert!(rows[0].is_active_entity());
 }
+
+/// Regression: ein verworfener Entwurf hinterliess seine Verwaltungszeile
+/// in `DraftAdministrativeData` (sie wurde nie entfernt).
+#[tokio::test]
+async fn discarded_draft_removes_its_admin_row() {
+    let store = seeded().await;
+    let before = store.count_draft_admin();
+    store.draft_edit(ORDERS, &active(1)).await.unwrap();
+    // Jeder Knoten des Entwurfsbaums (Auftrag plus Positionen) hat eine Zeile.
+    assert!(store.count_draft_admin() > before);
+    store.delete_entity(ORDERS, &draft(1)).await.unwrap();
+    assert_eq!(store.count_draft_admin(), before);
+}
+
+/// Regression: auch die Aktivierung entfernt die Verwaltungszeile des Entwurfs.
+#[tokio::test]
+async fn activated_draft_removes_its_admin_row() {
+    let store = seeded().await;
+    let before = store.count_draft_admin();
+    store.draft_edit(ORDERS, &active(1)).await.unwrap();
+    assert!(store.count_draft_admin() > before);
+    store.draft_activate(ORDERS, &draft(1)).await.unwrap();
+    assert_eq!(store.count_draft_admin(), before);
+}

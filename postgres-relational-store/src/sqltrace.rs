@@ -5,14 +5,15 @@
 //! Ergebnis und dem SQL-Text geloggt. Parameterwerte werden bewusst nicht
 //! ausgegeben, nur ihre Anzahl.
 //!
-//! Aktivieren mit `RUST_LOG=sql=info` (Statements), `RUST_LOG=sql=debug`
-//! (zusaetzlich Pool-Wartezeiten).
+//! Aktivieren mit `RUST_LOG=sql=debug` (erfolgreiche Statements), fehlgeschlagene
+//! Statements werden immer als WARN geloggt. `RUST_LOG=sql=trace` zusaetzlich
+//! erfolgreiche Pool-Entnahmen.
 
 use std::time::Instant;
 
 use deadpool_postgres::{ClientWrapper, GenericClient, Object, Pool, PoolError, Transaction};
 use tokio_postgres::{types::ToSql, Error, Row};
-use tracing::{debug, info, warn};
+use tracing::{debug, trace, warn};
 
 const TARGET: &str = "sql";
 
@@ -29,7 +30,7 @@ fn log_statement(op: &'static str, sql: &str, started: Instant, params: usize, r
     let duration_ms = ms(started);
     let sql = compact(sql);
     match err {
-        None => info!(
+        None => debug!(
             target: TARGET,
             op,
             duration_ms,
@@ -123,7 +124,7 @@ pub async fn conn(pool: &Pool) -> Result<Object, PoolError> {
     let started = Instant::now();
     let r = pool.get().await;
     match &r {
-        Ok(_) => debug!(target: TARGET, op = "pool.get", duration_ms = ms(started), "Verbindung aus Pool"),
+        Ok(_) => trace!(target: TARGET, op = "pool.get", duration_ms = ms(started), "Verbindung aus Pool"),
         Err(e) => warn!(target: TARGET, op = "pool.get", duration_ms = ms(started), error = %e, "Pool-Fehler"),
     }
     r

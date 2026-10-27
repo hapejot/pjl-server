@@ -78,7 +78,7 @@ pub struct Cli {
 
     /// Designer-Modus: pflegt `ddic.json` ueber die Metamodell-Oberflaeche.
     /// Ohne Skripte und ohne Datenbank; jede Aenderung wird sofort geschrieben.
-    #[arg(long, env = "DESIGNER")]
+    #[arg(long, env = "DESIGNER", value_parser = clap::builder::BoolishValueParser::new())]
     pub designer: bool,
 
     /// Header, den ein vorgeschalteter Auth-Proxy (z. B. oauth2-proxy) mit dem
@@ -240,5 +240,26 @@ mod tests {
     fn runtime_ddic_follows_the_export_dir() {
         let c = cli(&["--export-dir", "dist"]).into_config(ServerMode::Runtime);
         assert_eq!(c.ddic, Some(PathBuf::from("dist/ddic.json")));
+    }
+}
+
+#[cfg(test)]
+mod designer_env_tests {
+    use super::*;
+
+    /// `DESIGNER=1` aus der Compose-Datei muss wirken wie `--designer`.
+    #[test]
+    fn designer_env_accepts_one() {
+        temp_env_set("DESIGNER", "1");
+        let c = Cli::try_parse_from(["test"]).expect("parse");
+        temp_env_unset("DESIGNER");
+        assert!(c.designer);
+    }
+
+    fn temp_env_set(k: &str, v: &str) {
+        unsafe { std::env::set_var(k, v) };
+    }
+    fn temp_env_unset(k: &str) {
+        unsafe { std::env::remove_var(k) };
     }
 }

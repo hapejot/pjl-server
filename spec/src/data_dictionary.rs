@@ -598,6 +598,7 @@ mod list_view_tests {
             computed: false,
             immutable: false,
             value_list: None,
+            link: false,
         }
     }
 

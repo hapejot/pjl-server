@@ -546,6 +546,7 @@ fn atom_field(atom: &AtomMap) -> FieldSpec {
         computed: false,
         immutable: atom.immutable,
         value_list: None,
+        link: false,
     }
 }
 

@@ -139,6 +139,9 @@ pub enum FieldSpec {
         immutable: bool,
         /// Optional value help (dropdown/dialog).
         value_list: Option<AtomValueList>,
+        /// Wert ist eine URL: wird als anklickbarer Link dargestellt (`UI.DataFieldWithUrl`).
+        #[serde(default, skip_serializing_if = "is_false")]
+        link: bool,
     },
     /// Amount/quantity with a unit/currency companion field.
     /// Generates `Org.OData.Measures.V1.ISOCurrency` or `.Unit` annotation.
@@ -187,6 +190,7 @@ impl FieldSpec {
             computed: false,
             immutable: false,
             value_list: None,
+            link: false,
         }
     }
 
@@ -202,6 +206,7 @@ impl FieldSpec {
             computed: false,
             immutable: false,
             value_list: None,
+            link: false,
         }
     }
 
@@ -225,6 +230,7 @@ impl FieldSpec {
             computed: false,
             immutable: false,
             value_list: None,
+            link: false,
         }
     }
 

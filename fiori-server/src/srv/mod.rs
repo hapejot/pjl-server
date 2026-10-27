@@ -474,6 +474,7 @@ impl Annotations {
                 computed: false,
                 immutable: false,
                 value_list: None,
+                link: false,
             },
         ));
         for f in x.fields() {
@@ -618,13 +619,28 @@ fn line_item(qualifier: Option<&str>, columns: &[String], x: &EntitySpec) -> Ann
             matches!(f, spec::FieldSpec::Lookup { name, collection: false, .. } if name == col)
         });
         let path = if is_nav { format!("{col}/name") } else { col.clone() };
-        coll = coll.add_record(
-            Record::new("UI.DataField").add(PropertyValue::new("Value").path(path)),
-        );
+        let link = !is_nav && is_link_atom(x, col);
+        coll = coll.add_record(data_field(&path, link));
     }
     let mut ann = Annotation::new("UI.LineItem").collection(coll);
     ann.qualifier = qualifier.map(str::to_string);
     ann
+}
+
+/// Ist `name` ein Atom mit `link: true` (Wert ist eine URL)?
+fn is_link_atom(x: &EntitySpec, name: &str) -> bool {
+    x.fields().any(|f| matches!(f, FieldSpec::Atom { name: n, link: true, .. } if n == name))
+}
+
+/// `UI.DataField` bzw. bei `link` ein `UI.DataFieldWithUrl`, dessen Ziel der Wert selbst ist.
+fn data_field(path: &str, link: bool) -> Record {
+    if link {
+        Record::new("UI.DataFieldWithUrl")
+            .add(PropertyValue::new("Value").path(path))
+            .add(PropertyValue::new("Url").path(path))
+    } else {
+        Record::new("UI.DataField").add(PropertyValue::new("Value").path(path))
+    }
 }
 
 /// `UI.PresentationVariant` fuer eine Listenansicht. Die Ansicht `default`
@@ -836,11 +852,11 @@ fn field_record(f: &FieldSpec, hidden: &[String], app_entities: &[String]) -> Op
                 )
             }
         }
-        FieldSpec::Atom { name, .. } => {
+        FieldSpec::Atom { name, link, .. } => {
             if hidden.iter().any(|h| h == name) {
                 None
             } else {
-                Some(Record::new("UI.DataField").add(PropertyValue::new("Value").path(name)))
+                Some(data_field(name, *link))
             }
         }
         FieldSpec::Measure { .. } => todo!(),
@@ -2995,7 +3011,26 @@ mod list_view_annotation_tests {
             computed: false,
             immutable: false,
             value_list: None,
+            link: false,
         }
+    }
+
+    #[test]
+    fn link_atoms_become_clickable_fields() {
+        let mut e = active_video(vec![ListView::new("default", &["title"])]);
+        for f in e.fields.iter_mut() {
+            if let FieldSpec::Atom { name, link, .. } = f {
+                if name == "title" {
+                    *link = true;
+                }
+            }
+        }
+        let fg = serde_json::to_string(&field_group("Main", &e, None, &[], &[])).unwrap();
+        assert!(fg.contains("UI.DataFieldWithUrl"), "link-Atom wird DataFieldWithUrl");
+        let anns = line_item_annotations(&e);
+        let li = serde_json::to_string(&anns[0]).unwrap();
+        assert!(li.contains("UI.DataFieldWithUrl"));
+        assert!(!serde_json::to_string(&field_group("Main", &active_video(vec![]), None, &[], &[])).unwrap().contains("DataFieldWithUrl"));
     }
 
     #[test]

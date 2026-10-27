@@ -11,7 +11,7 @@
       "title": "Kunden"
     },
     {
-      "icon": "sap-icon://contact",
+      "icon": "sap-icon://contacts",
       "main_entity": "Contact",
       "name": "contacts",
       "package": {
@@ -41,7 +41,7 @@
       "title": "Aufgaben"
     },
     {
-      "icon": "sap-icon://note-editor",
+      "icon": "sap-icon://notes",
       "main_entity": "Note",
       "name": "notes",
       "package": {

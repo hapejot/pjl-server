@@ -1,0 +1,50 @@
+# Workbench: persoenliches Arbeitswerkzeug (Projekte, Aufgaben, Notizen, Artikel,
+# Kunden, Ansprechpartner, Entwicklungsobjekte, Releases, Termine).
+#
+#   docker compose -f workbench/compose.yaml up -d --build
+#   Designer  -> http://localhost:8092   (schreibt workbench/ddic.json)
+#   Laufzeit  -> http://localhost:8091   (nach Modelländerungen neu starten)
+#
+# Das Modell liegt in workbench/ddic.json. Der Designer bekommt das Verzeichnis
+# eingebunden, weil er die Datei atomar ersetzt (Temp-Datei + Rename); eine
+# einzelne Datei koennte Docker dabei nicht austauschen.
+# Die Laufzeit liest die Datei nur beim Start und bekommt sie schreibgeschuetzt.
+# Fachdaten liegen in SQLite im Volume `workbench-data`.
+
+services:
+  designer:
+    build:
+      context: ..
+      dockerfile: workbench/Dockerfile
+    image: hapejot/pjl-runtime:workbench
+    restart: unless-stopped
+    # Der Designer schreibt ins Host-Verzeichnis; daher mit der UID des Besitzers
+    # laufen (`id -u`, `id -g`). Sonst scheitert das Schreiben an den Rechten.
+    user: "${WB_UID:-1000}:${WB_GID:-1000}"
+    environment:
+      DESIGNER: "1"
+      DDIC: /app/model/ddic.json
+    ports:
+      - "8092:8080"
+    volumes:
+      - ./:/app/model
+
+  runtime:
+    build:
+      context: ..
+      dockerfile: workbench/Dockerfile
+    image: hapejot/pjl-runtime:workbench
+    restart: unless-stopped
+    environment:
+      DDIC: /app/model/ddic.json
+      DATA_DIR: /app/data
+      PORT: "8080"
+      RUST_LOG: info
+    ports:
+      - "8091:8080"
+    volumes:
+      - ./ddic.json:/app/model/ddic.json:ro
+      - workbench-data:/app/data
+
+volumes:
+  workbench-data:

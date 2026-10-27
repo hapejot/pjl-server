@@ -1,6 +1,7 @@
 # Workbench: persoenliches Arbeitswerkzeug (Projekte, Aufgaben, Notizen, Artikel,
 # Kunden, Ansprechpartner, Entwicklungsobjekte, Releases, Termine).
 #
+#   cp workbench/.env.example workbench/.env   # Passwort setzen
 #   docker compose -f workbench/compose.yaml up -d --build
 #   Designer  -> http://localhost:8092   (schreibt workbench/ddic.json)
 #   Laufzeit  -> http://localhost:8091   (nach Modelländerungen neu starten)
@@ -9,9 +10,24 @@
 # eingebunden, weil er die Datei atomar ersetzt (Temp-Datei + Rename); eine
 # einzelne Datei koennte Docker dabei nicht austauschen.
 # Die Laufzeit liest die Datei nur beim Start und bekommt sie schreibgeschuetzt.
-# Fachdaten liegen in SQLite im Volume `workbench-data`.
+# Fachdaten liegen in PostgreSQL (Dienst `db`, Volume `workbench-db`).
 
 services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: workbench
+      POSTGRES_PASSWORD: ${WB_DB_PASSWORD:?WB_DB_PASSWORD in workbench/.env setzen}
+      POSTGRES_DB: workbench
+    volumes:
+      - workbench-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workbench -d workbench"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   designer:
     build:
       context: ..
@@ -35,16 +51,18 @@ services:
       dockerfile: workbench/Dockerfile
     image: hapejot/pjl-runtime:workbench
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
       DDIC: /app/model/ddic.json
-      DATA_DIR: /app/data
+      STORE_PG_URL: postgres://workbench:${WB_DB_PASSWORD}@db:5432/workbench
       PORT: "8080"
       RUST_LOG: info
     ports:
       - "8091:8080"
     volumes:
       - ./ddic.json:/app/model/ddic.json:ro
-      - workbench-data:/app/data
 
 volumes:
-  workbench-data:
+  workbench-db:

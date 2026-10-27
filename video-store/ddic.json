@@ -3083,34 +3083,9 @@
       "package": "video",
       "type_name_plural": "Volumes",
       "fields": [
-        {
-          "Atom": {
-            "name": "name",
-            "label": "name",
-            "edm_type": "Edm.String",
-            "package": null,
-            "max_length": 512,
-            "precision": null,
-            "scale": null,
-            "computed": false,
-            "immutable": false,
-            "value_list": null
-          }
-        },
-        {
-          "Atom": {
-            "name": "mount_path",
-            "label": "mount_path",
-            "edm_type": "Edm.String",
-            "package": null,
-            "max_length": 512,
-            "precision": null,
-            "scale": null,
-            "computed": false,
-            "immutable": false,
-            "value_list": null
-          }
-        }
+        { "Atom": { "name": "name", "label": "name", "edm_type": "Edm.String", "package": null, "max_length": 512, "precision": null, "scale": null, "computed": false, "immutable": false, "value_list": null } },
+        { "Atom": { "name": "is_online", "label": "is online", "edm_type": "Edm.Boolean", "package": null, "max_length": null, "precision": null, "scale": null, "computed": false, "immutable": false, "value_list": null } },
+        { "Atom": { "name": "mount_path", "label": "mount_path", "edm_type": "Edm.String", "package": null, "max_length": 512, "precision": null, "scale": null, "computed": false, "immutable": false, "value_list": null } }
       ]
     },
     {
@@ -3513,16 +3488,9 @@
     }
   ],
   "apps": [
-    {
-      "name": "videos",
-      "title": "Videos",
-      "main_entity": "Video",
-      "subtitle": "List Videos",
-      "icon": null,
-      "package": {
-        "name": "video"
-      }
-    },
+    { "name": "hosts", "title": "Hosts", "main_entity": "Host", "subtitle": "Alle Hosts", "icon": null, "package": {"name":"video"} },
+    { "name": "volumes", "title": "Volumes", "main_entity": "Volume", "subtitle": "Alle Volumes", "icon": null, "package": {"name":"video"} },
+    { "name": "videos", "title": "Videos", "main_entity": "Video", "subtitle": "List Videos", "icon": null, "package": { "name": "video" } },
     {
       "name": "tags",
       "title": "Tags",

@@ -7,11 +7,13 @@
         { "name": "default", "columns": ["name", "scene", "agent"] }
       ]
     },
+    { "name": "VideoTag",
+      "list_views": [ { "name": "default", "columns": ["tag", "source"] } ] },
     {
-      "name": "VideoTag",
-      "list_views": [
-        { "name": "default", "columns": ["tag", "source"] }
-      ]
-    }
+      "name": "Volume",
+      "list_views": [ { "name": "default", "columns": ["name", "is_online", "mount_path"] } ]
+    } ,
+    { "name": "SceneTagMap", "list_views": [ {"name":"default", "columns": ["tag"]} ] },
+    { "name": "ActorSceneMap", "list_views": [ {"name":"default", "columns": ["actor"]},{"name":"reverse", "columns": ["scene"]} ] }
   ]
 }

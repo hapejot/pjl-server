@@ -1,6 +1,6 @@
 # Konfiguration des Fiori-Servers
 
-Der Server hat drei Konfigurationsebenen: **Startparameter** (Port, Pfade, Auth), das **Data Dictionary** (das fachliche Modell) und die **Laufzeitdaten** (Store). Das Dictionary wird im Designer gepflegt und über einen Export als Dateien abgelegt, die der Runtime-Server liest.
+Der Server hat drei Konfigurationsebenen: **Startparameter** (Port, Pfade, Auth), das **Data Dictionary** (das fachliche Modell) und die **Laufzeitdaten** (Store). Das Dictionary liegt in `ddic.json`, wird im Designer (`--designer`) gepflegt und vom Runtime-Server gelesen.
 
 ## 1. Startparameter (CLI-Flags und Env-Variablen)
 
@@ -24,9 +24,84 @@ Das Modell besteht aus Packages, Entities, Fields, Relations und Apps. Es wird i
 - `relationship.rs`: `Relationship` (Komposition oder Assoziation, Kardinalität, Fremdschlüssel)
 - `app.rs`: `App` (FLP-Kachel, Titel, Icon, Hauptentität)
 
-Der Designer zeigt ein eincompiliertes Metamodell (`DataDictionary::new()`) mit den Entities `Entity`, `Field`, `Relation`, `Value`, `Package`, `App`. Seine Daten liegen in `ddic.json` und werden über `DdicStore` (`fiori-server/src/ddic_store.rs`) abgebildet: Die Sets `PackageSet`, `EntitySet`, `FieldSet`, `RelationSet`, `AppSet` werden gelesen und geschrieben, andere Sets bleiben flüchtig. Jede Schreiboperation wird validiert und atomar in die Datei geschrieben. Unbekannte Schlüssel in `ddic.json` bleiben erhalten.
+Die Modelldaten werden in `ddic.json` gehalten. Der Designer (Abschnitt 2a) pflegt sie, die Runtime liest sie beim Start. Der Loader für die Store-Sets steht in `fiori-server/src/ddic_loader.rs`, die Felder in Anhang B.
 
-Die Modelldaten selbst liegen als Sets im Store: `PackageSet`, `EntitySet`, `FieldSet`, `RelationSet`, `AppSet`. Der Loader (`fiori-server/src/ddic_loader.rs`) baut daraus das Dictionary. Die Felder stehen in Anhang B.
+## 2a. Der Designer
+
+Der Designer ist kein eigenes Programm, sondern der Laufzeitserver mit `--designer` (Env `DESIGNER=1`). Er arbeitet ausschließlich auf `ddic.json`: keine Skripte, keine Datenbank, kein Entwurfszustand.
+
+**Ablauf**
+
+1. Der Designer öffnet `ddic.json` (`--ddic`, Standard `<export-dir>/ddic.json`). Fehlt die Datei, wird eine leere angelegt.
+2. Die Oberfläche zeigt das eincompilierte Metamodell (`DataDictionary::new()`) mit den Entitäten `Entity`, `Field`, `Relation`, `Value`, `ValueList`, `Package`, `App`.
+3. Jede Anlage, Änderung oder Löschung wird im `DdicStore` (`fiori-server/src/ddic_store.rs`) auf die Sets abgebildet, ins Dictionary übernommen, validiert und dann atomar geschrieben (Temp-Datei `ddic.json.tmp`, danach Rename). Scheitert die Validierung, bleibt die Datei unverändert und der Request bekommt einen Konflikt.
+4. Lesen greift nur auf den Speicherstand zu und schreibt nichts.
+
+**Persistierte Sets**
+
+| Set | Bedeutung | Abbildung in `ddic.json` |
+|---|---|---|
+| `PackageSet` | Pakete | `packages` |
+| `EntitySet` | Entitäten | `entities` |
+| `FieldSet` | Atom-Felder einer Entität | `entities[].fields[].Atom` |
+| `RelationSet` | Beziehungen | `relationships` |
+| `AppSet` | Launchpad-Kacheln | `apps` |
+| `ValueListSet` | Festwertlisten | `value_lists` |
+| `ValueSet` | Werte einer Festwertliste | `value_lists[].values` |
+
+Andere Sets sind nur flüchtig im Speicher.
+
+**Regeln**
+
+- Ein Objekt braucht ein gültiges Paket (`package_ID`); unbekannte Pakete werden abgelehnt.
+- Eine App braucht eine vorhandene Hauptentität (`main_entity_ID`) und ein Paket.
+- Löschen einer Entität entfernt ihre Felder und Beziehungen. Löschen einer Festwertliste entfernt ihre Werte und die Zuordnung an Feldern.
+- Doppelte Namen (Entität, Paket, App, Feld je Entität, Code je Festwertliste) werden abgelehnt.
+- Entwürfe (Draft) gibt es im Designer nicht. Draft-Aktionen liefern den aktiven Satz zurück.
+- Unbekannte Schlüssel in `ddic.json` bleiben beim Schreiben erhalten. Die Datei wird neu formatiert, Schlüssel sortiert.
+
+**Wirksamkeit**
+
+Die Runtime liest `ddic.json` nur beim Start. Nach Änderungen im Designer den Runtime-Server neu starten.
+
+## 2b. Festwertlisten
+
+Festwertlisten sind für Statuswerte und ähnliche kleine, selten geänderte Auswahllisten gedacht. Sie werden nur im Designer gepflegt.
+
+**In `ddic.json`**
+
+```json
+"value_lists": [
+  { "id": "1f057ed4-cc46-48f4-87ef-f005e060063b", "name": "OpportunityStage",
+    "values": [ { "code": "open", "label": "Offen", "sort": 1 } ] }
+],
+"entities": [ { "name": "Opportunity", "fields": [
+  { "Atom": { "name": "status", "edm_type": "Edm.String", "max_length": 20,
+              "value_list": { "FieldValueList": { "list_id": "1f057ed4-…", "prefer_dialog": false } } } }
+] } ]
+```
+
+- `id` ist eine UUID und wird von `list_id` referenziert. Ungültige UUIDs, doppelte IDs oder Namen und doppelte Codes brechen den Start der Runtime ab.
+- `prefer_dialog: false` ergibt ein Dropdown, `true` einen Suchdialog.
+
+**Runtime**
+
+Beim Start schreibt die Runtime alle Werte in das generierte Set `FieldValueListItemsSet` (Felder `name`, `ListID`, `value`, `label`, `sort`). Das Set wird bei jedem Start vollständig neu aufgebaut. Die Wertehilfe-Annotation des Atoms zeigt darauf und filtert auf `ListID`.
+
+**Im Designer**
+
+Festwertliste anlegen (`ValueListSet`), Werte anlegen (`ValueSet` mit `list_ID`), dann im Atom (`FieldSet`) über `value_list_ID` zuordnen.
+
+## 2c. Skripte (Hooks)
+
+Mit `--scripts-dir` (Env `SCRIPTS_DIR`) lädt die Runtime Rhai-Skripte, eine Datei `<set>.rhai` pro Entity Set. Sie können Lese- und Schreibzugriffe prüfen oder verändern:
+
+- `before_<op>` / `after_<op>` für `create`, `patch`, `delete`, `draft_edit`, `draft_activate`, `draft_prepare`
+- `before_read` (Query, z. B. `$filter` ergänzen oder reduzieren) und `after_read` (einmal pro Request; Listen dürfen Sätze ändern oder entfernen)
+- `throw "Meldung"` bricht den Request mit Fehler ab. Der Count wird um entfernte Sätze verringert.
+
+Änderungen an den Dateien werden automatisch neu geladen. Ein Skript mit Fehler bleibt wirkungslos und die vorherige Version aktiv. Der Designer nutzt keine Skripte.
+
 
 ## 3. Wo die Konfiguration abgelegt wird
 
@@ -42,7 +117,6 @@ rel-data/data.sqlite         Fachdaten der Laufzeit
 
 Wichtige Details:
 
-- **Designer-Schreibvorgänge** sind transaktional: Ungültige Dictionaries werden abgelehnt, die Datei bleibt dann unverändert.
 - **Runtime** lädt `ddic.json` nur beim Start. Nach Änderungen im Designer muss der Runtime-Server neu gestartet werden. Ohne Dictionary bricht er mit einem Hinweis ab.
 - **Schema**: Ohne `--schema` wird das Schema aus dem Dictionary abgeleitet, inklusive Migration neuer Tabellen. Mit `--schema` wird eine feste Schemadatei verwendet.
 - **Store-Backend**: Standard ist SQLite unter `DATA_DIR`. Mit `STORE_PG_URL` läuft der Store in PostgreSQL.
@@ -55,7 +129,7 @@ Der SQLite-Store läuft im Speicher und wird nur beim sauberen Beenden (SIGINT/S
 
 - `Dockerfile`: Setzt `PORT=8080`, `DATA_DIR=/app/data`, `EXPORT_DIR=/app/export`, `WEB_ROOT=/app/web`. Läuft als Nutzer `appuser`.
 - `compose.yaml`:
-  - Designer: Port `3033:8080`, Env `DESIGNER=1`, Volume `export` (schreibbar).
+  - Designer: derselbe Laufzeit-Code mit `DESIGNER=1`, Port `3033:8080`, Volume `export` (schreibbar).
   - Runtime: Port `3034:8080`, Env `DDIC=/app/export/ddic.json`, Volume `export` **read-only**.
   - Optionaler Postgres-Dienst im Profil `dev` (Port 5433).
 
@@ -114,7 +188,13 @@ Die Felder, die der Loader liest (`ddic_loader.rs`):
 **AppSet**: `name`, `title`, `subtitle`, `icon`, `main_entity_ID`, `package_ID`
 - Die Apps erscheinen als Kacheln im Launchpad (`flp.rs`, Route `/flp/`). Icons im Format `sap-icon://...`.
 
-Im Designer wird beim Anlegen einer Entity über den Hook `EntityDefaultsHook` (`hook.rs`) automatisch ein Feldpaar `name` und `title` erzeugt.
+**ValueListSet**: `name` (Festwertliste, ID ist die Listen-UUID)
+
+**ValueSet**: `value` (Code), `label`, `sort`, `list_ID`
+
+**FieldSet** zusätzlich: `value_list_ID` (Zuordnung zu einer Festwertliste)
+
+Der frühere Hook `EntityDefaultsHook`, der beim Anlegen einer Entität `name` und `title` erzeugte, ist entfernt. Felder werden nur noch explizit angelegt.
 
 ## Anhang C: Dictionary-Eigenschaften
 
@@ -127,11 +207,12 @@ Nicht alles davon ist im Designer-Store abbildbar (siehe Auffälligkeit 2).
 
 **FieldSpec**
 - `Atom`: `name`, `label`, `edm_type`, `package`, `max_length`, `precision`, `scale`, `computed` (nicht editierbar), `immutable` (nach Anlage schreibgeschützt), `value_list`
+- Die Festwertlisten selbst (`value_lists`) sind eine Ebene über den Entitäten, siehe Abschnitt 2b.
 - `Measure`: Betrag/Menge mit Währungs- oder Einheitsfeld (`MeasureKind::Currency` oder `Unit`)
 - `Lookup`: `name`, `entity`, `collection`, `owned`
 
 **AtomValueList** (Wertehilfe)
-- `FieldValueList { list_id, prefer_dialog }`: Dropdown oder Dialog aus einer Werteliste
+- `FieldValueList { list_id, prefer_dialog }`: Dropdown oder Dialog aus einer Festwertliste (Abschnitt 2b)
 - `EntityRef { entity_set, key_property, display_property, filters, prefer_dialog }`: Wertehilfe aus einer anderen EntitySet, optional gefiltert über `ValueListFilter { local_property, target_property }`
 
 **ListView**
@@ -156,7 +237,8 @@ Nicht alles davon ist im Designer-Store abbildbar (siehe Auffälligkeit 2).
 | `DATA_DIR` | Dockerfile | `/app/data` |
 | `EXPORT_DIR` | Dockerfile | `/app/export` |
 | `WEB_ROOT` | Dockerfile | `/app/web` |
-| `DDIC` | compose (runtime) | `/app/export/ddic.json` |
+| `DDIC` | compose (runtime, designer) | `/app/export/ddic.json` |
+| `DESIGNER` | compose (designer) | `1` |
 
 Volumes: `runtime-data` → `/app/data` (Runtime), `export` → `/app/export` (Designer rw, Runtime ro).
 
@@ -167,6 +249,6 @@ Volumes: `runtime-data` → `/app/data` (Runtime), `export` → `/app/export` (D
 | `fiori-server/src/config.rs` | Alle Startparameter und Defaults |
 | `compose.yaml` | Container-Setup, Ports, Volumes |
 | `Dockerfile` | Image, Env-Defaults, Nutzer |
-| `export/ddic.json`, `export/schema.json` | Exportierter Stand für die Runtime |
+| `export/ddic.json` | Modell, vom Designer gepflegt und von der Runtime gelesen |
 | `sample-data/*` | Beispielmodell (YAML-Sets, `schema.json`, `ddic.json`) |
 | `fiori-server/entities.yaml` | Vermutlich Altlast, wird von keiner Datei referenziert |

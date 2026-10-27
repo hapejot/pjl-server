@@ -229,9 +229,9 @@
         {
           "Atom": {
             "edm_type": "Edm.String",
-            "label": "Titel",
+            "label": "Name",
             "max_length": 255,
-            "name": "title"
+            "name": "name"
           }
         },
         {
@@ -288,9 +288,9 @@
         {
           "Atom": {
             "edm_type": "Edm.String",
-            "label": "Titel",
+            "label": "Name",
             "max_length": 255,
-            "name": "title"
+            "name": "name"
           }
         },
         {
@@ -319,9 +319,9 @@
         {
           "Atom": {
             "edm_type": "Edm.String",
-            "label": "Titel",
+            "label": "Name",
             "max_length": 255,
-            "name": "title"
+            "name": "name"
           }
         },
         {
@@ -417,6 +417,14 @@
       "fields": [
         {
           "Atom": {
+            "name": "name",
+            "label": "Name",
+            "edm_type": "Edm.String",
+            "max_length": 255
+          }
+        },
+        {
+          "Atom": {
             "edm_type": "Edm.String",
             "label": "Version",
             "max_length": 50,
@@ -463,9 +471,9 @@
         {
           "Atom": {
             "edm_type": "Edm.String",
-            "label": "Titel",
+            "label": "Name",
             "max_length": 255,
-            "name": "title"
+            "name": "name"
           }
         },
         {

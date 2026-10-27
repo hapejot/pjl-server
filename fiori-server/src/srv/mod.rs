@@ -724,10 +724,28 @@ fn object_page_sections(
         .iter()
         .flat_map(|f| f.fields.iter().map(String::as_str))
         .collect();
+    // Langtexte bekommen je einen eigenen Abschnitt (volle Breite), sofern keine
+    // Facette sie ausdruecklich nennt.
+    let long_texts: Vec<String> = x
+        .fields()
+        .filter_map(|f| match f {
+            FieldSpec::Atom { name, multiline: true, .. } if !mentioned.contains(&name.as_str()) => {
+                Some(name.clone())
+            }
+            _ => None,
+        })
+        .collect();
     let remainder: Vec<String> = x
         .fields()
         .filter(|f| !matches!(f, FieldSpec::Lookup { collection: true, .. }))
         .filter(|f| !mentioned.contains(&f.name()))
+        .filter(|f| !long_texts.iter().any(|l| l == f.name()))
+        .map(|f| f.name().to_string())
+        .collect();
+    let general_fields: Vec<String> = x
+        .fields()
+        .filter(|f| !matches!(f, FieldSpec::Lookup { collection: true, .. }))
+        .filter(|f| !long_texts.iter().any(|l| l == f.name()))
         .map(|f| f.name().to_string())
         .collect();
 
@@ -742,6 +760,9 @@ fn object_page_sections(
             keys.push(nav.clone());
         }
     }
+    for long in &long_texts {
+        keys.push(format!("{long}{LONG_TEXT_SUFFIX}"));
+    }
 
     let mut records = Vec::new();
     let mut groups = Vec::new();
@@ -750,8 +771,22 @@ fn object_page_sections(
             records.push(list_facet_record(x, key));
             continue;
         }
+        if let Some(long) = key.strip_suffix(LONG_TEXT_SUFFIX) {
+            groups.push(field_group(key, x, Some(&[long.to_string()]), hidden, app_entities));
+            records.push(
+                Record::new("UI.ReferenceFacet")
+                    .add(PropertyValue::new("Label").string(facet_title(x, long)))
+                    .add(PropertyValue::new("ID").string(format!("{long}Section")))
+                    .add(PropertyValue::new("Target").annotation_path(format!("@UI.FieldGroup#{key}"))),
+            );
+            continue;
+        }
         let (selected, qualifier): (Option<Vec<String>>, &str) = if key == GENERAL_FACET {
-            let fields = x.facet(key).map(|f| f.fields.clone()).filter(|f| !f.is_empty());
+            let fields = x
+                .facet(key)
+                .map(|f| f.fields.clone())
+                .filter(|f| !f.is_empty())
+                .or_else(|| Some(general_fields.clone()));
             (fields, "Main")
         } else if key == DEFAULT_FACET {
             if remainder.is_empty() {
@@ -788,6 +823,9 @@ fn object_page_sections(
     }
     (records, groups)
 }
+
+/// Qualifier-Suffix fuer den eigenen Abschnitt eines Langtextfelds.
+const LONG_TEXT_SUFFIX: &str = "_LongText";
 
 /// Listenabschnitt (`UI.ReferenceFacet`) fuer eine to-many Navigation.
 fn list_facet_record(x: &EntitySpec, nav: &str) -> Record {

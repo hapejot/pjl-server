@@ -92,6 +92,7 @@ pub struct Relationship {
     pub many_property: Option<String>,
     /// `true` = composition (parent controls child lifecycle, child gets DraftNode).
     /// `false` = association (independent entities, just linked).
+    #[serde(default, skip_serializing_if = "crate::entity_spec::is_false")]
     pub owned: bool,
     /// Logical package grouping (e.g. "itil", "asset_management").
     pub package: String,

@@ -4,26 +4,26 @@
   ],
   "entities": [
     {"name": "Account", "package": "crm", "type_name_plural": "Accounts", "fields": [
-        {"Atom": {"name": "name", "label": "Name", "edm_type": "Edm.String", "max_length": 255, "computed": false, "immutable": false}},
-        {"Atom": {"name": "industry", "label": "Industry", "edm_type": "Edm.String", "max_length": 100, "computed": false, "immutable": false}},
-        {"Atom": {"name": "city", "label": "City", "edm_type": "Edm.String", "max_length": 100, "computed": false, "immutable": false}},
-        {"Atom": {"name": "website", "label": "Website", "edm_type": "Edm.String", "max_length": 255, "computed": false, "immutable": false}}
+        {"Atom": {"name": "name", "label": "Name", "edm_type": "Edm.String", "max_length": 255}},
+        {"Atom": {"name": "industry", "label": "Industry", "edm_type": "Edm.String", "max_length": 100}},
+        {"Atom": {"name": "city", "label": "City", "edm_type": "Edm.String", "max_length": 100}},
+        {"Atom": {"name": "website", "label": "Website", "edm_type": "Edm.String", "max_length": 255}}
       ]},
     {"name": "Contact", "package": "crm", "type_name_plural": "Contacts", "fields": [
-        {"Atom": {"name": "name", "label": "Name", "edm_type": "Edm.String", "max_length": 255, "computed": false, "immutable": false}},
-        {"Atom": {"name": "email", "label": "E-Mail", "edm_type": "Edm.String", "max_length": 255, "computed": false, "immutable": false}},
-        {"Atom": {"name": "phone", "label": "Phone", "edm_type": "Edm.String", "max_length": 50, "computed": false, "immutable": false}}
+        {"Atom": {"name": "name", "label": "Name", "edm_type": "Edm.String", "max_length": 255}},
+        {"Atom": {"name": "email", "label": "E-Mail", "edm_type": "Edm.String", "max_length": 255}},
+        {"Atom": {"name": "phone", "label": "Phone", "edm_type": "Edm.String", "max_length": 50}}
       ]},
     {"name": "Opportunity", "package": "crm", "type_name_plural": "Opportunities", "fields": [
-        {"Atom": {"name": "name", "label": "Name", "edm_type": "Edm.String", "max_length": 255, "computed": false, "immutable": false}},
-        {"Atom": {"name": "stage", "label": "Stage", "edm_type": "Edm.String", "max_length": 50, "computed": false, "immutable": false}},
-        {"Atom": {"name": "amount", "label": "Amount", "edm_type": "Edm.Decimal", "precision": 15, "scale": 2, "computed": false, "immutable": false}},
-        {"Atom": {"name": "close_date", "label": "Close date", "edm_type": "Edm.Date", "computed": false, "immutable": false}}
+        {"Atom": {"name": "name", "label": "Name", "edm_type": "Edm.String", "max_length": 255}},
+        {"Atom": {"name": "stage", "label": "Stage", "edm_type": "Edm.String", "max_length": 50}},
+        {"Atom": {"name": "amount", "label": "Amount", "edm_type": "Edm.Decimal", "precision": 15, "scale": 2}},
+        {"Atom": {"name": "close_date", "label": "Close date", "edm_type": "Edm.Date"}}
       ]}
   ],
   "relationships": [
-    {"name": "contact_account_id", "one": "Account", "one_field": "_Contacts", "many": "Contact", "many_property": "account", "owned": false, "package": "crm", "one_label": "Contacts", "many_label": "Account"},
-    {"name": "opportunity_account_id", "one": "Account", "one_field": "_Opportunities", "many": "Opportunity", "many_property": "account", "owned": false, "package": "crm", "one_label": "Opportunities", "many_label": "Account"}
+    {"name": "contact_account_id", "one": "Account", "one_field": "_Contacts", "many": "Contact", "many_property": "account", "package": "crm", "one_label": "Contacts", "many_label": "Account"},
+    {"name": "opportunity_account_id", "one": "Account", "one_field": "_Opportunities", "many": "Opportunity", "many_property": "account", "package": "crm", "one_label": "Opportunities", "many_label": "Account"}
   ],
   "apps": [
     {"name": "accounts", "title": "Accounts", "main_entity": "Account", "subtitle": "Alle Kunden", "package": {"name": "crm"}},

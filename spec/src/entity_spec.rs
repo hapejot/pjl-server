@@ -102,6 +102,11 @@ impl AtomValueList {
 /// source so no caller hard-codes the string.
 pub const ID_SUFFIX: &str = "_ID";
 
+/// Hilfsfunktion fuer `skip_serializing_if`: Default-`false` wird nicht geschrieben.
+pub(crate) fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// A field specification — describes the entity's own data (leaves on the relationship tree).
 ///
 /// Only two variants: Atom (simple values) and Measure (value + unit/currency dependency).
@@ -127,8 +132,10 @@ pub enum FieldSpec {
         precision: Option<u32>,
         scale: Option<u32>,
         /// Server-generated field — never editable (Core.Computed + NonInsertable).
+        #[serde(default, skip_serializing_if = "is_false")]
         computed: bool,
         /// Set at creation, read-only afterward (Core.Immutable).
+        #[serde(default, skip_serializing_if = "is_false")]
         immutable: bool,
         /// Optional value help (dropdown/dialog).
         value_list: Option<AtomValueList>,

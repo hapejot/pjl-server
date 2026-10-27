@@ -561,7 +561,6 @@
       "one": "Project",
       "one_field": "_Tasks",
       "one_label": "Aufgaben",
-      "owned": true,
       "package": "workbench"
     },
     {
@@ -572,7 +571,6 @@
       "one": "Project",
       "one_field": "_Notes",
       "one_label": "Notizen",
-      "owned": true,
       "package": "workbench"
     },
     {

@@ -417,8 +417,8 @@ impl Annotations {
         main_annotations.annotations.push(
             Annotation::new("UI.HeaderInfo").record(
                 Record::new("UI.HeaderInfoType")
-                    .add(PropertyValue::new("TypeName").string(x.name()))
-                    .add(PropertyValue::new("TypeNamePlural").string(x.setname()))
+                    .add(PropertyValue::new("TypeName").string(x.type_name()))
+                    .add(PropertyValue::new("TypeNamePlural").string(&x.type_name_plural))
                     .add(PropertyValue::new("Title").record(
                         Record::new("UI.DataField").add(PropertyValue::new("Value").path("name")),
                     )),
@@ -2996,6 +2996,21 @@ mod list_view_annotation_tests {
             immutable: false,
             value_list: None,
         }
+    }
+
+    #[test]
+    fn header_type_names_are_display_texts_not_technical_names() {
+        let mut e = active_video(vec![]);
+        let header = |e: &spec::EntitySpec| {
+            let anns = Annotations::from_entity(e, &[], &[]);
+            let main = anns.iter().find(|a| a.target == "Service.Video").unwrap();
+            serde_json::to_string(main.annotations.iter().find(|a| a.term == "UI.HeaderInfo").unwrap()).unwrap()
+        };
+        let h = header(&e);
+        assert!(h.contains("\"Videos\""), "Plural aus type_name_plural");
+        assert!(!h.contains("VideoSet"));
+        e.type_name = Some("Film".into());
+        assert!(header(&e).contains("\"Film\""), "TypeName aus type_name");
     }
 
     fn active_video(views: Vec<ListView>) -> spec::EntitySpec {

@@ -38,6 +38,8 @@ pub struct OverlayEntity {
     #[serde(default)]
     pub package: Option<String>,
     #[serde(default)]
+    pub type_name: Option<String>,
+    #[serde(default)]
     pub type_name_plural: Option<String>,
     #[serde(default)]
     pub list_views: Vec<ListView>,
@@ -81,6 +83,9 @@ pub fn apply(base: DataDictionary, overlay: &Overlay) -> anyhow::Result<DataDict
 
         if let Some(package) = &oe.package {
             obj["package"] = json!(package);
+        }
+        if let Some(name) = &oe.type_name {
+            obj["type_name"] = json!(name);
         }
         if let Some(plural) = &oe.type_name_plural {
             obj["type_name_plural"] = json!(plural);

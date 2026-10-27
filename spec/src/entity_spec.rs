@@ -324,6 +324,11 @@ pub struct EntitySpec {
     /// Logical package grouping (e.g. "itil", "asset_management").
     pub package: String,
 
+    /// Singular display name for the Object Page header (e.g. "Customer").
+    /// Frei definierbar, unabhaengig vom Entitaetsnamen. Fehlt er, gilt der Name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_name: Option<String>,
+
     /// Plural display name (e.g. "Orders"). Default: set_name.
     pub type_name_plural: String,
 
@@ -436,6 +441,7 @@ impl EntitySpec {
         Self {
             name: name.into(),
             package: package.into(),
+            type_name: None,
             type_name_plural: type_name_plural.into(),
             fields: vec![],
             list_views: vec![],
@@ -482,6 +488,11 @@ impl EntitySpec {
 
     pub fn fields(&self) -> impl Iterator<Item = &FieldSpec> {
         self.fields.iter()
+    }
+
+    /// Singularer Anzeigename: `type_name`, sonst der Entitaetsname.
+    pub fn type_name(&self) -> &str {
+        self.type_name.as_deref().unwrap_or(&self.name)
     }
 
     pub fn setname(&self) -> String {

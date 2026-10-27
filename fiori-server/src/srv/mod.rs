@@ -2043,16 +2043,12 @@ async fn read_collection(
     set: &str,
     query: &ODataQuery,
 ) -> Result<Cursor, ODataError> {
-    let records = state
+    // Ein Aufruf: Hooks laufen einmal pro Request, Count beruecksichtigt Entfernungen.
+    let (records, count) = state
         .store
-        .get_collection(set, query)
+        .read_collection(set, query, query.count)
         .await
         .map_err(ODataError::from_store)?;
-    let count = if query.count {
-        Some(state.store.count(set, query).await)
-    } else {
-        None
-    };
     Ok(Cursor::Collection { records, count })
 }
 

@@ -13,6 +13,7 @@ pub mod extension;
 pub mod flp;
 pub mod hook;
 pub mod overlay;
+pub mod script;
 pub mod server;
 pub mod srv;
 pub mod status;

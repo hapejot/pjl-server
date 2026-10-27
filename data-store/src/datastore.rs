@@ -332,6 +332,24 @@ pub trait DataStore: Send + Sync {
 
     async fn count(&self, set_name: &str, query: &ODataQuery) -> usize;
 
+    /// Liste und optional Gesamtzahl in einem Aufruf. Standard: getrennt ueber
+    /// `get_collection` und `count`. Erweiterungen (Hooks) koennen die Zahl
+    /// an ihre eigenen Aenderungen anpassen.
+    async fn read_collection(
+        &self,
+        set_name: &str,
+        query: &ODataQuery,
+        with_count: bool,
+    ) -> Result<(Vec<DataRecord>, Option<usize>), StoreError> {
+        let records = self.get_collection(set_name, query).await?;
+        let count = if with_count {
+            Some(self.count(set_name, query).await)
+        } else {
+            None
+        };
+        Ok((records, count))
+    }
+
     // -- Single Entity CRUD --
     async fn read_entity(
         &self,

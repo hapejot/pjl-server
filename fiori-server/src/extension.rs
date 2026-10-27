@@ -80,6 +80,12 @@ pub trait Extension: Send + Sync {
         Vec::new()
     }
 
+    /// Store-Hooks (Lesen, Schreiben, Filter). Werden in Registrierungsreihenfolge
+    /// um den Store gelegt, in allen Modi.
+    fn hooks(&self) -> Vec<Arc<dyn crate::hook::Hook>> {
+        Vec::new()
+    }
+
     /// Controller-Erweiterungen als `(Ziel-Controller, Controller-Name)`, z. B.
     /// `("sap.fe.templates.ObjectPage.ObjectPageController", "video.ext.ObjectPageController")`.
     /// Gehen ins Manifest unter `sap.ui5/extends/extensions/sap.ui.controllerExtensions`.

@@ -124,6 +124,11 @@ pub struct Cli {
     /// Zielverzeichnis des 3270-Befehls `dump ddic`.
     #[arg(long, env = "DUMP_DIR", default_value = "dump")]
     pub dump_dir: PathBuf,
+
+    /// Verzeichnis mit Rhai-Skripten `<set>.rhai` (Hooks fuer Lesen und Schreiben).
+    /// Ohne Angabe keine Skripte. Wird im Container als Volume eingebunden.
+    #[arg(long, env = "SCRIPTS_DIR")]
+    pub scripts_dir: Option<PathBuf>,
 }
 
 impl Cli {
@@ -157,6 +162,7 @@ impl Cli {
             term3270_port: self.term3270_port,
             term3270_bind: self.term3270_bind,
             dump_dir: self.dump_dir,
+            scripts_dir: self.scripts_dir,
         }
     }
 }
@@ -185,6 +191,8 @@ pub struct ServerConfig {
     pub term3270_bind: IpAddr,
     /// Zielverzeichnis fuer `dump ddic` in der 3270-Schnittstelle.
     pub dump_dir: PathBuf,
+    /// Skriptverzeichnis; `None` schaltet die Skript-Hooks aus.
+    pub scripts_dir: Option<PathBuf>,
 }
 
 impl ServerConfig {
@@ -216,6 +224,7 @@ impl ServerConfig {
             term3270_port: None,
             term3270_bind: IpAddr::from([127, 0, 0, 1]),
             dump_dir: "dump".into(),
+            scripts_dir: None,
         }
     }
 }

@@ -5,6 +5,7 @@ use thiserror::Error;
 use tracing::debug;
 
 use data_store::{DataRecord, DataStore, DraftDataStore, EntityKey, Navigation, StoreError, WriteOp};
+use odata::query::ODataQuery;
 
 /// Identifiziert eine durchlaufende Operation (für Logging/Vorschau im Hook).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,10 +24,10 @@ pub enum Operation {
 #[derive(Debug, Error)]
 pub enum HookError {
     /// Deine eigene Prüferenz (z. B. FK-Verstoß / berechneter Wert).
-    #[error("Hook Fehler: &1")]
+    #[error("Hook Fehler: {0}")]
     Hook(String),
     /// Originale Store-Fehler; wird so weitergeleitet (Cycle vermieden): kein `StoreError`.
-    #[error("Store Fehler: &1")]
+    #[error("Store Fehler: {0}")]
     Store(StoreError),
 }
 
@@ -45,7 +46,6 @@ impl From<HookError> for StoreError {
     }
 }
 
-#[async_trait::async_trait]
 #[async_trait::async_trait]
 pub trait Hook: Send + Sync {
     async fn before(
@@ -68,6 +68,44 @@ pub trait Hook: Send + Sync {
     ) -> Result<(), HookError> {
         let _ = store;
         debug!(set_name, ?op, ?value);
+        Ok(())
+    }
+
+    /// Lesezugriff, einmal pro Request, vor dem Store. `key` ist gesetzt bei
+    /// Einzelzugriff, `None` bei Listen. Die Query darf ergaenzt oder reduziert werden.
+    async fn before_read(
+        &self,
+        store: &Extender,
+        set_name: &str,
+        key: Option<&EntityKey>,
+        query: &mut ODataQuery,
+    ) -> Result<(), HookError> {
+        let _ = (store, set_name, key, query);
+        Ok(())
+    }
+
+    /// Ergebnisliste eines Lesezugriffs, einmal pro Request. Saetze duerfen
+    /// geaendert und entfernt werden.
+    async fn after_read_list(
+        &self,
+        store: &Extender,
+        set_name: &str,
+        records: &mut Vec<DataRecord>,
+    ) -> Result<(), HookError> {
+        let _ = (store, set_name, records);
+        Ok(())
+    }
+
+    /// Einzelne Property-Lesung (`$value`), einmal pro Request.
+    async fn after_property(
+        &self,
+        store: &Extender,
+        set_name: &str,
+        key: &EntityKey,
+        property: &str,
+        value: &mut Value,
+    ) -> Result<(), HookError> {
+        let _ = (store, set_name, key, property, value);
         Ok(())
     }
 }
@@ -185,7 +223,33 @@ impl DataStore for Extender {
         set_name: &str,
         query: &odata::query::ODataQuery,
     ) -> Result<Vec<DataRecord>, StoreError> {
-        self.inner.get_collection(set_name, query).await
+        Ok(self.read_collection(set_name, query, false).await?.0)
+    }
+
+    /// Ein Request = ein `before_read` (Query), Store, ein `after_read_list`.
+    /// Die Gesamtzahl wird um die durch den Hook entfernten Saetze verringert.
+    async fn read_collection(
+        &self,
+        set_name: &str,
+        query: &odata::query::ODataQuery,
+        with_count: bool,
+    ) -> Result<(Vec<DataRecord>, Option<usize>), StoreError> {
+        let mut q = query.clone();
+        self.hook
+            .before_read(self, set_name, None, &mut q)
+            .await?;
+        let mut records = self.inner.get_collection(set_name, &q).await?;
+        let before = records.len();
+        self.hook
+            .after_read_list(self, set_name, &mut records)
+            .await?;
+        let removed = before.saturating_sub(records.len());
+        let count = if with_count {
+            Some(self.inner.count(set_name, &q).await.saturating_sub(removed))
+        } else {
+            None
+        };
+        Ok((records, count))
     }
 
     async fn count(&self, set_name: &str, query: &odata::query::ODataQuery) -> usize {
@@ -198,7 +262,15 @@ impl DataStore for Extender {
         key: &EntityKey,
         query: &odata::query::ODataQuery,
     ) -> Result<DataRecord, StoreError> {
-        self.inner.read_entity(set_name, key, query).await
+        let mut q = query.clone();
+        self.hook
+            .before_read(self, set_name, Some(key), &mut q)
+            .await?;
+        let mut record = self.inner.read_entity(set_name, key, &q).await?;
+        self.hook
+            .after(self, set_name, Operation::Read, &mut record)
+            .await?;
+        Ok(record)
     }
 
     async fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
@@ -332,7 +404,15 @@ impl DataStore for Extender {
         set_name: &str,
         key: &EntityKey,
     ) -> Result<DataRecord, StoreError> {
-        self.inner.read_sibling_entity(set_name, key).await
+        let mut q = ODataQuery::new();
+        self.hook
+            .before_read(self, set_name, Some(key), &mut q)
+            .await?;
+        let mut record = self.inner.read_sibling_entity(set_name, key).await?;
+        self.hook
+            .after(self, set_name, Operation::Read, &mut record)
+            .await?;
+        Ok(record)
     }
 
     async fn get_property(
@@ -341,7 +421,11 @@ impl DataStore for Extender {
         key: &EntityKey,
         property: &str,
     ) -> Result<Value, StoreError> {
-        self.inner.get_property(set_name, key, property).await
+        let mut value = self.inner.get_property(set_name, key, property).await?;
+        self.hook
+            .after_property(self, set_name, key, property, &mut value)
+            .await?;
+        Ok(value)
     }
 
     async fn commit(&self) {

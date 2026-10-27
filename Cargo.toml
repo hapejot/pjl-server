@@ -7,6 +7,7 @@ members = [
     "odata-yaml-store",
     "postgres-relational-store",
     "relational-core",
+    "script-hooks",
     "sqlite-data-store",
     "sqlite-relational-store",
     "spec",

@@ -35,16 +35,23 @@ pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
 /// Server mit Erweiterungen (siehe `extension::Extension`) aufbauen und bis zum Abbruch bedienen.
 pub async fn run_with(
     config: ServerConfig,
-    extensions: crate::extension::Extensions,
+    mut extensions: crate::extension::Extensions,
 ) -> anyhow::Result<()> {
     let config = Arc::new(config);
     crate::status::hub().set_config(crate::status::config_json(&config));
     info!("starting {} server", config.mode.label());
 
+    // Skripte zuletzt registriert: ihre Hooks liegen aussen und sehen jeden Request zuerst.
+    if let Some(dir) = &config.scripts_dir {
+        let hooks = script_hooks::ScriptHooks::load(dir)
+            .with_context(|| format!("cannot load scripts '{}'", dir.display()))?;
+        extensions.push(Arc::new(crate::script::ScriptExtension::new(hooks)));
+    }
+
     let base = load_dictionary(&config)?;
     let schema_source = schema_source(&config, &base)?;
     let (inner, sqlite) = open_store(&config, schema_source).await?;
-    let store = wrap_store(&config, inner)?;
+    let store = wrap_store(&config, inner, &extensions)?;
 
     let state = AppState::new(store, config.clone(), base).with_extensions(extensions);
     state.reload();
@@ -199,14 +206,22 @@ async fn open_store(
 fn wrap_store(
     config: &ServerConfig,
     store: Arc<dyn DraftDataStore>,
+    extensions: &crate::extension::Extensions,
 ) -> anyhow::Result<Arc<dyn DraftDataStore>> {
-    match config.mode {
-        // Nur beim Modellieren sinnvoll: eine neue Entitaet bekommt sofort
-        // die Felder `name` und `title`. In der Laufzeit waere das ein
-        // Eingriff in fachliche Daten.
-        ServerMode::Designer => Ok(Extender::new(store, Arc::new(EntityDefaultsHook))?),
-        ServerMode::Runtime => Ok(store),
+    let mut store = store;
+    // Nur beim Modellieren sinnvoll: eine neue Entitaet bekommt sofort
+    // die Felder `name` und `title`. In der Laufzeit waere das ein
+    // Eingriff in fachliche Daten.
+    if config.mode == ServerMode::Designer {
+        store = Extender::new(store, Arc::new(EntityDefaultsHook))?;
     }
+    // Erweiterungs-Hooks: der zuletzt umhuellende Hook sieht den Request zuerst.
+    // Damit `before` in Registrierungsreihenfolge laeuft, wird rueckwaerts gewickelt.
+    let hooks: Vec<_> = extensions.iter().flat_map(|ext| ext.hooks()).collect();
+    for hook in hooks.into_iter().rev() {
+        store = Extender::new(store, hook)?;
+    }
+    Ok(store)
 }
 
 fn router(state: AppState, config: &ServerConfig) -> Router {

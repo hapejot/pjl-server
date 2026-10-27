@@ -147,6 +147,9 @@ pub enum FieldSpec {
         /// Wert ist eine URL: wird als anklickbarer Link dargestellt (`UI.DataFieldWithUrl`).
         #[serde(default, skip_serializing_if = "is_false")]
         link: bool,
+        /// Langtext: mehrzeilige Eingabe (`UI.MultiLineText`). `max_length` begrenzt die Laenge.
+        #[serde(default, skip_serializing_if = "is_false")]
+        multiline: bool,
     },
     /// Amount/quantity with a unit/currency companion field.
     /// Generates `Org.OData.Measures.V1.ISOCurrency` or `.Unit` annotation.
@@ -199,6 +202,7 @@ impl FieldSpec {
             immutable: false,
             value_list: None,
             link: false,
+            multiline: false,
         }
     }
 
@@ -215,6 +219,7 @@ impl FieldSpec {
             immutable: false,
             value_list: None,
             link: false,
+            multiline: false,
         }
     }
 
@@ -239,6 +244,7 @@ impl FieldSpec {
             immutable: false,
             value_list: None,
             link: false,
+            multiline: false,
         }
     }
 

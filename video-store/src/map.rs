@@ -547,6 +547,7 @@ fn atom_field(atom: &AtomMap) -> FieldSpec {
         immutable: atom.immutable,
         value_list: None,
         link: false,
+        multiline: false,
     }
 }
 

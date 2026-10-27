@@ -297,8 +297,8 @@
           "Atom": {
             "edm_type": "Edm.String",
             "label": "Text",
-            "max_length": 10000,
-            "name": "body"
+            "name": "body",
+            "multiline": true
           }
         },
         {
@@ -350,8 +350,8 @@
           "Atom": {
             "edm_type": "Edm.String",
             "label": "Text",
-            "max_length": 20000,
-            "name": "body"
+            "name": "body",
+            "multiline": true
           }
         },
         {

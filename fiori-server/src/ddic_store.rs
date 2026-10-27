@@ -181,6 +181,7 @@ fn project(base: &Value) -> Sets {
             for key in ATOM_NUMBERS {
                 fields[key] = atom.get(key).cloned().unwrap_or(Value::Null);
             }
+            fields["multiline"] = json!(atom.get("multiline").and_then(Value::as_bool).unwrap_or(false));
             sets.entry("FieldSet".into()).or_default().push(rec(
                 "FieldSet",
                 id_for("FieldSet", &format!("{name}.{fname}")),
@@ -331,6 +332,11 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
             atom.insert("edm_type".into(), json!(text(fr, "type").unwrap_or("Edm.String")));
             for key in ATOM_NUMBERS {
                 put(&mut atom, key, &fr.get(key).cloned().unwrap_or(Value::Null));
+            }
+            if fr.get("multiline").and_then(Value::as_bool).unwrap_or(false) {
+                atom.insert("multiline".into(), json!(true));
+            } else {
+                atom.remove("multiline");
             }
             // Festwertliste: Zuordnung im Designer, `prefer_dialog` bleibt wie im Original.
             match text(fr, "value_list_ID") {

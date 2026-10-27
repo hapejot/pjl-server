@@ -37,7 +37,8 @@ impl DataDictionary {
             .field(FieldSpec::atom("precision", "Precision", "Edm.Int64"))
             .field(FieldSpec::atom("scale", "Scale", "Edm.Int64"))
             .field(FieldSpec::atom("computed", "Computed", "Edm.Boolean"))
-            .field(FieldSpec::atom("immutable", "Immutable", "Edm.Boolean"));
+            .field(FieldSpec::atom("immutable", "Immutable", "Edm.Boolean"))
+            .field(FieldSpec::atom("multiline", "Multiline", "Edm.Boolean"));
 
         let relation_ent = EntitySpec::new("Relation", core.name(), "Relations")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
@@ -649,6 +650,7 @@ mod list_view_tests {
             immutable: false,
             value_list: None,
             link: false,
+            multiline: false,
         }
     }
 

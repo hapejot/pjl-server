@@ -475,6 +475,7 @@ impl Annotations {
                 immutable: false,
                 value_list: None,
                 link: false,
+                multiline: false,
             },
         ));
         for f in x.fields() {
@@ -496,6 +497,9 @@ impl Annotations {
     fn from_field(service_name: &str, f: &spec::FieldSpec) -> Annotations {
         let mut target = format!("Service.{}/{}", service_name, f.name());
         let mut annotations = vec![Annotation::new("Common.Label").string(f.label())];
+        if matches!(f, FieldSpec::Atom { multiline: true, .. }) {
+            annotations.push(Annotation::new("UI.MultiLineText"));
+        }
 
         match f {
             FieldSpec::Lookup {
@@ -2871,6 +2875,7 @@ mod list_view_annotation_tests {
             immutable: false,
             value_list: None,
             link: false,
+            multiline: false,
         }
     }
 

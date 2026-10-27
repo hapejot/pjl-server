@@ -9,5 +9,7 @@ pub mod data_dictionary;
 pub mod package;
 
 pub mod app;
+pub mod value_list;
 pub use entity_spec::*;
+pub use value_list::{ValueEntry, ValueList};
 pub use relationship::*;

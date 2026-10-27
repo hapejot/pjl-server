@@ -6,14 +6,14 @@ Der Server hat drei Konfigurationsebenen: **Startparameter** (Port, Pfade, Auth)
 
 Definiert in `fiori-server/src/config.rs`. Jeder Wert ist sowohl als `--flag` als auch als Umgebungsvariable verfügbar. Priorität: **Flag > Env > Default**.
 
-Es gibt zwei Binaries, die denselben Code nutzen:
+Es gibt ein Binary, `pjl-runtime`. Mit `--designer` (bzw. `DESIGNER=1`) läuft es als Designer:
 
-| Binary | Rolle | Port | Datenverzeichnis |
-|---|---|---|---|
-| `pjl-designer` | pflegt das Modell, Export über "Publish Dictionary" | 3033 | `design-data` |
-| `pjl-runtime` | führt ein exportiertes Modell aus | 3034 | `rel-data` |
+| Modus | Zweck | Daten |
+|---|---|---|
+| Laufzeit (Standard) | führt ein Modell aus | `ddic.json`, Store in SQLite/PostgreSQL |
+| Designer (`--designer`) | pflegt das Modell über die Metamodell-Oberfläche | schreibt jede Änderung direkt in `ddic.json` (kein Skript, keine Datenbank) |
 
-Die Rolle ist im Binary fest verdrahtet und nicht per Flag wählbar. Die vollständige Liste steht in Anhang A.
+Die vollständige Liste der Flags steht in Anhang A.
 
 ## 2. Data Dictionary (das fachliche Modell)
 
@@ -24,18 +24,17 @@ Das Modell besteht aus Packages, Entities, Fields, Relations und Apps. Es wird i
 - `relationship.rs`: `Relationship` (Komposition oder Assoziation, Kardinalität, Fremdschlüssel)
 - `app.rs`: `App` (FLP-Kachel, Titel, Icon, Hauptentität)
 
-Der Designer kennt außerdem ein eincompiliertes Metamodell (`DataDictionary::new()`) mit den Entities `Entity`, `Field`, `Relation`, `Value`, `Package`, `App`. Diese Objekte werden beim Export herausgefiltert, außer mit `--export-metamodel`.
+Der Designer zeigt ein eincompiliertes Metamodell (`DataDictionary::new()`) mit den Entities `Entity`, `Field`, `Relation`, `Value`, `Package`, `App`. Seine Daten liegen in `ddic.json` und werden über `DdicStore` (`fiori-server/src/ddic_store.rs`) abgebildet: Die Sets `PackageSet`, `EntitySet`, `FieldSet`, `RelationSet`, `AppSet` werden gelesen und geschrieben, andere Sets bleiben flüchtig. Jede Schreiboperation wird validiert und atomar in die Datei geschrieben. Unbekannte Schlüssel in `ddic.json` bleiben erhalten.
 
 Die Modelldaten selbst liegen als Sets im Store: `PackageSet`, `EntitySet`, `FieldSet`, `RelationSet`, `AppSet`. Der Loader (`fiori-server/src/ddic_loader.rs`) baut daraus das Dictionary. Die Felder stehen in Anhang B.
 
 ## 3. Wo die Konfiguration abgelegt wird
 
 ```
-design-data/data.sqlite      Store des Designers (Modell, bearbeitbar)
-        |  POST /Service/export  ("Publish Dictionary")
+pjl-runtime --designer       Metamodell-Oberfläche, schreibt sofort
+        |
         v
-export/ddic.json             semantisches Dictionary (unaktiviert)
-export/schema.json           daraus abgeleitetes Speicher-Schema
+export/ddic.json             semantisches Dictionary (einzige Wahrheit)
         |  Start des Runtime-Servers (--ddic)
         v
 rel-data/data.sqlite         Fachdaten der Laufzeit
@@ -43,8 +42,8 @@ rel-data/data.sqlite         Fachdaten der Laufzeit
 
 Wichtige Details:
 
-- **Export** (`fiori-server/src/export.rs`): Das Schema wird vor dem Schreiben validiert. Ein unvollständiges Modell hinterlässt also kein halbes Exportverzeichnis. Das Dictionary wird ohne abgeleitete Lookups geschrieben, weil die Runtime `activate()` selbst aufruft.
-- **Runtime** lädt `ddic.json` nur beim Start. Nach einem Publish muss der Runtime-Server neu gestartet werden. Ohne Dictionary bricht er mit einem Hinweis ab.
+- **Designer-Schreibvorgänge** sind transaktional: Ungültige Dictionaries werden abgelehnt, die Datei bleibt dann unverändert.
+- **Runtime** lädt `ddic.json` nur beim Start. Nach Änderungen im Designer muss der Runtime-Server neu gestartet werden. Ohne Dictionary bricht er mit einem Hinweis ab.
 - **Schema**: Ohne `--schema` wird das Schema aus dem Dictionary abgeleitet, inklusive Migration neuer Tabellen. Mit `--schema` wird eine feste Schemadatei verwendet.
 - **Store-Backend**: Standard ist SQLite unter `DATA_DIR`. Mit `STORE_PG_URL` läuft der Store in PostgreSQL.
 
@@ -56,7 +55,7 @@ Der SQLite-Store läuft im Speicher und wird nur beim sauberen Beenden (SIGINT/S
 
 - `Dockerfile`: Setzt `PORT=8080`, `DATA_DIR=/app/data`, `EXPORT_DIR=/app/export`, `WEB_ROOT=/app/web`. Läuft als Nutzer `appuser`.
 - `compose.yaml`:
-  - Designer: Port `3033:8080`, Volumes `design-data` und `export` (schreibbar).
+  - Designer: Port `3033:8080`, Env `DESIGNER=1`, Volume `export` (schreibbar).
   - Runtime: Port `3034:8080`, Env `DDIC=/app/export/ddic.json`, Volume `export` **read-only**.
   - Optionaler Postgres-Dienst im Profil `dev` (Port 5433).
 
@@ -72,7 +71,7 @@ Der Austausch läuft über das gemeinsame Volume `export`. Der Runtime-Container
 
 ## Auffälligkeiten
 
-1. **`pjl-export.rs` ignoriert die Konfiguration**: Quell- und Zielverzeichnis (`design-data`, `sample-data`) sind im Code fest eingetragen. Das Binary nutzt `ServerConfig::defaults`, nicht `parse`.
+1. **Designer-Datei wird beim Schreiben neu formatiert**: Schlüssel werden alphabetisch sortiert, Formatierung ist Standard-JSON. Der Inhalt bleibt semantisch gleich.
 2. **Listenansichten (`ListView`) werden nicht aus dem Store geladen.** `ddic_loader.rs` kennt kein `ListViewSet`. Listenansichten kommen aktuell nur aus Rust-Code bzw. einer `ddic.json`, nicht aus der Designer-Oberfläche.
 3. **Store nur bei sauberem Stopp persistiert** (siehe Abschnitt 3).
 4. **Runtime lädt Modelländerungen nicht live nach.** Neustart nötig.
@@ -86,17 +85,17 @@ Der Austausch läuft über das gemeinsame Volume `export`. Der Runtime-Container
 |---|---|---|---|---|
 | `--port` | `PORT` | 3033 | 3034 | HTTP-Port |
 | `--bind` | `BIND` | 0.0.0.0 | 0.0.0.0 | Lauschadresse |
-| `--data-dir` | `DATA_DIR` | `design-data` | `rel-data` | Verzeichnis für `data.sqlite` |
+| `--designer` | `DESIGNER` | aus | aus | Designer-Modus: schreibt `ddic.json` |
+| `--data-dir` | `DATA_DIR` | `rel-data` | `rel-data` | Verzeichnis für `data.sqlite` |
 | `--web-root` | `WEB_ROOT` | `web` | `web` | Statische UI5-Assets |
 | `--ddic` | `DDIC` | keiner | `<export-dir>/ddic.json` | Dictionary-Datei (Runtime Pflicht) |
 | `--schema` | `SCHEMA` | abgeleitet | abgeleitet | Feste Schemadatei (JSON) |
-| `--export-dir` | `EXPORT_DIR` | `export` | `export` | Zielverzeichnis des Exports |
-| `--export-metamodel` | `EXPORT_METAMODEL` | aus | – | Metamodell mit exportieren |
+| `--export-dir` | `EXPORT_DIR` | `export` | `export` | Verzeichnis, aus dem `ddic.json` gelesen wird |
+| `--scripts-dir` | `SCRIPTS_DIR` | – | – | Rhai-Skripte pro Set (Hooks) |
 | `--auth-user-header` | `AUTH_USER_HEADER` | `X-Forwarded-User` | `X-Forwarded-User` | Header des Auth-Proxys |
 | `--auth-required` | `AUTH_REQUIRED` | aus | aus | Ohne Header: 401 |
 | `--store-pg-url` | `STORE_PG_URL` | – (SQLite) | – (SQLite) | PostgreSQL-Verbindung |
 
-Für `pjl-export` (nur Entwicklung): Quelle `design-data` und Ziel `sample-data` sind im Code fest eingetragen.
 
 ## Anhang B: Modell-Sets im Designer-Store
 
@@ -159,7 +158,7 @@ Nicht alles davon ist im Designer-Store abbildbar (siehe Auffälligkeit 2).
 | `WEB_ROOT` | Dockerfile | `/app/web` |
 | `DDIC` | compose (runtime) | `/app/export/ddic.json` |
 
-Volumes: `design-data` → `/app/data` (Designer), `runtime-data` → `/app/data` (Runtime), `export` → `/app/export` (Designer rw, Runtime ro).
+Volumes: `runtime-data` → `/app/data` (Runtime), `export` → `/app/export` (Designer rw, Runtime ro).
 
 ## Anhang E: Dateien mit Konfigurationscharakter
 

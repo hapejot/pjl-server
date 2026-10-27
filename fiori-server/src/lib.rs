@@ -6,9 +6,9 @@ use spec::data_dictionary::DataDictionary;
 pub mod auth;
 pub mod batch;
 pub mod config;
-pub mod ddic_edit;
+pub mod ddic_file;
+pub mod ddic_store;
 pub mod ddic_loader;
-pub mod export;
 pub mod extension;
 pub mod flp;
 pub mod hook;
@@ -20,13 +20,12 @@ pub mod status;
 pub mod term3270;
 
 use config::{ServerConfig, ServerMode};
-use tracing::info;
 
 /// Gemeinsamer Zustand beider Server.
 ///
-/// Der Unterschied zwischen Designer und Laufzeit steckt allein in `base`:
-/// der Designer bekommt das eincompilierte Metamodell, die Laufzeit das vom
-/// Designer exportierte Dictionary. Alles darunter - OData, `$metadata`, FLP -
+/// Der Unterschied zwischen Designer und Laufzeit steckt allein in `base` und
+/// im Store: der Designer zeigt das eincompilierte Metamodell auf `DdicStore`,
+/// die Laufzeit das Dictionary aus `ddic.json`. Alles darunter - OData, `$metadata`, FLP -
 /// ist identischer Code.
 #[derive(Clone)]
 pub struct AppState {
@@ -72,14 +71,17 @@ impl AppState {
         self.config.mode
     }
 
+    /// Designer-Modus: Metamodell-Oberflaeche, Schreiben in `ddic.json`.
+    pub fn is_designer(&self) -> bool {
+        self.config.designer
+    }
+
     /// Designer-Zustand mit Standardkonfiguration und dem eincompilierten
     /// Metamodell - der Einstieg fuer Tests und Beispiele.
     pub fn designer(store: Arc<dyn DraftDataStore>) -> Self {
-        Self::new(
-            store,
-            Arc::new(ServerConfig::defaults(ServerMode::Designer)),
-            DataDictionary::new(),
-        )
+        let mut config = ServerConfig::defaults(ServerMode::Runtime);
+        config.designer = true;
+        Self::new(store, Arc::new(config), DataDictionary::new())
     }
 
     /// Snapshot des aktuellen Dictionary - bleibt fuer die Dauer eines Requests stabil.
@@ -109,23 +111,6 @@ impl AppState {
 
         let ddic = Arc::new(ddic);
         *self.ddic.write().expect("ddic lock") = ddic.clone();
-        ddic
-    }
-
-    /// Der im Store gepflegte Modellstand, so wie ihn der Export sieht.
-    ///
-    /// Nur im Designer sinnvoll: dort liegen in `EntitySet`, `FieldSet`,
-    /// `RelationSet`, `PackageSet` und `AppSet` die vom Anwender definierten
-    /// Objekte. Bewusst getrennt von [`AppState::reload`] - der Designer soll
-    /// in seiner eigenen Oberflaeche nur das Metamodell zeigen, nicht die
-    /// Objekte, die er gerade modelliert.
-    pub async fn designed_dictionary(&self) -> DataDictionary {
-        let mut ddic = DataDictionary::new();
-        info!(
-            "loading designed dictionary from store: {:?}",
-            self.store.component_info()
-        );
-        ddic_loader::load_ddic_from_store(&mut ddic, self.store.as_ref()).await;
         ddic
     }
 }

@@ -6,7 +6,9 @@ pub struct App {
     name: String,
     title: String,
     main_entity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     subtitle: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     icon: Option<String>,
     package: Package,
 }

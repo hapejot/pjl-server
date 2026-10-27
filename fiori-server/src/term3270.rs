@@ -6,19 +6,17 @@
 //! Im Log blaettern PF7 (aelter) und PF8 (neuer), Enter aktualisiert.
 //!
 //! Alle Statusansichten lesen nur aus dem [`StatusHub`]. Ausnahme sind die
-//! Befehle der Befehlszeile (`ddic.rs`/`ddic_edit.rs`): sie bearbeiten einen
-//! Entwurf des Data Dictionary im Speicher, siehe [`DdicEditor`].
+//! Befehlszeile: Navigation zwischen den Statusansichten.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::Value;
 use srv_3270::{Action, Aid, App, Color, FieldAttribute, FieldId, Screen, Server, View};
 use tracing::{error, info};
 
 use crate::config::ServerConfig;
-use crate::ddic_edit::{DdicEditor, Reply};
 use crate::extension::Extension;
 use crate::status::{hub, StatusHub};
 use crate::AppState;
@@ -67,7 +65,6 @@ struct Page {
     content: Content,
     names: Arc<Vec<&'static str>>,
     exts: Arc<Vec<Arc<dyn Extension>>>,
-    editor: Arc<DdicEditor>,
     paged: bool,
     scroll: usize,
 }
@@ -161,18 +158,6 @@ impl View<Hub> for Page {
                     return Action::Stay;
                 }
                 let cmd = raw.to_lowercase();
-                if let Some(reply) = self.editor.run(&raw) {
-                    return match reply {
-                        Reply::Msg(m) => {
-                            app.msg = m;
-                            Action::Stay
-                        }
-                        Reply::Show { title, rows } => Action::Open {
-                            view: "ddic",
-                            params: json!({ "title": title, "rows": rows }),
-                        },
-                    };
-                }
                 match self.names.iter().find(|n| **n == cmd).copied() {
                     Some(view) => Action::Open { view, params: Value::Null },
                     None => {
@@ -324,7 +309,6 @@ pub fn spawn(config: &ServerConfig, state: &AppState) {
     };
     let addr = SocketAddr::new(config.term3270_bind, port);
     let exts = state.extensions.clone();
-    let editor = Arc::new(DdicEditor::new(state.clone(), config.dump_dir.clone()));
 
     let mut names: Vec<&'static str> = vec!["home", "logs", "ext", "config"];
     let mut ext_views: Vec<(&'static str, SharedFactory)> = Vec::new();
@@ -337,14 +321,13 @@ pub fn spawn(config: &ServerConfig, state: &AppState) {
     let names = Arc::new(names);
 
     let page = |title: &'static str, content: Content, paged: bool| {
-        let (names, exts, editor) = (names.clone(), exts.clone(), editor.clone());
+        let (names, exts) = (names.clone(), exts.clone());
         move || {
             DynView(Box::new(Page {
                 title: title.to_string(),
                 content,
                 names: names.clone(),
                 exts: exts.clone(),
-                editor: editor.clone(),
                 paged,
                 scroll: 0,
             }))
@@ -355,11 +338,7 @@ pub fn spawn(config: &ServerConfig, state: &AppState) {
         .view("home", page("Startseite", home, false))
         .view("logs", page("Log-Ringbuffer", logs, true))
         .view("ext", page("Erweiterungen", ext, false))
-        .view("config", page("Konfiguration", config_page, false))
-        .view("ddic", {
-            let editor = editor.clone();
-            move || DynView(Box::new(DdicPage::new(editor.clone())))
-        });
+        .view("config", page("Konfiguration", config_page, false));
     for (name, factory) in ext_views {
         server = server.view(name, move || DynView((*factory)()));
     }
@@ -370,100 +349,4 @@ pub fn spawn(config: &ServerConfig, state: &AppState) {
         }
     });
     info!(%addr, "3270-Schnittstelle gestartet");
-}
-
-/// Detailansicht fuer Listen und Eintraege aus dem DDIC-Editor. Hat selbst
-/// eine Befehlszeile, damit man Aenderungen direkt im Blick behaelt.
-struct DdicPage {
-    editor: Arc<DdicEditor>,
-    title: String,
-    rows: Vec<(String, String)>,
-}
-
-impl DdicPage {
-    fn new(editor: Arc<DdicEditor>) -> Self {
-        Self {
-            editor,
-            title: String::new(),
-            rows: Vec::new(),
-        }
-    }
-}
-
-#[async_trait]
-impl View<Hub> for DdicPage {
-    async fn enter(&mut self, _app: &mut App<Hub>, params: Value) -> Result<(), String> {
-        self.title = params["title"].as_str().unwrap_or_default().to_string();
-        self.rows = params["rows"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|r| {
-                let pair = r.as_array()?;
-                Some((pair.first()?.as_str()?.to_string(), pair.get(1)?.as_str()?.to_string()))
-            })
-            .collect();
-        Ok(())
-    }
-
-    fn render(&self, app: &App<Hub>) -> Screen {
-        let (rows, cols) = (app.rows, app.cols);
-        let mut s = Screen::new(rows, cols);
-        s.text(0, 0, &self.title, FieldAttribute::protected_intensified(), Some(Color::Blue));
-        let max = (rows as usize).saturating_sub(6);
-        for (i, (label, value)) in self.rows.iter().take(max).enumerate() {
-            let row = 2 + i as u16;
-            if label.is_empty() {
-                s.text(row, 0, value, FieldAttribute::normal(), Some(Color::Green));
-            } else {
-                s.text(row, 0, label, FieldAttribute::normal(), Some(Color::Blue));
-                s.text(row, VAL_COL, value, FieldAttribute::normal(), Some(Color::Green));
-            }
-        }
-        let cmd_row = rows.saturating_sub(3);
-        s.text(cmd_row, 0, "Befehl ==>", FieldAttribute::normal(), Some(Color::Blue));
-        s.input(FieldId::Command, cmd_row, 11, cols.saturating_sub(12), "");
-        s.focus(FieldId::Command);
-        if !app.msg.is_empty() {
-            s.text(
-                rows.saturating_sub(2),
-                0,
-                &app.msg,
-                FieldAttribute::protected_intensified(),
-                Some(Color::Yellow),
-            );
-        }
-        s.text(
-            rows.saturating_sub(1),
-            0,
-            "PF3=Zurueck PF12=Ende Enter=Ausfuehren  help=Befehle",
-            FieldAttribute::normal(),
-            Some(Color::Blue),
-        );
-        s
-    }
-
-    async fn handle(&mut self, app: &mut App<Hub>, aid: Aid, values: &[(FieldId, String)]) -> Action {
-        app.msg.clear();
-        match aid {
-            Aid::Pf(3) => Action::Back,
-            Aid::Pf(12) => Action::Exit,
-            Aid::Enter => {
-                let raw = command_text(values);
-                if raw.is_empty() {
-                    return Action::Stay;
-                }
-                match self.editor.run(&raw) {
-                    Some(Reply::Show { title, rows }) => {
-                        self.title = title;
-                        self.rows = rows;
-                    }
-                    Some(Reply::Msg(m)) => app.msg = m,
-                    None => app.msg = format!("Unbekannter Befehl: {raw}"),
-                }
-                Action::Stay
-            }
-            _ => Action::Stay,
-        }
-    }
 }

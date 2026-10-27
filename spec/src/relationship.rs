@@ -84,11 +84,15 @@ pub struct Relationship {
     /// Unique name for this relationship (used as reference target by ConditionalRef).
     pub name: String,
     /// The "1" side — gets a Collection NavigationProperty + TableFacet
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub one: Option<String>,
     /// FK field name on the "many" entity. Default: `"{many.nav_name}ID"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub one_field: Option<String>,
     /// The "N" side — gets a FK property + 1:1 NavigationProperty + ValueList + SemanticObject
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub many: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub many_property: Option<String>,
     /// `true` = composition (parent controls child lifecycle, child gets DraftNode).
     /// `false` = association (independent entities, just linked).

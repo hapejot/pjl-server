@@ -55,7 +55,6 @@ services:
       DDIC_OVERLAY: /app/overlay/ddic.overlay.json
       STORE_PG_URL: postgres://video:video@db:5432/video
       EXPORT_DIR: /app/export
-      DUMP_DIR: /app/dump
       PORT: "8080"
       RUST_LOG: info
     ports:

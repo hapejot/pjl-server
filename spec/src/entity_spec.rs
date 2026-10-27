@@ -127,9 +127,13 @@ pub enum FieldSpec {
         label: String,
         edm_type: String,
         /// Logical package grouping (e.g. "itil", "asset_management").
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         package: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         max_length: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         precision: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         scale: Option<u32>,
         /// Server-generated field — never editable (Core.Computed + NonInsertable).
         #[serde(default, skip_serializing_if = "is_false")]
@@ -138,6 +142,7 @@ pub enum FieldSpec {
         #[serde(default, skip_serializing_if = "is_false")]
         immutable: bool,
         /// Optional value help (dropdown/dialog).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         value_list: Option<AtomValueList>,
         /// Wert ist eine URL: wird als anklickbarer Link dargestellt (`UI.DataFieldWithUrl`).
         #[serde(default, skip_serializing_if = "is_false")]
@@ -149,8 +154,11 @@ pub enum FieldSpec {
         name: String,
         label: String,
         /// Logical package grouping (e.g. "itil", "asset_management").
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         package: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         precision: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         scale: Option<u32>,
         /// Name of the companion Atom field holding the unit/currency code (e.g. "Currency").
         unit_field: String,

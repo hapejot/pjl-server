@@ -1,13 +1,14 @@
 # Zwei Server, ein Image-Rezept: beide werden aus demselben Dockerfile und
 # demselben Code gebaut und unterscheiden sich nur im Binary.
 #
-# Der Designer schreibt sein Modell nach `export/`, der Laufzeitserver liest
-# es von dort - deshalb teilen sich beide das Volume `export`, beim
-# Laufzeitserver schreibgeschuetzt.
+# Der Designer ist derselbe Laufzeitserver mit `DESIGNER=1`. Er schreibt
+# jede Aenderung direkt nach `export/ddic.json`; der Laufzeitserver liest
+# diese Datei beim Start - deshalb teilen sich beide das Volume `export`,
+# beim Laufzeitserver schreibgeschuetzt.
 #
 #   docker compose up --build
-#   Designer  -> http://localhost:3033   ("Publish Dictionary" in jeder Liste)
-#   Laufzeit  -> http://localhost:3034   (nach dem Publish neu starten)
+#   Designer  -> http://localhost:3033
+#   Laufzeit  -> http://localhost:3034   (nach Aenderungen neu starten)
 #
 # Fuer die Tests des Postgres-Backends gibt es zusaetzlich eine Datenbank im
 # Profil `dev`. Sie laeuft nicht mit hoch, wenn man nur die Server starten
@@ -25,12 +26,14 @@ services:
       context: .
       target: run
       args:
-        BIN_NAME: pjl-designer
+        BIN_NAME: pjl-runtime
     restart: unless-stopped
     ports:
       - "3033:8080"
+    environment:
+      DESIGNER: "1"
+      DDIC: /app/export/ddic.json
     volumes:
-      - design-data:/app/data
       - export:/app/export
 
   runtime:
@@ -75,6 +78,5 @@ services:
       # - /var/lib/postgresql/data
 
 volumes:
-  design-data:
   runtime-data:
   export:

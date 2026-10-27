@@ -475,65 +475,6 @@ impl Hook for DefaultHook {
     }
 }
 
-/// Beim Anlegen eines `EntitySet`-Datensatzes werden automatisch zwei
-/// `FieldSet`-Kinder angelegt (`name` und `title`). Die Kinder erben den
-/// Draft-Zustand des Parents; Nutzer koennen sie spaeter umbenennen oder
-/// loeschen.
-///
-/// Semantik:
-/// * feuert im `after`-Callback von [`Operation::Create`] fuer `set_name ==
-///   "EntitySet"`,
-/// * legt die Kinder ueber [`Extender::create_entity`] an -- damit gelten
-///   dieselben Hook-/Validierungspfade wie bei jedem anderen Kind-Create,
-/// * uebernimmt den `IsActiveEntity`-Zustand des Parents; im Draft-Modus
-///   entstehen also Draft-Kinder, aktiv angelegte Parents erhalten aktive
-///   Kinder.
-#[derive(Default)]
-pub struct EntityDefaultsHook;
-
-impl EntityDefaultsHook {
-    const PARENT_SET: &'static str = "EntitySet";
-    const CHILD_SET: &'static str = "FieldSet";
-    /// Foreign-Key-Spalte in `FieldSet`, die auf das Parent-`EntitySet` zeigt.
-    const CHILD_FK: &'static str = "entity_ID";
-    /// Namen der automatisch angelegten Felder.
-    const DEFAULT_FIELDS: &'static [&'static str] = &["name", "title"];
-}
-
-#[async_trait::async_trait]
-impl Hook for EntityDefaultsHook {
-    async fn after(
-        &self,
-        store: &Extender,
-        set_name: &str,
-        op: Operation,
-        value: &mut DataRecord,
-    ) -> Result<(), HookError> {
-        // Nur beim Anlegen eines EntitySet greifen. Draft-Aktivierung und
-        // Draft-Prepare beruehren den Datensatz nicht neu: die Kinder wurden
-        // beim urspruenglichen Create schon mitgeschrieben und werden vom
-        // Draft-Aktivierungspfad zusammen mit dem Parent uebernommen.
-        if set_name != Self::PARENT_SET || op != Operation::Create {
-            return Ok(());
-        }
-        let parent_id = value.id().to_string();
-        let is_active = value.is_active_entity();
-        for field_name in Self::DEFAULT_FIELDS {
-            store
-                .create_entity(
-                    Self::CHILD_SET,
-                    &json!({
-                        "name": field_name,
-                        Self::CHILD_FK: parent_id,
-                        "IsActiveEntity": is_active,
-                    }),
-                )
-                .await?;
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod test {
     use std::sync::RwLock;

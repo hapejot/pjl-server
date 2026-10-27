@@ -1,6 +1,6 @@
 //! Laufzeitkonfiguration der beiden Server.
 //!
-//! Beide Binaries (`pjl-designer`, `pjl-runtime`) teilen sich denselben
+//! Der Laufzeitserver (`pjl-runtime`, optional `--designer`) nutzt denselben
 //! Code; sie unterscheiden sich ausschliesslich ueber [`ServerMode`] und die
 //! daraus abgeleiteten Defaults. Alles ist per CLI-Flag oder Umgebungsvariable
 //! ueberschreibbar - vorher waren Port, Datenverzeichnis, Schemadatei und
@@ -12,39 +12,24 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-/// Welche Rolle der Prozess spielt.
-///
-/// Die Rolle wird vom Binary festgelegt, nicht vom Benutzer - ein Designer
-/// laesst sich nicht per Flag in einen Laufzeitserver verwandeln.
+/// Betriebsart. Es gibt nur den Laufzeitserver; der Designer ist ein Flag
+/// (`--designer`), das dieselbe Laufzeit auf `ddic.json` schreibend betreibt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServerMode {
-    /// Pflegt das Data Dictionary: Metamodell-Store, Export-Aktion, keine
-    /// fachlichen Tabellen.
-    Designer,
-    /// Fuehrt ein exportiertes Dictionary aus: fachliche Tabellen, kein
-    /// Metamodell, kein Export.
     Runtime,
 }
 
 impl ServerMode {
-    pub fn is_designer(self) -> bool {
-        self == ServerMode::Designer
-    }
-
-    /// Prozessname fuer Logs und die Titelzeile des Launchpads.
+    /// Prozessname fuer Logs und Status.
     pub fn label(self) -> &'static str {
         match self {
-            ServerMode::Designer => "designer",
             ServerMode::Runtime => "runtime",
         }
     }
 
-    /// `(Port, Datenverzeichnis)` - die einzigen Defaults, die sich zwischen
-    /// den beiden Servern unterscheiden. Getrennte Werte, damit beide
-    /// parallel auf demselben Rechner laufen koennen.
+    /// `(Port, Datenverzeichnis)` fuer den Laufzeitserver.
     fn defaults(self) -> (u16, &'static str) {
         match self {
-            ServerMode::Designer => (3033, "design-data"),
             ServerMode::Runtime => (3034, "rel-data"),
         }
     }
@@ -72,8 +57,8 @@ pub struct Cli {
     #[arg(long, env = "WEB_ROOT", default_value = "web")]
     pub web_root: PathBuf,
 
-    /// Data Dictionary (JSON). Im Laufzeitmodus die Pflichteingabe, im
-    /// Designer ungenutzt (dort ist das Metamodell eincompiliert).
+    /// Data Dictionary (JSON). Pflicht im Laufzeitmodus; im Designer die
+    /// Datei, die gepflegt wird.
     #[arg(long, env = "DDIC")]
     pub ddic: Option<PathBuf>,
 
@@ -87,14 +72,14 @@ pub struct Cli {
     #[arg(long, env = "SCHEMA")]
     pub schema: Option<PathBuf>,
 
-    /// Zielverzeichnis der Export-Aktion (nur Designer).
+    /// Verzeichnis mit `ddic.json`, falls `--ddic` nicht angegeben ist.
     #[arg(long, env = "EXPORT_DIR", default_value = "export")]
     pub export_dir: PathBuf,
 
-    /// Das Metamodell (Entity/Field/Relation/Package/App und dessen Apps)
-    /// mitexportieren. Standardmaessig bleibt es im Designer.
-    #[arg(long, env = "EXPORT_METAMODEL")]
-    pub export_metamodel: bool,
+    /// Designer-Modus: pflegt `ddic.json` ueber die Metamodell-Oberflaeche.
+    /// Ohne Skripte und ohne Datenbank; jede Aenderung wird sofort geschrieben.
+    #[arg(long, env = "DESIGNER")]
+    pub designer: bool,
 
     /// Header, den ein vorgeschalteter Auth-Proxy (z. B. oauth2-proxy) mit dem
     /// angemeldeten Benutzer setzt. Der Proxy muss diesen Header von Clients
@@ -121,10 +106,6 @@ pub struct Cli {
     #[arg(long, env = "TERM3270_BIND", default_value = "127.0.0.1")]
     pub term3270_bind: IpAddr,
 
-    /// Zielverzeichnis des 3270-Befehls `dump ddic`.
-    #[arg(long, env = "DUMP_DIR", default_value = "dump")]
-    pub dump_dir: PathBuf,
-
     /// Verzeichnis mit Rhai-Skripten `<set>.rhai` (Hooks fuer Lesen und Schreiben).
     /// Ohne Angabe keine Skripte. Wird im Container als Volume eingebunden.
     #[arg(long, env = "SCRIPTS_DIR")]
@@ -134,17 +115,12 @@ pub struct Cli {
 impl Cli {
     pub fn into_config(self, mode: ServerMode) -> ServerConfig {
         let (default_port, default_data_dir) = mode.defaults();
-        let ddic = match mode {
-            ServerMode::Runtime => Some(
-                self.ddic
-                    .unwrap_or_else(|| self.export_dir.join("ddic.json")),
-            ),
-            ServerMode::Designer => self.ddic,
-        };
-        let ddic_overlay = match mode {
-            ServerMode::Runtime => self.ddic_overlay,
-            ServerMode::Designer => None,
-        };
+        let ddic = Some(
+            self.ddic
+                .unwrap_or_else(|| self.export_dir.join("ddic.json")),
+        );
+        // Overlay gilt nur fuer die Laufzeit; der Designer schreibt die Datei selbst.
+        let ddic_overlay = if self.designer { None } else { self.ddic_overlay };
         ServerConfig {
             mode,
             port: self.port.unwrap_or(default_port),
@@ -155,13 +131,12 @@ impl Cli {
             ddic_overlay,
             schema: self.schema,
             export_dir: self.export_dir,
-            export_metamodel: self.export_metamodel,
+            designer: self.designer,
             auth_user_header: self.auth_user_header,
             auth_required: self.auth_required,
             store_pg_url: self.store_pg_url,
             term3270_port: self.term3270_port,
             term3270_bind: self.term3270_bind,
-            dump_dir: self.dump_dir,
             scripts_dir: self.scripts_dir,
         }
     }
@@ -181,7 +156,8 @@ pub struct ServerConfig {
     pub ddic_overlay: Option<PathBuf>,
     pub schema: Option<PathBuf>,
     pub export_dir: PathBuf,
-    pub export_metamodel: bool,
+    /// Designer-Modus (siehe `Cli::designer`).
+    pub designer: bool,
     pub auth_user_header: String,
     pub auth_required: bool,
     /// Ziel-Datenbank des Stores. `None`: SQLite in `data_dir`.
@@ -189,8 +165,6 @@ pub struct ServerConfig {
     /// 3270-Schnittstelle nur aktiv, wenn gesetzt.
     pub term3270_port: Option<u16>,
     pub term3270_bind: IpAddr,
-    /// Zielverzeichnis fuer `dump ddic` in der 3270-Schnittstelle.
-    pub dump_dir: PathBuf,
     /// Skriptverzeichnis; `None` schaltet die Skript-Hooks aus.
     pub scripts_dir: Option<PathBuf>,
 }
@@ -217,13 +191,12 @@ impl ServerConfig {
             ddic_overlay: None,
             schema: None,
             export_dir: "export".into(),
-            export_metamodel: false,
+            designer: false,
             auth_user_header: "X-Forwarded-User".into(),
             auth_required: false,
             store_pg_url: None,
             term3270_port: None,
             term3270_bind: IpAddr::from([127, 0, 0, 1]),
-            dump_dir: "dump".into(),
             scripts_dir: None,
         }
     }
@@ -240,17 +213,20 @@ mod tests {
     }
 
     #[test]
-    fn mode_drives_the_defaults() {
-        let designer = cli(&[]).into_config(ServerMode::Designer);
-        assert_eq!(designer.port, 3033);
-        assert_eq!(designer.data_dir, PathBuf::from("design-data"));
-        // Der Designer bringt sein Dictionary selbst mit.
-        assert!(designer.ddic.is_none());
-
+    fn runtime_defaults() {
         let runtime = cli(&[]).into_config(ServerMode::Runtime);
         assert_eq!(runtime.port, 3034);
         assert_eq!(runtime.data_dir, PathBuf::from("rel-data"));
         assert_eq!(runtime.ddic, Some(PathBuf::from("export/ddic.json")));
+        assert!(!runtime.designer);
+    }
+
+    #[test]
+    fn designer_flag_keeps_the_runtime_binary() {
+        let c = cli(&["--designer", "--ddic", "x.json"]).into_config(ServerMode::Runtime);
+        assert!(c.designer);
+        assert_eq!(c.ddic, Some(PathBuf::from("x.json")));
+        assert!(c.ddic_overlay.is_none());
     }
 
     #[test]

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::value_list::{self, ValueList, ITEMS_ENTITY};
 use crate::{EntitySpec, FieldSpec, Relationship, app::App, package::Package};
 use tracing::*;
 
@@ -11,6 +12,8 @@ pub struct DataDictionary {
     entities: Vec<EntitySpec>,
     relationships: Vec<Relationship>,
     apps: Vec<App>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    value_lists: Vec<ValueList>,
     #[serde(skip)]
     active: HashMap<String, EntitySpec>,
 }
@@ -50,10 +53,14 @@ impl DataDictionary {
                 "Edm.String",
             ));
 
+        // `name` ist Titel und Listenspalte (Annotationen verweisen darauf); es traegt den Code.
         let value_ent = EntitySpec::new("Value", core.name(), "Values")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
             .field(FieldSpec::atom("value", "Value", "Edm.String"))
-            .field(FieldSpec::atom("label", "Label", "Edm.String"));
+            .field(FieldSpec::atom("label", "Label", "Edm.String"))
+            .field(FieldSpec::atom("sort", "Sort", "Edm.Int64"));
+        let value_list_ent = EntitySpec::new("ValueList", core.name(), "Value Lists")
+            .field(FieldSpec::atom("name", "Name", "Edm.String"));
         // .field(FieldSpec::atom("package", "Package", "Edm.Guid"));
 
         let package_ent = EntitySpec::new("Package", core.name(), "Packages")
@@ -86,6 +93,12 @@ impl DataDictionary {
         let r6 = Relationship::new("app_entity", core.name())
             .with_one("Entity", "_Apps")
             .with_many("App", "main_entity");
+        let r8 = Relationship::new("value_list_values", core.name())
+            .with_one("ValueList", "_Values")
+            .with_many("Value", "list");
+        let r9 = Relationship::new("value_list_fields", core.name())
+            .with_one("ValueList", "_Fields")
+            .with_many("Field", "value_list");
         let r7 = Relationship::new("app_package", core.name())
             .with_one("Package", "_Apps")
             .with_many("App", "package");
@@ -121,6 +134,14 @@ impl DataDictionary {
             Some("sap-icon://world".into()),
             core.clone(),
         );
+        let a6 = App::new(
+            "valuelists".into(),
+            "Value Lists".into(),
+            "ValueList".into(),
+            Some("Maintain Value Lists".into()),
+            Some("sap-icon://world".into()),
+            core.clone(),
+        );
         let a5 = App::new(
             "apps".into(),
             "Apps".into(),
@@ -139,9 +160,11 @@ impl DataDictionary {
                 value_ent,
                 package_ent,
                 app_ent,
+                value_list_ent,
             ],
-            relationships: vec![rel, r2, r3, r4, r5, r6, r7],
-            apps: vec![a1, a2, a3, a4, a5],
+            relationships: vec![rel, r2, r3, r4, r5, r6, r7, r8, r9],
+            apps: vec![a1, a2, a3, a4, a5, a6],
+            value_lists: Vec::new(),
             active: HashMap::new(),
         }
     }
@@ -156,6 +179,7 @@ impl DataDictionary {
             entities: Vec::new(),
             relationships: Vec::new(),
             apps: Vec::new(),
+            value_lists: Vec::new(),
             active: HashMap::new(),
         }
     }
@@ -168,8 +192,34 @@ impl DataDictionary {
         self.packages.iter()
     }
 
+    pub fn value_lists(&self) -> &[ValueList] {
+        &self.value_lists
+    }
+
+    /// Festwertlisten pruefen (siehe [`value_list::validate`]).
+    pub fn validate_value_lists(&self) -> Result<(), String> {
+        value_list::validate(&self.value_lists)
+    }
+
+    /// Generierte Entitaet mit allen Festwerten. Ohne Listen entsteht keine.
+    fn generated_entities(&self) -> Vec<EntitySpec> {
+        if self.value_lists.is_empty() {
+            return Vec::new();
+        }
+        vec![
+            EntitySpec::new(ITEMS_ENTITY, "core", "FieldValueListItems")
+                // `name` ist Titel und Listenspalte; es traegt die Bezeichnung.
+                .field(FieldSpec::atom("name", "Bezeichnung", "Edm.String"))
+                .field(FieldSpec::atom("ListID", "Liste", "Edm.String"))
+                .field(FieldSpec::atom("value", "Wert", "Edm.String"))
+                .field(FieldSpec::atom("label", "Bezeichnung", "Edm.String"))
+                .field(FieldSpec::atom("sort", "Sortierung", "Edm.Int64")),
+        ]
+    }
+
     pub fn entities(&self) -> Vec<EntitySpec> {
         let mut entities = self.entities.clone();
+        entities.extend(self.generated_entities());
         for relation in self.relationships.iter() {
             let Relationship {
                 one,
@@ -355,7 +405,7 @@ impl DataDictionary {
     }
 
     pub fn activate(&mut self) {
-        for entitiy in self.entities.iter() {
+        for entitiy in self.entities.iter().chain(self.generated_entities().iter()) {
             let mut active = entitiy.clone();
 
             for r in self.relationships() {

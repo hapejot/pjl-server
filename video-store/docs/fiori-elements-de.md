@@ -303,8 +303,7 @@ Stellen, an denen die Erzeugung nicht so weit geht wie die Typdefinitionen vermu
 | L7 | Die Annotation-Erzeugung für `FieldSpec::Measure` ist mit `todo!()` in `prepare_field_group` markiert. Im Video-Modell gibt es keine Measures, daher kein Laufzeitfehler. | `srv/mod.rs` `prepare_field_group` |
 | L8 | `sample.rs` enthält ein XML-Annotations-Beispiel; es wird nicht aufgerufen (auskommentiert in `srv/mod.rs` ca. Zeile 2125). | `srv/sample.rs`, `srv/mod.rs:2125` |
 
-Im Designer-Modus (`pjl-designer`) gibt es zusätzlich einen Button "Publish Dictionary"
-(`flp.rs` `list_control_configuration`). Im Runtime-Modus (`video-store`) ist dieser nicht vorhanden.
+Der Designer-Modus (`--designer`) schreibt Änderungen direkt in `ddic.json`; einen Publish-Schritt gibt es nicht mehr.
 
 ---
 

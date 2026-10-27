@@ -149,7 +149,6 @@ Der Austausch läuft über das gemeinsame Volume `export`. Der Runtime-Container
 2. **Listenansichten (`ListView`) werden nicht aus dem Store geladen.** `ddic_loader.rs` kennt kein `ListViewSet`. Listenansichten kommen aktuell nur aus Rust-Code bzw. einer `ddic.json`, nicht aus der Designer-Oberfläche.
 3. **Store nur bei sauberem Stopp persistiert** (siehe Abschnitt 3).
 4. **Runtime lädt Modelländerungen nicht live nach.** Neustart nötig.
-5. **`fiori-server/entities.yaml`** wird von keiner Datei im Projekt referenziert (geprüft per Suche in `*.rs`, `*.toml`, `Dockerfile*`, `*.yaml`). Vermutlich eine Altlast.
 
 ---
 
@@ -250,5 +249,3 @@ Volumes: `runtime-data` → `/app/data` (Runtime), `export` → `/app/export` (D
 | `compose.yaml` | Container-Setup, Ports, Volumes |
 | `Dockerfile` | Image, Env-Defaults, Nutzer |
 | `export/ddic.json` | Modell, vom Designer gepflegt und von der Runtime gelesen |
-| `sample-data/*` | Beispielmodell (YAML-Sets, `schema.json`, `ddic.json`) |
-| `fiori-server/entities.yaml` | Vermutlich Altlast, wird von keiner Datei referenziert |

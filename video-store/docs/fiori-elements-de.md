@@ -362,9 +362,8 @@ Der Einstieg ist jeweils `Annotations::from_entity` bzw. `from_field`.
 * `app_manifest_handler`: Routen, Targets, Modelleinstellungen (`autoExpandSelect`,
   `earlyRequests`, `operationMode`), `variantManagement`, `initialLoad`.
 * `list_control_configuration`: Toolbar-Aktionen und Controls der Liste über
-  `controlConfiguration` (heute nur im Designer genutzt).
+  `controlConfiguration` (heute ohne Eintrag, Erweiterungen liefern die Controls).
 * `Component.js`: Komponenten-Erweiterungen. Die Datei wird serverseitig erzeugt.
-* `ext/Publish.js`: Beispiel für eine Custom-Action, die als Modul geladen wird.
 
 ### 8.5 Laufzeit- und Daten-Ebene (`fiori-server/src/hook.rs`)
 

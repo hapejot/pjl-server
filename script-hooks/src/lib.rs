@@ -32,6 +32,9 @@ use odata::query::ODataQuery;
 use rhai::{AST, Dynamic, Engine, EvalAltResult, Scope};
 use serde_json::{Value, json};
 
+/// Wartezeit nach dem letzten Dateiereignis, bevor neu geladen wird.
+const RELOAD_DEBOUNCE: Duration = Duration::from_millis(300);
+
 /// Zeitlimit pro Skriptaufruf.
 const CALL_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -77,7 +80,17 @@ impl ScriptHooks {
             anyhow::bail!("script compile errors: {}", list.join("; "));
         }
         let dir = inner.dir.clone();
+        // Debounce: Schreibvorgaenge (z. B. `fs::write` kuerzt die Datei zuerst)
+        // erzeugen mehrere Ereignisse. Neu geladen wird erst nach einer Ruhephase,
+        // sonst koennte eine leere Zwischenstufe als Skript gelten.
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
         let watch_inner = inner.clone();
+        std::thread::spawn(move || {
+            while rx.recv().is_ok() {
+                while rx.recv_timeout(RELOAD_DEBOUNCE).is_ok() {}
+                watch_inner.reload();
+            }
+        });
         let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             if let Ok(event) = res {
                 let relevant = event
@@ -85,7 +98,7 @@ impl ScriptHooks {
                     .iter()
                     .any(|p| p.extension().is_some_and(|e| e == "rhai"));
                 if relevant {
-                    watch_inner.reload();
+                    let _ = tx.send(());
                 }
             }
         })?;

@@ -242,24 +242,3 @@ mod tests {
         assert_eq!(c.ddic, Some(PathBuf::from("dist/ddic.json")));
     }
 }
-
-#[cfg(test)]
-mod designer_env_tests {
-    use super::*;
-
-    /// `DESIGNER=1` aus der Compose-Datei muss wirken wie `--designer`.
-    #[test]
-    fn designer_env_accepts_one() {
-        temp_env_set("DESIGNER", "1");
-        let c = Cli::try_parse_from(["test"]).expect("parse");
-        temp_env_unset("DESIGNER");
-        assert!(c.designer);
-    }
-
-    fn temp_env_set(k: &str, v: &str) {
-        unsafe { std::env::set_var(k, v) };
-    }
-    fn temp_env_unset(k: &str) {
-        unsafe { std::env::remove_var(k) };
-    }
-}

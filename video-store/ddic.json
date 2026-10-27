@@ -13,7 +13,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -34,7 +34,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -55,7 +55,7 @@
         {
           "Atom": {
             "name": "legacy_id",
-            "label": "legacy_id",
+            "label": "Legacy ID",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -69,7 +69,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -83,7 +83,7 @@
         {
           "Atom": {
             "name": "category",
-            "label": "category",
+            "label": "Category",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -97,7 +97,7 @@
         {
           "Atom": {
             "name": "category_order",
-            "label": "category_order",
+            "label": "Category order",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -111,7 +111,7 @@
         {
           "Atom": {
             "name": "normalized_name",
-            "label": "normalized_name",
+            "label": "Normalized name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -132,7 +132,7 @@
         {
           "Atom": {
             "name": "legacy_id",
-            "label": "legacy_id",
+            "label": "Legacy ID",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -146,7 +146,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -160,7 +160,7 @@
         {
           "Atom": {
             "name": "bio",
-            "label": "bio",
+            "label": "Bio",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -174,7 +174,7 @@
         {
           "Atom": {
             "name": "birth_place",
-            "label": "birth_place",
+            "label": "Birth place",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -188,7 +188,7 @@
         {
           "Atom": {
             "name": "birthday",
-            "label": "birthday",
+            "label": "Birthday",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -202,7 +202,7 @@
         {
           "Atom": {
             "name": "gender",
-            "label": "gender",
+            "label": "Gender",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -216,7 +216,7 @@
         {
           "Atom": {
             "name": "height",
-            "label": "height",
+            "label": "Height",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -230,7 +230,7 @@
         {
           "Atom": {
             "name": "last_scene_release_date",
-            "label": "last_scene_release_date",
+            "label": "Last scene release date",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -244,7 +244,7 @@
         {
           "Atom": {
             "name": "measurements",
-            "label": "measurements",
+            "label": "Measurements",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -258,7 +258,7 @@
         {
           "Atom": {
             "name": "rank",
-            "label": "rank",
+            "label": "Rank",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -272,7 +272,7 @@
         {
           "Atom": {
             "name": "weight",
-            "label": "weight",
+            "label": "Weight",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -286,7 +286,7 @@
         {
           "Atom": {
             "name": "normalized_name",
-            "label": "normalized_name",
+            "label": "Normalized name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -307,7 +307,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -321,7 +321,7 @@
         {
           "Atom": {
             "name": "job_type",
-            "label": "job_type",
+            "label": "Job type",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -335,7 +335,7 @@
         {
           "Atom": {
             "name": "schema_version",
-            "label": "schema_version",
+            "label": "Schema version",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -349,7 +349,7 @@
         {
           "Atom": {
             "name": "parameter_schema",
-            "label": "parameter_schema",
+            "label": "Parameter schema",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -363,7 +363,7 @@
         {
           "Atom": {
             "name": "result_schema",
-            "label": "result_schema",
+            "label": "Result schema",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -377,7 +377,7 @@
         {
           "Atom": {
             "name": "requires_video",
-            "label": "requires_video",
+            "label": "Requires video",
             "edm_type": "Edm.Boolean",
             "package": null,
             "max_length": null,
@@ -391,7 +391,7 @@
         {
           "Atom": {
             "name": "registered_at",
-            "label": "registered_at",
+            "label": "Registered at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -405,7 +405,7 @@
         {
           "Atom": {
             "name": "updated_at",
-            "label": "updated_at",
+            "label": "Updated at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -426,7 +426,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 255,
@@ -440,7 +440,7 @@
         {
           "Atom": {
             "name": "key",
-            "label": "key",
+            "label": "Key",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 100,
@@ -454,7 +454,7 @@
         {
           "Atom": {
             "name": "value",
-            "label": "value",
+            "label": "Value",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -468,7 +468,7 @@
         {
           "Atom": {
             "name": "updated_at",
-            "label": "updated_at",
+            "label": "Updated at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -489,7 +489,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -503,7 +503,7 @@
         {
           "Atom": {
             "name": "path",
-            "label": "path",
+            "label": "Path",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -517,7 +517,7 @@
         {
           "Atom": {
             "name": "recursive",
-            "label": "recursive",
+            "label": "Recursive",
             "edm_type": "Edm.Boolean",
             "package": null,
             "max_length": null,
@@ -531,7 +531,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -552,7 +552,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 255,
@@ -566,7 +566,7 @@
         {
           "Atom": {
             "name": "base_url",
-            "label": "base_url",
+            "label": "Base URL",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 512,
@@ -580,7 +580,7 @@
         {
           "Atom": {
             "name": "status",
-            "label": "status",
+            "label": "Status",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -594,7 +594,7 @@
         {
           "Atom": {
             "name": "last_heartbeat",
-            "label": "last_heartbeat",
+            "label": "Last heartbeat",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -608,7 +608,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -622,7 +622,7 @@
         {
           "Atom": {
             "name": "version",
-            "label": "version",
+            "label": "Version",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 255,
@@ -643,7 +643,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 255,
@@ -657,7 +657,7 @@
         {
           "Atom": {
             "name": "hostname",
-            "label": "hostname",
+            "label": "Hostname",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 255,
@@ -671,7 +671,7 @@
         {
           "Atom": {
             "name": "platform",
-            "label": "platform",
+            "label": "Platform",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 50,
@@ -692,7 +692,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -706,7 +706,7 @@
         {
           "Atom": {
             "name": "batch_id",
-            "label": "batch_id",
+            "label": "Batch ID",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -720,7 +720,7 @@
         {
           "Atom": {
             "name": "version",
-            "label": "version",
+            "label": "Version",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -734,7 +734,7 @@
         {
           "Atom": {
             "name": "source",
-            "label": "source",
+            "label": "Source",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -748,7 +748,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -762,7 +762,7 @@
         {
           "Atom": {
             "name": "raw_json",
-            "label": "raw_json",
+            "label": "Raw json",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -783,7 +783,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -797,7 +797,7 @@
         {
           "Atom": {
             "name": "model_id",
-            "label": "model_id",
+            "label": "Model ID",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -811,7 +811,7 @@
         {
           "Atom": {
             "name": "dim",
-            "label": "dim",
+            "label": "Dim",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -825,7 +825,7 @@
         {
           "Atom": {
             "name": "vector",
-            "label": "vector",
+            "label": "Vector",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -839,7 +839,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -860,7 +860,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -874,7 +874,7 @@
         {
           "Atom": {
             "name": "cluster_id",
-            "label": "cluster_id",
+            "label": "Cluster ID",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -888,7 +888,7 @@
         {
           "Atom": {
             "name": "model_name",
-            "label": "model_name",
+            "label": "Model name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -902,7 +902,7 @@
         {
           "Atom": {
             "name": "representative_type",
-            "label": "representative_type",
+            "label": "Representative type",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -916,7 +916,7 @@
         {
           "Atom": {
             "name": "vector",
-            "label": "vector",
+            "label": "Vector",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -930,7 +930,7 @@
         {
           "Atom": {
             "name": "cluster_size",
-            "label": "cluster_size",
+            "label": "Cluster size",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -944,7 +944,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -965,7 +965,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -979,7 +979,7 @@
         {
           "Atom": {
             "name": "cluster_id",
-            "label": "cluster_id",
+            "label": "Cluster ID",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -993,7 +993,7 @@
         {
           "Atom": {
             "name": "is_noise",
-            "label": "is_noise",
+            "label": "Is noise",
             "edm_type": "Edm.Boolean",
             "package": null,
             "max_length": null,
@@ -1007,7 +1007,7 @@
         {
           "Atom": {
             "name": "distance_to_centroid",
-            "label": "distance_to_centroid",
+            "label": "Distance to centroid",
             "edm_type": "Edm.Double",
             "package": null,
             "max_length": null,
@@ -1021,7 +1021,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -1042,7 +1042,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1056,7 +1056,7 @@
         {
           "Atom": {
             "name": "model_name",
-            "label": "model_name",
+            "label": "Model name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1070,7 +1070,7 @@
         {
           "Atom": {
             "name": "algorithm",
-            "label": "algorithm",
+            "label": "Algorithm",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1084,7 +1084,7 @@
         {
           "Atom": {
             "name": "parameters",
-            "label": "parameters",
+            "label": "Parameters",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1098,7 +1098,7 @@
         {
           "Atom": {
             "name": "status",
-            "label": "status",
+            "label": "Status",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1112,7 +1112,7 @@
         {
           "Atom": {
             "name": "n_samples",
-            "label": "n_samples",
+            "label": "N samples",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -1126,7 +1126,7 @@
         {
           "Atom": {
             "name": "n_clusters",
-            "label": "n_clusters",
+            "label": "N clusters",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -1140,7 +1140,7 @@
         {
           "Atom": {
             "name": "n_noise",
-            "label": "n_noise",
+            "label": "N noise",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -1154,7 +1154,7 @@
         {
           "Atom": {
             "name": "started_at",
-            "label": "started_at",
+            "label": "Started at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -1168,7 +1168,7 @@
         {
           "Atom": {
             "name": "completed_at",
-            "label": "completed_at",
+            "label": "Completed at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -1182,7 +1182,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -1203,7 +1203,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1217,7 +1217,7 @@
         {
           "Atom": {
             "name": "model_id",
-            "label": "model_id",
+            "label": "Model ID",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1231,7 +1231,7 @@
         {
           "Atom": {
             "name": "dim",
-            "label": "dim",
+            "label": "Dim",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -1245,7 +1245,7 @@
         {
           "Atom": {
             "name": "vector",
-            "label": "vector",
+            "label": "Vector",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1259,7 +1259,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -1280,7 +1280,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1294,7 +1294,7 @@
         {
           "Atom": {
             "name": "path",
-            "label": "path",
+            "label": "Path",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1308,7 +1308,7 @@
         {
           "Atom": {
             "name": "source",
-            "label": "source",
+            "label": "Source",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1322,7 +1322,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -1336,7 +1336,7 @@
         {
           "Atom": {
             "name": "extra",
-            "label": "extra",
+            "label": "Extra",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1350,7 +1350,7 @@
         {
           "Atom": {
             "name": "thumbnail_index",
-            "label": "thumbnail_index",
+            "label": "Thumbnail index",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -1364,7 +1364,7 @@
         {
           "Atom": {
             "name": "timestamp_seconds",
-            "label": "timestamp_seconds",
+            "label": "Timestamp seconds",
             "edm_type": "Edm.Double",
             "package": null,
             "max_length": null,
@@ -1385,7 +1385,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1399,7 +1399,7 @@
         {
           "Atom": {
             "name": "value",
-            "label": "value",
+            "label": "Value",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1413,7 +1413,7 @@
         {
           "Atom": {
             "name": "confidence",
-            "label": "confidence",
+            "label": "Confidence",
             "edm_type": "Edm.Double",
             "package": null,
             "max_length": null,
@@ -1427,7 +1427,7 @@
         {
           "Atom": {
             "name": "source",
-            "label": "source",
+            "label": "Source",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1441,7 +1441,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -1455,7 +1455,7 @@
         {
           "Atom": {
             "name": "dimension",
-            "label": "dimension",
+            "label": "Dimension",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1476,7 +1476,7 @@
         {
           "Atom": {
             "name": "legacy_id",
-            "label": "legacy_id",
+            "label": "Legacy ID",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1490,7 +1490,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 200,
@@ -1504,7 +1504,7 @@
         {
           "Atom": {
             "name": "embedding",
-            "label": "embedding",
+            "label": "Embedding",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1518,7 +1518,7 @@
         {
           "Atom": {
             "name": "image_data",
-            "label": "image_data",
+            "label": "Image data",
             "edm_type": "Edm.Binary",
             "package": null,
             "max_length": null,
@@ -1532,7 +1532,7 @@
         {
           "Atom": {
             "name": "image_filename",
-            "label": "image_filename",
+            "label": "Image filename",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 500,
@@ -1546,7 +1546,7 @@
         {
           "Atom": {
             "name": "source_image",
-            "label": "source_image",
+            "label": "Source image",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 500,
@@ -1560,7 +1560,7 @@
         {
           "Atom": {
             "name": "confidence",
-            "label": "confidence",
+            "label": "Confidence",
             "edm_type": "Edm.Double",
             "package": null,
             "max_length": null,
@@ -1574,7 +1574,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -1595,7 +1595,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1609,7 +1609,7 @@
         {
           "Atom": {
             "name": "position_index",
-            "label": "position_index",
+            "label": "Position index",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -1623,7 +1623,7 @@
         {
           "Atom": {
             "name": "position_type",
-            "label": "position_type",
+            "label": "Position type",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 20,
@@ -1637,7 +1637,7 @@
         {
           "Atom": {
             "name": "value",
-            "label": "value",
+            "label": "Value",
             "edm_type": "Edm.Double",
             "package": null,
             "max_length": null,
@@ -1651,7 +1651,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -1672,7 +1672,7 @@
         {
           "Atom": {
             "name": "legacy_id",
-            "label": "legacy_id",
+            "label": "Legacy ID",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1686,7 +1686,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1700,7 +1700,7 @@
         {
           "Atom": {
             "name": "updated_at",
-            "label": "updated_at",
+            "label": "Updated at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -1721,7 +1721,7 @@
         {
           "Atom": {
             "name": "legacy_id",
-            "label": "legacy_id",
+            "label": "Legacy ID",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1735,7 +1735,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 100,
@@ -1749,7 +1749,7 @@
         {
           "Atom": {
             "name": "sort_order",
-            "label": "sort_order",
+            "label": "Sort order",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -1763,7 +1763,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -1784,7 +1784,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1798,7 +1798,7 @@
         {
           "Atom": {
             "name": "value",
-            "label": "value",
+            "label": "Value",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 100,
@@ -1812,7 +1812,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -1826,7 +1826,7 @@
         {
           "Atom": {
             "name": "sort_order",
-            "label": "sort_order",
+            "label": "Sort order",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -1847,7 +1847,7 @@
         {
           "Atom": {
             "name": "legacy_id",
-            "label": "legacy_id",
+            "label": "Legacy ID",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1861,7 +1861,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1875,7 +1875,7 @@
         {
           "Atom": {
             "name": "ignore",
-            "label": "ignore",
+            "label": "Ignore",
             "edm_type": "Edm.Boolean",
             "package": null,
             "max_length": null,
@@ -1896,7 +1896,7 @@
         {
           "Atom": {
             "name": "legacy_id",
-            "label": "legacy_id",
+            "label": "Legacy ID",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1910,7 +1910,7 @@
         {
           "Atom": {
             "name": "size",
-            "label": "size",
+            "label": "Size",
             "edm_type": "Edm.Int64",
             "package": null,
             "max_length": null,
@@ -1924,7 +1924,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1945,7 +1945,7 @@
         {
           "Atom": {
             "name": "legacy_id",
-            "label": "legacy_id",
+            "label": "Legacy ID",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1959,7 +1959,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -1980,7 +1980,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2001,7 +2001,7 @@
         {
           "Atom": {
             "name": "legacy_id",
-            "label": "legacy_id",
+            "label": "Legacy ID",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2015,7 +2015,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2029,7 +2029,7 @@
         {
           "Atom": {
             "name": "description",
-            "label": "description",
+            "label": "Description",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2043,7 +2043,7 @@
         {
           "Atom": {
             "name": "video_length",
-            "label": "video_length",
+            "label": "Video length",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2057,7 +2057,7 @@
         {
           "Atom": {
             "name": "video_1080p_size_bytes",
-            "label": "video_1080p_size_bytes",
+            "label": "Video 1080p size bytes",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2071,7 +2071,7 @@
         {
           "Atom": {
             "name": "video_1080p_download",
-            "label": "video_1080p_download",
+            "label": "Video 1080p download",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2085,7 +2085,7 @@
         {
           "Atom": {
             "name": "video_1080p_view",
-            "label": "video_1080p_view",
+            "label": "Video 1080p view",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2099,7 +2099,7 @@
         {
           "Atom": {
             "name": "video_1080p_format",
-            "label": "video_1080p_format",
+            "label": "Video 1080p format",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2113,7 +2113,7 @@
         {
           "Atom": {
             "name": "brand",
-            "label": "brand",
+            "label": "Brand",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2127,7 +2127,7 @@
         {
           "Atom": {
             "name": "date_released",
-            "label": "date_released",
+            "label": "Date released",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2141,7 +2141,7 @@
         {
           "Atom": {
             "name": "video_format",
-            "label": "video_format",
+            "label": "Video format",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2155,7 +2155,7 @@
         {
           "Atom": {
             "name": "video_view",
-            "label": "video_view",
+            "label": "Video view",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2169,7 +2169,7 @@
         {
           "Atom": {
             "name": "video_download",
-            "label": "video_download",
+            "label": "Video download",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2183,7 +2183,7 @@
         {
           "Atom": {
             "name": "video_size_bytes",
-            "label": "video_size_bytes",
+            "label": "Video size bytes",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2197,7 +2197,7 @@
         {
           "Atom": {
             "name": "downloaded",
-            "label": "downloaded",
+            "label": "Downloaded",
             "edm_type": "Edm.Boolean",
             "package": null,
             "max_length": null,
@@ -2218,7 +2218,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 100,
@@ -2232,7 +2232,7 @@
         {
           "Atom": {
             "name": "normalized_name",
-            "label": "normalized_name",
+            "label": "Normalized name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 100,
@@ -2246,7 +2246,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -2260,7 +2260,7 @@
         {
           "Atom": {
             "name": "visible",
-            "label": "visible",
+            "label": "Visible",
             "edm_type": "Edm.Boolean",
             "package": null,
             "max_length": null,
@@ -2281,7 +2281,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2295,7 +2295,7 @@
         {
           "Atom": {
             "name": "classification",
-            "label": "classification",
+            "label": "Classification",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 20,
@@ -2309,7 +2309,7 @@
         {
           "Atom": {
             "name": "phash",
-            "label": "phash",
+            "label": "Phash",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 16,
@@ -2323,7 +2323,7 @@
         {
           "Atom": {
             "name": "file_path",
-            "label": "file_path",
+            "label": "File path",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2337,7 +2337,7 @@
         {
           "Atom": {
             "name": "original_thumbnail_url",
-            "label": "original_thumbnail_url",
+            "label": "Original thumbnail URL",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2351,7 +2351,7 @@
         {
           "Atom": {
             "name": "width",
-            "label": "width",
+            "label": "Width",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -2365,7 +2365,7 @@
         {
           "Atom": {
             "name": "height",
-            "label": "height",
+            "label": "Height",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -2379,7 +2379,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -2393,7 +2393,7 @@
         {
           "Atom": {
             "name": "labels",
-            "label": "labels",
+            "label": "Labels",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2407,7 +2407,7 @@
         {
           "Atom": {
             "name": "in_training_set",
-            "label": "in_training_set",
+            "label": "In training set",
             "edm_type": "Edm.Boolean",
             "package": null,
             "max_length": null,
@@ -2428,7 +2428,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2442,7 +2442,7 @@
         {
           "Atom": {
             "name": "job_type",
-            "label": "job_type",
+            "label": "Job type",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2456,7 +2456,7 @@
         {
           "Atom": {
             "name": "status",
-            "label": "status",
+            "label": "Status",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2470,7 +2470,7 @@
         {
           "Atom": {
             "name": "priority",
-            "label": "priority",
+            "label": "Priority",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -2484,7 +2484,7 @@
         {
           "Atom": {
             "name": "parameters",
-            "label": "parameters",
+            "label": "Parameters",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2498,7 +2498,7 @@
         {
           "Atom": {
             "name": "requested_at",
-            "label": "requested_at",
+            "label": "Requested at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -2512,7 +2512,7 @@
         {
           "Atom": {
             "name": "started_at",
-            "label": "started_at",
+            "label": "Started at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -2526,7 +2526,7 @@
         {
           "Atom": {
             "name": "completed_at",
-            "label": "completed_at",
+            "label": "Completed at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -2540,7 +2540,7 @@
         {
           "Atom": {
             "name": "result",
-            "label": "result",
+            "label": "Result",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2554,7 +2554,7 @@
         {
           "Atom": {
             "name": "schema_version",
-            "label": "schema_version",
+            "label": "Schema version",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2575,7 +2575,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2589,7 +2589,7 @@
         {
           "Atom": {
             "name": "rating",
-            "label": "rating",
+            "label": "Rating",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -2603,7 +2603,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -2617,7 +2617,7 @@
         {
           "Atom": {
             "name": "updated_at",
-            "label": "updated_at",
+            "label": "Updated at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -2638,7 +2638,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2652,7 +2652,7 @@
         {
           "Atom": {
             "name": "source",
-            "label": "source",
+            "label": "Source",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2666,7 +2666,7 @@
         {
           "Atom": {
             "name": "external_source",
-            "label": "external_source",
+            "label": "External source",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 100,
@@ -2680,7 +2680,7 @@
         {
           "Atom": {
             "name": "confidence",
-            "label": "confidence",
+            "label": "Confidence",
             "edm_type": "Edm.Double",
             "package": null,
             "max_length": null,
@@ -2694,7 +2694,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -2708,7 +2708,7 @@
         {
           "Atom": {
             "name": "created_by",
-            "label": "created_by",
+            "label": "Created by",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 100,
@@ -2729,7 +2729,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2743,7 +2743,7 @@
         {
           "Atom": {
             "name": "thumbnail_index",
-            "label": "thumbnail_index",
+            "label": "Thumbnail index",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -2757,7 +2757,7 @@
         {
           "Atom": {
             "name": "timestamp_seconds",
-            "label": "timestamp_seconds",
+            "label": "Timestamp seconds",
             "edm_type": "Edm.Double",
             "package": null,
             "max_length": null,
@@ -2771,7 +2771,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -2792,7 +2792,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2806,7 +2806,7 @@
         {
           "Atom": {
             "name": "watched_at",
-            "label": "watched_at",
+            "label": "Watched at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -2820,7 +2820,7 @@
         {
           "Atom": {
             "name": "watch_duration_seconds",
-            "label": "watch_duration_seconds",
+            "label": "Watch duration seconds",
             "edm_type": "Edm.Double",
             "package": null,
             "max_length": null,
@@ -2834,7 +2834,7 @@
         {
           "Atom": {
             "name": "completed",
-            "label": "completed",
+            "label": "Completed",
             "edm_type": "Edm.Boolean",
             "package": null,
             "max_length": null,
@@ -2855,7 +2855,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 512,
@@ -2869,7 +2869,7 @@
         {
           "Atom": {
             "name": "duration_seconds",
-            "label": "duration_seconds",
+            "label": "Duration seconds",
             "edm_type": "Edm.Double",
             "package": null,
             "max_length": null,
@@ -2883,7 +2883,7 @@
         {
           "Atom": {
             "name": "width",
-            "label": "width",
+            "label": "Width",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -2897,7 +2897,7 @@
         {
           "Atom": {
             "name": "height",
-            "label": "height",
+            "label": "Height",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -2911,7 +2911,7 @@
         {
           "Atom": {
             "name": "codec",
-            "label": "codec",
+            "label": "Codec",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 50,
@@ -2925,7 +2925,7 @@
         {
           "Atom": {
             "name": "bitrate",
-            "label": "bitrate",
+            "label": "Bitrate",
             "edm_type": "Edm.Int64",
             "package": null,
             "max_length": null,
@@ -2939,7 +2939,7 @@
         {
           "Atom": {
             "name": "is_streamable",
-            "label": "is_streamable",
+            "label": "Is streamable",
             "edm_type": "Edm.Boolean",
             "package": null,
             "max_length": null,
@@ -2953,7 +2953,7 @@
         {
           "Atom": {
             "name": "thumbnail_path",
-            "label": "thumbnail_path",
+            "label": "Thumbnail path",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": null,
@@ -2967,7 +2967,7 @@
         {
           "Atom": {
             "name": "created_at",
-            "label": "created_at",
+            "label": "Created at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -2981,7 +2981,7 @@
         {
           "Atom": {
             "name": "updated_at",
-            "label": "updated_at",
+            "label": "Updated at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -2995,7 +2995,7 @@
         {
           "Atom": {
             "name": "last_seen",
-            "label": "last_seen",
+            "label": "Last seen",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -3009,7 +3009,7 @@
         {
           "Atom": {
             "name": "thumbnail_count",
-            "label": "thumbnail_count",
+            "label": "Thumbnail count",
             "edm_type": "Edm.Int32",
             "package": null,
             "max_length": null,
@@ -3023,7 +3023,7 @@
         {
           "Atom": {
             "name": "deleted_at",
-            "label": "deleted_at",
+            "label": "Deleted at",
             "edm_type": "Edm.DateTimeOffset",
             "package": null,
             "max_length": null,
@@ -3037,7 +3037,7 @@
         {
           "Atom": {
             "name": "pending_physical_delete",
-            "label": "pending_physical_delete",
+            "label": "Pending physical delete",
             "edm_type": "Edm.Boolean",
             "package": null,
             "max_length": null,
@@ -3051,7 +3051,7 @@
         {
           "Atom": {
             "name": "title",
-            "label": "title",
+            "label": "Title",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 512,
@@ -3065,7 +3065,7 @@
         {
           "Atom": {
             "name": "is_reviewed",
-            "label": "is_reviewed",
+            "label": "Is reviewed",
             "edm_type": "Edm.Boolean",
             "package": null,
             "max_length": null,
@@ -3083,9 +3083,9 @@
       "package": "video",
       "type_name_plural": "Volumes",
       "fields": [
-        { "Atom": { "name": "name", "label": "name", "edm_type": "Edm.String", "package": null, "max_length": 512, "precision": null, "scale": null, "computed": false, "immutable": false, "value_list": null } },
+        { "Atom": { "name": "name", "label": "Name", "edm_type": "Edm.String", "package": null, "max_length": 512, "precision": null, "scale": null, "computed": false, "immutable": false, "value_list": null } },
         { "Atom": { "name": "is_online", "label": "is online", "edm_type": "Edm.Boolean", "package": null, "max_length": null, "precision": null, "scale": null, "computed": false, "immutable": false, "value_list": null } },
-        { "Atom": { "name": "mount_path", "label": "mount_path", "edm_type": "Edm.String", "package": null, "max_length": 512, "precision": null, "scale": null, "computed": false, "immutable": false, "value_list": null } }
+        { "Atom": { "name": "mount_path", "label": "Mount path", "edm_type": "Edm.String", "package": null, "max_length": 512, "precision": null, "scale": null, "computed": false, "immutable": false, "value_list": null } }
       ]
     },
     {
@@ -3096,7 +3096,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "name",
+            "label": "Name",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 512,
@@ -3110,7 +3110,7 @@
         {
           "Atom": {
             "name": "relative_path",
-            "label": "relative_path",
+            "label": "Relative path",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 1024,
@@ -3124,7 +3124,7 @@
         {
           "Atom": {
             "name": "size",
-            "label": "size",
+            "label": "Size",
             "edm_type": "Edm.Int64",
             "package": null,
             "max_length": null,
@@ -3138,7 +3138,7 @@
         {
           "Atom": {
             "name": "sha256_checksum",
-            "label": "sha256_checksum",
+            "label": "Sha256 checksum",
             "edm_type": "Edm.String",
             "package": null,
             "max_length": 64,
@@ -3160,7 +3160,9 @@
       "many": "Video",
       "many_property": "agent",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Videos",
+      "many_label": "Agent"
     },
     {
       "name": "video_tags_video_id",
@@ -3169,7 +3171,9 @@
       "many": "VideoTag",
       "many_property": "video",
       "owned": true,
-      "package": "video"
+      "package": "video",
+      "one_label": "Video tags",
+      "many_label": "Video"
     },
     {
       "name": "video_tags_tag_id",
@@ -3178,7 +3182,9 @@
       "many": "VideoTag",
       "many_property": "tag",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Video tags",
+      "many_label": "Tag"
     },
     {
       "name": "video_ratings_video_id",
@@ -3187,7 +3193,9 @@
       "many": "VideoRating",
       "many_property": "video",
       "owned": true,
-      "package": "video"
+      "package": "video",
+      "one_label": "Video ratings",
+      "many_label": "Video"
     },
     {
       "name": "video_views_video_id",
@@ -3196,7 +3204,9 @@
       "many": "VideoView",
       "many_property": "video",
       "owned": true,
-      "package": "video"
+      "package": "video",
+      "one_label": "Video views",
+      "many_label": "Video"
     },
     {
       "name": "video_thumbnails_video_id",
@@ -3205,7 +3215,9 @@
       "many": "VideoThumbnail",
       "many_property": "video",
       "owned": true,
-      "package": "video"
+      "package": "video",
+      "one_label": "Video thumbnails",
+      "many_label": "Video"
     },
     {
       "name": "video_jobs_video_id",
@@ -3214,7 +3226,9 @@
       "many": "VideoJob",
       "many_property": "video",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Video jobs",
+      "many_label": "Video"
     },
     {
       "name": "video_jobs_agent_id",
@@ -3223,7 +3237,9 @@
       "many": "VideoJob",
       "many_property": "agent",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Video jobs",
+      "many_label": "Agent"
     },
     {
       "name": "agent_settings_agent_id",
@@ -3232,7 +3248,9 @@
       "many": "AgentSetting",
       "many_property": "agent",
       "owned": true,
-      "package": "video"
+      "package": "video",
+      "one_label": "Agent settings",
+      "many_label": "Agent"
     },
     {
       "name": "agent_video_directories_agent_id",
@@ -3241,7 +3259,9 @@
       "many": "AgentVideoDirectory",
       "many_property": "agent",
       "owned": true,
-      "package": "video"
+      "package": "video",
+      "one_label": "Agent video directories",
+      "many_label": "Agent"
     },
     {
       "name": "emb_dinov2_image_id",
@@ -3250,7 +3270,9 @@
       "many": "EmbDinov2",
       "many_property": "image",
       "owned": true,
-      "package": "video"
+      "package": "video",
+      "one_label": "Emb dinov2",
+      "many_label": "Image"
     },
     {
       "name": "emb_dinov2_batch_id",
@@ -3259,7 +3281,9 @@
       "many": "EmbDinov2",
       "many_property": "batch",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Emb dinov2",
+      "many_label": "Batch"
     },
     {
       "name": "agent_capabilities_agent_id",
@@ -3268,7 +3292,9 @@
       "many": "AgentCapability",
       "many_property": "agent",
       "owned": true,
-      "package": "video"
+      "package": "video",
+      "one_label": "Agent capabilities",
+      "many_label": "Agent"
     },
     {
       "name": "emb_clip_image_id",
@@ -3277,7 +3303,9 @@
       "many": "EmbClip",
       "many_property": "image",
       "owned": true,
-      "package": "video"
+      "package": "video",
+      "one_label": "Emb clip",
+      "many_label": "Image"
     },
     {
       "name": "emb_clip_batch_id",
@@ -3286,7 +3314,9 @@
       "many": "EmbClip",
       "many_property": "batch",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Emb clip",
+      "many_label": "Batch"
     },
     {
       "name": "emb_labels_image_id",
@@ -3295,7 +3325,9 @@
       "many": "EmbLabel",
       "many_property": "image",
       "owned": true,
-      "package": "video"
+      "package": "video",
+      "one_label": "Emb labels",
+      "many_label": "Image"
     },
     {
       "name": "label_category_options_category_key",
@@ -3304,7 +3336,9 @@
       "many": "LabelCategoryOption",
       "many_property": "category",
       "owned": true,
-      "package": "video"
+      "package": "video",
+      "one_label": "Label category options",
+      "many_label": "Category"
     },
     {
       "name": "emb_cluster_centroids_run_id",
@@ -3313,7 +3347,9 @@
       "many": "EmbClusterCentroid",
       "many_property": "run",
       "owned": true,
-      "package": "video"
+      "package": "video",
+      "one_label": "Emb cluster centroids",
+      "many_label": "Run"
     },
     {
       "name": "emb_cluster_results_run_id",
@@ -3322,7 +3358,9 @@
       "many": "EmbClusterResult",
       "many_property": "run",
       "owned": true,
-      "package": "video"
+      "package": "video",
+      "one_label": "Emb cluster results",
+      "many_label": "Run"
     },
     {
       "name": "emb_cluster_results_image_id",
@@ -3331,7 +3369,9 @@
       "many": "EmbClusterResult",
       "many_property": "image",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Emb cluster results",
+      "many_label": "Image"
     },
     {
       "name": "videos_scene_id",
@@ -3340,7 +3380,9 @@
       "many": "Video",
       "many_property": "scene",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Videos",
+      "many_label": "Scene"
     },
     {
       "name": "scene_files_path_id",
@@ -3349,7 +3391,9 @@
       "many": "SceneFile",
       "many_property": "path",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Scene files",
+      "many_label": "Path"
     },
     {
       "name": "actor_scene_map_actor_id",
@@ -3358,7 +3402,9 @@
       "many": "ActorSceneMap",
       "many_property": "actor",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Actor scene map",
+      "many_label": "Actor"
     },
     {
       "name": "actor_scene_map_scene_id",
@@ -3367,7 +3413,9 @@
       "many": "ActorSceneMap",
       "many_property": "scene",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Actor scene map",
+      "many_label": "Scene"
     },
     {
       "name": "actor_tag_map_actor_id",
@@ -3376,7 +3424,9 @@
       "many": "ActorTagMap",
       "many_property": "actor",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Actor tag map",
+      "many_label": "Actor"
     },
     {
       "name": "actor_tag_map_tag_id",
@@ -3385,7 +3435,9 @@
       "many": "ActorTagMap",
       "many_property": "tag",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Actor tag map",
+      "many_label": "Tag"
     },
     {
       "name": "scene_tag_map_scene_id",
@@ -3394,7 +3446,9 @@
       "many": "SceneTagMap",
       "many_property": "scene",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Scene tag map",
+      "many_label": "Scene"
     },
     {
       "name": "scene_tag_map_tag_id",
@@ -3403,7 +3457,9 @@
       "many": "SceneTagMap",
       "many_property": "tag",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Scene tag map",
+      "many_label": "Tag"
     },
     {
       "name": "path_scene_map_path_id",
@@ -3412,7 +3468,9 @@
       "many": "PathSceneMap",
       "many_property": "path",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Path scene map",
+      "many_label": "Path"
     },
     {
       "name": "path_scene_map_scene_id",
@@ -3421,7 +3479,9 @@
       "many": "PathSceneMap",
       "many_property": "scene",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Path scene map",
+      "many_label": "Scene"
     },
     {
       "name": "emb_images_video_id",
@@ -3430,7 +3490,9 @@
       "many": "EmbImage",
       "many_property": "video",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Emb images",
+      "many_label": "Video"
     },
     {
       "name": "emb_images_training_image_id",
@@ -3439,7 +3501,9 @@
       "many": "EmbImage",
       "many_property": "training_image",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Emb images",
+      "many_label": "Training image"
     },
     {
       "name": "training_images_video_id",
@@ -3448,7 +3512,9 @@
       "many": "TrainingImage",
       "many_property": "video",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Training images",
+      "many_label": "Video"
     },
     {
       "name": "agents_host_id",
@@ -3457,7 +3523,9 @@
       "many": "Agent",
       "many_property": "host",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Agents",
+      "many_label": "Host"
     },
     {
       "name": "volumes_host_id",
@@ -3466,7 +3534,9 @@
       "many": "Volume",
       "many_property": "host",
       "owned": true,
-      "package": "video"
+      "package": "video",
+      "one_label": "Volumes",
+      "many_label": "Host"
     },
     {
       "name": "files_volume_id",
@@ -3475,7 +3545,9 @@
       "many": "File",
       "many_property": "volume",
       "owned": true,
-      "package": "video"
+      "package": "video",
+      "one_label": "Files",
+      "many_label": "Volume"
     },
     {
       "name": "files_video_id",
@@ -3484,7 +3556,9 @@
       "many": "File",
       "many_property": "video",
       "owned": false,
-      "package": "video"
+      "package": "video",
+      "one_label": "Files",
+      "many_label": "Video"
     }
   ],
   "apps": [

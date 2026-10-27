@@ -8,8 +8,7 @@
 //! - `type_name_plural`, `package`: ueberschreiben die Basis.
 //! - `list_views`: je Ansicht per `name`. Gleichnamige ersetzen die Basis,
 //!   unbekannte werden angehaengt.
-//! - `object_page_hidden`: Vereinigung mit der Basis. Ein Overlay kann Felder
-//!   ausblenden, aber nicht wieder einblenden.
+//! - `facets`: Object-Page-Abschnitte je Schluessel (siehe `FacetSpec`).
 //! - Unbekannte Entitaeten, Pakete und Felder sind Fehler.
 //! - `fields` ist nicht Teil des Overlays (unbekannte Schluessel werden abgelehnt).
 
@@ -19,7 +18,11 @@ use std::path::Path;
 use anyhow::{bail, Context};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use spec::{data_dictionary::DataDictionary, FilterDefault, ListView};
+use spec::{data_dictionary::DataDictionary, FacetSpec, FilterDefault, ListView};
+
+/// Schluessel der Allgemein-Facette und der Sammel-Facette (siehe `srv::GENERAL_FACET`, `srv::DEFAULT_FACET`).
+const GENERAL_FACET: &str = "General";
+const DEFAULT_FACET: &str = "Default";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -39,11 +42,11 @@ pub struct OverlayEntity {
     #[serde(default)]
     pub list_views: Vec<ListView>,
     #[serde(default)]
-    pub object_page_hidden: Vec<String>,
-    #[serde(default)]
     pub filter_defaults: BTreeMap<String, FilterDefault>,
     #[serde(default)]
     pub selection_fields: Vec<String>,
+    #[serde(default)]
+    pub facets: Vec<FacetSpec>,
 }
 
 /// Overlay-Datei lesen und parsen.
@@ -103,21 +106,6 @@ pub fn apply(base: DataDictionary, overlay: &Overlay) -> anyhow::Result<DataDict
             }
         }
 
-        if !oe.object_page_hidden.is_empty() {
-            let hidden = obj
-                .as_object_mut()
-                .context("ddic: Entitaet ist kein Objekt")?
-                .entry("object_page_hidden")
-                .or_insert_with(|| json!([]))
-                .as_array_mut()
-                .context("ddic: 'object_page_hidden' ist kein Array")?;
-            for field in &oe.object_page_hidden {
-                if !hidden.iter().any(|h| h.as_str() == Some(field.as_str())) {
-                    hidden.push(json!(field));
-                }
-            }
-        }
-
         if !oe.selection_fields.is_empty() {
             let fields = obj
                 .as_object_mut()
@@ -129,6 +117,26 @@ pub fn apply(base: DataDictionary, overlay: &Overlay) -> anyhow::Result<DataDict
             for field in &oe.selection_fields {
                 if !fields.iter().any(|f| f.as_str() == Some(field.as_str())) {
                     fields.push(json!(field));
+                }
+            }
+        }
+
+        if !oe.facets.is_empty() {
+            let facets = obj
+                .as_object_mut()
+                .context("ddic: Entitaet ist kein Objekt")?
+                .entry("facets")
+                .or_insert_with(|| json!([]))
+                .as_array_mut()
+                .context("ddic: 'facets' ist kein Array")?;
+            for facet in &oe.facets {
+                let value = serde_json::to_value(facet)?;
+                match facets
+                    .iter()
+                    .position(|f| f.get("facet").and_then(Value::as_str) == Some(facet.facet.as_str()))
+                {
+                    Some(i) => facets[i] = value,
+                    None => facets.push(value),
                 }
             }
         }
@@ -147,7 +155,9 @@ pub fn apply(base: DataDictionary, overlay: &Overlay) -> anyhow::Result<DataDict
         }
     }
 
-    Ok(serde_json::from_value(value)?)
+    let merged: DataDictionary = serde_json::from_value(value)?;
+    validate_facets(&merged, overlay)?;
+    Ok(merged)
 }
 
 /// Prueft Referenzen gegen das Basis-Dictionary, bevor etwas veraendert wird.
@@ -168,14 +178,6 @@ fn validate(base: &DataDictionary, overlay: &Overlay) -> anyhow::Result<()> {
         if let Some(package) = &oe.package {
             if !base.packages().any(|p| p.name() == package) {
                 bail!("overlay: Entitaet '{}': Paket '{package}' unbekannt", oe.name);
-            }
-        }
-        for field in &oe.object_page_hidden {
-            if !entity.fields().any(|f| f.name() == field) {
-                bail!(
-                    "overlay: Entitaet '{}': object_page_hidden nennt unbekanntes Feld '{field}'",
-                    oe.name
-                );
             }
         }
         for field in &oe.selection_fields {
@@ -201,6 +203,99 @@ fn validate(base: &DataDictionary, overlay: &Overlay) -> anyhow::Result<()> {
                     oe.name
                 );
             }
+        }
+    }
+    Ok(())
+}
+
+/// Prueft `facets` gegen das gemergte Dictionary.
+/// * `Default`: ohne `fields` und ohne `view`.
+/// * `General`: nur `title` und `fields`.
+/// * To-many Navigation: `view` und `title`, keine `fields`.
+/// * Eigener Schluessel: braucht `fields`, keine `view`.
+fn validate_facets(merged: &DataDictionary, overlay: &Overlay) -> anyhow::Result<()> {
+    let mut active = merged.clone();
+    active.activate();
+    for oe in &overlay.entities {
+        let entity = active
+            .active_entity(&oe.name)
+            .with_context(|| format!("overlay: Entitaet '{}' fehlt", oe.name))?;
+        let mut seen: Vec<&str> = Vec::new();
+        for facet in &oe.facets {
+            let key = facet.facet.as_str();
+            let ctx = format!("overlay: Entitaet '{}': facet '{key}'", oe.name);
+            if facet.title.as_deref().is_some_and(|t| t.trim().is_empty()) {
+                bail!("{ctx} hat einen leeren title");
+            }
+            if seen.contains(&key) {
+                bail!("{ctx} mehrfach angegeben");
+            }
+            seen.push(key);
+            let mut seen_fields: Vec<&str> = Vec::new();
+            for field in &facet.fields {
+                if seen_fields.contains(&field.as_str()) {
+                    bail!("{ctx}: Feld '{field}' mehrfach angegeben");
+                }
+                seen_fields.push(field);
+            }
+
+            let nav_target = entity.fields().find_map(|f| match f {
+                spec::FieldSpec::Lookup { name, entity: target, collection: true, .. } if name == key => {
+                    Some(target.clone())
+                }
+                _ => None,
+            });
+
+            if key == DEFAULT_FACET {
+                if facet.view.is_some() || !facet.fields.is_empty() {
+                    bail!("{ctx}: Default hat keine fields und keine view, es sammelt die nicht genannten Felder");
+                }
+            } else if key == GENERAL_FACET {
+                if facet.view.is_some() {
+                    bail!("{ctx}: hat keine Listenansicht");
+                }
+                check_facet_fields(&oe.name, facet, entity)?;
+            } else if let Some(target) = nav_target {
+                if !facet.fields.is_empty() {
+                    bail!("{ctx}: Navigationsfacette hat keine fields");
+                }
+                if let Some(view) = facet.view.as_deref().filter(|v| *v != ListView::DEFAULT) {
+                    let target_entity = active
+                        .active_entity(&target)
+                        .with_context(|| format!("overlay: Zielentitaet '{target}' fehlt"))?;
+                    if !target_entity.list_views().iter().any(|v| v.name == view) {
+                        bail!(
+                            "{ctx} nennt Ansicht '{view}', die es auf '{target}' nicht gibt"
+                        );
+                    }
+                }
+            } else {
+                if facet.view.is_some() {
+                    bail!("{ctx}: ist keine Navigation und hat daher keine Listenansicht");
+                }
+                if facet.fields.is_empty() {
+                    bail!("{ctx}: ist weder Navigation noch General/Default, eine eigene Facette braucht fields");
+                }
+                check_facet_fields(&oe.name, facet, entity)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Felder einer Facette: Atome oder einwertige Navigationen.
+fn check_facet_fields(owner: &str, facet: &FacetSpec, entity: &spec::EntitySpec) -> anyhow::Result<()> {
+    for field in &facet.fields {
+        let ok = entity.fields().any(|f| match f {
+            spec::FieldSpec::Atom { name, .. } => name == field,
+            spec::FieldSpec::Lookup { name, collection, .. } => name == field && !collection,
+            spec::FieldSpec::Measure { .. } => false,
+        });
+        if !ok {
+            bail!(
+                "overlay: Entitaet '{owner}': facet '{}' nennt '{field}', das weder Atom noch einwertige Navigation ist",
+                facet.facet
+            );
         }
     }
     Ok(())
@@ -245,17 +340,6 @@ mod tests {
         let review = views.iter().find(|v| v.name == "review").unwrap();
         assert_eq!(review.columns, vec!["name"]);
         assert!(views.iter().any(|v| v.name == "archive"));
-    }
-
-    #[test]
-    fn object_page_hidden_is_a_union() {
-        let overlay = parse(
-            r#"{"entities":[{"name":"Video","object_page_hidden":["file_size"]}]}"#,
-        )
-        .unwrap();
-        let once = apply(base(), &overlay).unwrap();
-        let twice = apply(once, &overlay).unwrap();
-        assert_eq!(video(&twice).object_page_hidden(), &["file_size".to_string()]);
     }
 
     #[test]
@@ -324,18 +408,89 @@ mod tests {
     }
 
     #[test]
-    fn unknown_hidden_field_is_an_error() {
-        let overlay =
-            parse(r#"{"entities":[{"name":"Video","object_page_hidden":["gibts_nicht"]}]}"#)
-                .unwrap();
-        assert!(apply(base(), &overlay).is_err());
-    }
-
-    #[test]
     fn unknown_keys_are_rejected() {
         // Tippfehler duerfen nicht still verschluckt werden.
         assert!(parse(r#"{"entities":[{"name":"Video","list_view":[]}]}"#).is_err());
         assert!(parse(r#"{"entities":[{"name":"Video","fields":[]}]}"#).is_err());
+    }
+
+    fn base_with_agent() -> DataDictionary {
+        let mut d = base();
+        d.add_entity(EntitySpec::new("Agent", "core", "Agents").field(FieldSpec::atom("name", "Name", "Edm.String")));
+        d.add_relationship(
+            spec::Relationship::new("videos_agent", "core")
+                .with_one("Agent", "_Videos")
+                .with_many("Video", "agent"),
+        );
+        d
+    }
+
+    #[test]
+    fn navigation_labels_come_from_the_relationship() {
+        let mut d = base();
+        d.add_entity(EntitySpec::new("Agent", "core", "Agents").field(FieldSpec::atom("name", "Name", "Edm.String")));
+        let mut rel = spec::Relationship::new("videos_agent", "core")
+            .with_one("Agent", "_Videos")
+            .with_many("Video", "agent");
+        rel.one_label = Some("Videos".into());
+        rel.many_label = Some("Agent".into());
+        d.add_relationship(rel);
+        d.activate();
+        let agent = d.active_entity("Agent").unwrap();
+        assert_eq!(agent.fields().find(|f| f.name() == "_Videos").unwrap().label(), "Videos");
+        let video = d.active_entity("Video").unwrap();
+        assert_eq!(video.fields().find(|f| f.name() == "agent").unwrap().label(), "Agent");
+    }
+
+    #[test]
+    fn facet_is_merged_and_kept() {
+        let o = parse(r#"{"entities":[{"name":"Agent","facets":[{"facet":"_Videos","view":"review"}]}]}"#).unwrap();
+        let d = apply(base_with_agent(), &o).unwrap();
+        let agent = d.entities().into_iter().find(|e| e.name() == "Agent").unwrap();
+        assert_eq!(agent.facet("_Videos").unwrap().view.as_deref(), Some("review"));
+    }
+
+    #[test]
+    fn facet_unknown_view_is_an_error() {
+        let o = parse(r#"{"entities":[{"name":"Agent","facets":[{"facet":"_Videos","view":"gibts_nicht"}]}]}"#).unwrap();
+        let err = apply(base_with_agent(), &o).unwrap_err().to_string();
+        assert!(err.contains("gibts_nicht"), "{err}");
+    }
+
+    #[test]
+    fn facet_default_is_always_valid() {
+        let o = parse(r#"{"entities":[{"name":"Agent","facets":[{"facet":"_Videos","view":"default"}]}]}"#).unwrap();
+        assert!(apply(base_with_agent(), &o).is_ok());
+    }
+
+    #[test]
+    fn facet_title_is_merged_and_blank_is_rejected() {
+        let o = parse(r#"{"entities":[{"name":"Agent","facets":[{"facet":"_Videos","title":"Filme"}]}]}"#).unwrap();
+        let d = apply(base_with_agent(), &o).unwrap();
+        let agent = d.entities().into_iter().find(|e| e.name() == "Agent").unwrap();
+        assert_eq!(agent.facet("_Videos").unwrap().title.as_deref(), Some("Filme"));
+
+        let blank = parse(r#"{"entities":[{"name":"Agent","facets":[{"facet":"_Videos","title":"  "}]}]}"#).unwrap();
+        assert!(apply(base_with_agent(), &blank).is_err());
+    }
+
+    #[test]
+    fn general_facet_takes_title_but_no_view() {
+        let o = parse(r#"{"entities":[{"name":"Agent","facets":[{"facet":"General","title":"Stammdaten"}]}]}"#).unwrap();
+        let d = apply(base_with_agent(), &o).unwrap();
+        let agent = d.entities().into_iter().find(|e| e.name() == "Agent").unwrap();
+        assert_eq!(agent.facet("General").unwrap().title.as_deref(), Some("Stammdaten"));
+
+        let with_view = parse(r#"{"entities":[{"name":"Agent","facets":[{"facet":"General","view":"review"}]}]}"#).unwrap();
+        assert!(apply(base_with_agent(), &with_view).is_err());
+    }
+
+    #[test]
+    fn facet_navigation_must_be_to_many() {
+        let o = parse(r#"{"entities":[{"name":"Video","facets":[{"facet":"agent"}]}]}"#).unwrap();
+        assert!(apply(base_with_agent(), &o).is_err());
+        let o = parse(r#"{"entities":[{"name":"Agent","facets":[{"facet":"nope","view":"review"}]}]}"#).unwrap();
+        assert!(apply(base_with_agent(), &o).is_err());
     }
 
     #[test]

@@ -120,6 +120,10 @@ pub struct Cli {
     /// den Zugriff ueber das Port-Mapping steuern.
     #[arg(long, env = "TERM3270_BIND", default_value = "127.0.0.1")]
     pub term3270_bind: IpAddr,
+
+    /// Zielverzeichnis des 3270-Befehls `dump ddic`.
+    #[arg(long, env = "DUMP_DIR", default_value = "dump")]
+    pub dump_dir: PathBuf,
 }
 
 impl Cli {
@@ -152,6 +156,7 @@ impl Cli {
             store_pg_url: self.store_pg_url,
             term3270_port: self.term3270_port,
             term3270_bind: self.term3270_bind,
+            dump_dir: self.dump_dir,
         }
     }
 }
@@ -178,6 +183,8 @@ pub struct ServerConfig {
     /// 3270-Schnittstelle nur aktiv, wenn gesetzt.
     pub term3270_port: Option<u16>,
     pub term3270_bind: IpAddr,
+    /// Zielverzeichnis fuer `dump ddic` in der 3270-Schnittstelle.
+    pub dump_dir: PathBuf,
 }
 
 impl ServerConfig {
@@ -208,6 +215,7 @@ impl ServerConfig {
             store_pg_url: None,
             term3270_port: None,
             term3270_bind: IpAddr::from([127, 0, 0, 1]),
+            dump_dir: "dump".into(),
         }
     }
 }

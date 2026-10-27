@@ -48,7 +48,7 @@ pub async fn run_with(
 
     let state = AppState::new(store, config.clone(), base).with_extensions(extensions);
     state.reload();
-    crate::term3270::spawn(&config, state.extensions.clone());
+    crate::term3270::spawn(&config, &state);
 
     let app = router(state, &config);
 

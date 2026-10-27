@@ -6,6 +6,7 @@ use spec::data_dictionary::DataDictionary;
 pub mod auth;
 pub mod batch;
 pub mod config;
+pub mod ddic_edit;
 pub mod ddic_loader;
 pub mod export;
 pub mod extension;
@@ -32,7 +33,7 @@ pub struct AppState {
     pub config: Arc<ServerConfig>,
     /// Unaktivierter Ausgangsstand; jeder `reload()` geht wieder von hier aus,
     /// damit `activate()` die Lookups nicht mehrfach anhaengt.
-    base: Arc<DataDictionary>,
+    base: Arc<RwLock<Arc<DataDictionary>>>,
     ddic: Arc<RwLock<Arc<DataDictionary>>>,
     /// Eingereichte Erweiterungen (Routen, UI5-Pfade, Object-Page-Beitraege).
     pub extensions: Arc<Vec<Arc<dyn extension::Extension>>>,
@@ -54,7 +55,7 @@ impl AppState {
         Self {
             store,
             config,
-            base,
+            base: Arc::new(RwLock::new(base)),
             ddic: Arc::new(RwLock::new(Arc::new(active))),
             extensions: Arc::new(Vec::new()),
         }
@@ -85,9 +86,22 @@ impl AppState {
         self.ddic.read().expect("ddic lock").clone()
     }
 
+    /// Unaktivierte Basis, so wie sie `reload()` verwendet.
+    pub fn base(&self) -> Arc<DataDictionary> {
+        self.base.read().expect("base lock").clone()
+    }
+
+    /// Ersetzt die Basis nur im Speicher und baut das aktive Dictionary neu auf.
+    /// Nichts davon wird im Store oder in einer Datei persistiert.
+    pub fn replace_base(&self, base: DataDictionary) -> Arc<DataDictionary> {
+        *self.base.write().expect("base lock") = Arc::new(base);
+        self.reload()
+    }
+
     /// Dictionary komplett neu aufbauen; Lookups entstehen dabei erneut aus den Relations.
     pub fn reload(&self) -> Arc<DataDictionary> {
-        let mut ddic = (*self.base).clone();
+        let base = self.base.read().expect("base lock").clone();
+        let mut ddic = (*base).clone();
         ddic.activate();
         self.store
             .set_navigations(ddic_loader::navigations_from_ddic(&ddic));

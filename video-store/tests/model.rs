@@ -26,6 +26,9 @@ fn naming_rules() {
     assert_eq!(map::nav_name("video_id"), "video");
     assert_eq!(map::nav_name("category_key"), "category");
     assert_eq!(map::collection_nav("video_tags"), "_VideoTags");
+    assert_eq!(map::human_label("file_size"), "File size");
+    assert_eq!(map::human_label("legacy_id"), "Legacy ID");
+    assert_eq!(map::human_label("name"), "Name");
 }
 
 #[test]
@@ -140,10 +143,15 @@ fn ddic_round_trips_through_json() {
 
 #[test]
 fn overlay_list_views_reach_the_video_entities() {
-    let model = model();
+    // Wie der Runtime-Start: Basis ist die ddic.json, nicht der Katalog-Build
+    // (der Testkatalog enthaelt z. B. keine Volumes).
+    let base_path = concat!(env!("CARGO_MANIFEST_DIR"), "/ddic.json");
+    let base: spec::data_dictionary::DataDictionary =
+        serde_json::from_str(&std::fs::read_to_string(base_path).expect("ddic.json lesbar"))
+            .expect("ddic.json parsbar");
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/overlay/ddic.overlay.json");
     let overlay = fiori_server::overlay::load(std::path::Path::new(path)).expect("overlay lesbar");
-    let ddic = fiori_server::overlay::apply(model.ddic.clone(), &overlay).expect("overlay passt");
+    let ddic = fiori_server::overlay::apply(base, &overlay).expect("overlay passt");
     ddic.validate_list_views().expect("Overlay-Listenansichten valide");
 
     let video = ddic.entities().into_iter().find(|e| e.name() == "Video").unwrap();

@@ -113,6 +113,8 @@ pub enum FieldSpec {
         entity: String,
         collection: bool,
         owned: bool,
+        /// Lesbarer Titel der Navigation (aus der Relationship). Fehlt er, gilt der Name.
+        label: Option<String>,
     },
     /// Simple value: text, number, date, boolean, coded value with optional dropdown.
     Atom {
@@ -279,7 +281,7 @@ impl FieldSpec {
         match self {
             FieldSpec::Atom { label, .. } => label,
             FieldSpec::Measure { label, .. } => label,
-            FieldSpec::Lookup { name, .. } => name,
+            FieldSpec::Lookup { name, label, .. } => label.as_deref().unwrap_or(name),
         }
     }
 
@@ -326,11 +328,6 @@ pub struct EntitySpec {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub list_views: Vec<ListView>,
 
-    /// Felder, die nur aus der ObjectPage-FieldGroup ausgeblendet werden.
-    /// Listen und das OData-Modell sind davon nicht betroffen.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub object_page_hidden: Vec<String>,
-
     /// Vorbelegte Filterwerte je Atom-Feld (`Common.FilterDefaultValue`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub filter_defaults: BTreeMap<String, FilterDefault>,
@@ -338,6 +335,32 @@ pub struct EntitySpec {
     /// Felder der Filterleiste in dieser Reihenfolge (`UI.SelectionFields`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selection_fields: Vec<String>,
+
+    /// Einstellungen je Object-Page-Facette (Tabellenabschnitt einer to-many Navigation).
+    /// Fehlt ein Eintrag, gelten die Standardwerte.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub facets: Vec<FacetSpec>,
+}
+
+/// Einstellungen fuer eine Object-Page-Facette, identifiziert ueber `facet`.
+/// Weitere Einstellungen kommen als zusaetzliche Felder hinzu.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FacetSpec {
+    /// Identifikator der Facette: eine to-many Navigation des Eigentuemers
+    /// (z. B. `_ActorSceneMap`), `General` (Feldabschnitt Main), `Default`
+    /// (nicht genannte Felder) oder ein frei gewaehlter Schluessel mit `fields`.
+    pub facet: String,
+    /// Listenansicht der Zielentitaet. Fehlt sie oder ist `default`, gilt das Standard-LineItem.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
+    /// Titel des Facetten-Abschnitts. Fehlt er, wird der Schluessel verwendet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Felder des Abschnitts in Anzeigereihenfolge (Atome oder einwertige Navigationen).
+    /// Bei `General` ohne Angabe: alle Felder. Bei `Default`: nicht genannte Felder.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<String>,
 }
 
 /// Konstanter Standardwert fuer einen Filter. Zahlen und Datumswerte sind
@@ -409,10 +432,18 @@ impl EntitySpec {
             type_name_plural: type_name_plural.into(),
             fields: vec![],
             list_views: vec![],
-            object_page_hidden: vec![],
             filter_defaults: BTreeMap::new(),
             selection_fields: vec![],
+            facets: vec![],
         }
+    }
+
+    pub fn facets(&self) -> &[FacetSpec] {
+        &self.facets
+    }
+
+    pub fn facet(&self, key: &str) -> Option<&FacetSpec> {
+        self.facets.iter().find(|f| f.facet == key)
     }
 
     pub fn selection_fields(&self) -> &[String] {
@@ -421,10 +452,6 @@ impl EntitySpec {
 
     pub fn filter_defaults(&self) -> &BTreeMap<String, FilterDefault> {
         &self.filter_defaults
-    }
-
-    pub fn object_page_hidden(&self) -> &[String] {
-        &self.object_page_hidden
     }
 
     pub fn list_view(mut self, view: ListView) -> Self {

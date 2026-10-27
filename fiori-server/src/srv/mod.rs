@@ -58,6 +58,7 @@ impl EntityType {
                     entity,
                     collection,
                     owned: _,
+                    ..
                 } => {
                     let p = if *collection {
                         NavigationProperty::new(
@@ -313,6 +314,7 @@ impl EntitySet {
                 entity,
                 collection,
                 owned,
+                ..
             } = field
             {
                 if !collection && *owned {
@@ -446,34 +448,16 @@ impl Annotations {
         // (nur eine JSON-Spalte im Store). Der Verweis wuerde FE-Fehler
         // "does not point to a property" ausloesen.
 
-        // Default Object Page section pointing to a main field group, plus one
-        // list section per to-many navigation.
-        let mut facets = Collection::new().add_record(
-            Record::new("UI.CollectionFacet")
-                .add(PropertyValue::new("Label").string("General"))
-                .add(PropertyValue::new("ID").string("GeneralSection"))
-                .add(
-                    PropertyValue::new("Facets").collection(
-                        Collection::new().add_record(
-                            Record::new("UI.ReferenceFacet")
-                                .add(PropertyValue::new("Label").string("General"))
-                                .add(
-                                    PropertyValue::new("Target")
-                                        .annotation_path("@UI.FieldGroup#Main"),
-                                ),
-                        ),
-                    ),
-                ),
-        );
-        for record in list_facet_records(x) {
+        // Object-Page-Abschnitte: Feldgruppen und Listen, siehe `object_page_sections`.
+        let (sections, groups) = object_page_sections(x, hidden, app_entities);
+        let mut facets = Collection::new();
+        for record in sections {
             facets = facets.add_record(record);
         }
         main_annotations
             .annotations
             .push(Annotation::new("UI.Facets").collection(facets));
-
-        let main_field_group = prepare_field_group(x, hidden, app_entities);
-        main_annotations.annotations.push(main_field_group);
+        main_annotations.annotations.extend(groups);
 
         annotations.push(main_annotations);
 
@@ -518,6 +502,7 @@ impl Annotations {
                 entity,
                 collection,
                 owned: _,
+                ..
             } => {
                 if !collection {
                     let name = format!("{}_ID", name);
@@ -663,30 +648,135 @@ fn presentation_variant(view_name: &str) -> Annotation {
     ann
 }
 
-/// One top-level `UI.ReferenceFacet` section per to-many navigation, pointing at
-/// the target entity's default `UI.LineItem` for its table columns.
-fn list_facet_records(x: &EntitySpec) -> Vec<Record> {
-    x.fields()
-        .filter_map(|f| match f {
-            FieldSpec::Lookup {
-                name,
-                collection: true,
-                ..
-            } => Some(
-                Record::new("UI.ReferenceFacet")
-                    .add(PropertyValue::new("Label").string(name))
-                    .add(PropertyValue::new("ID").string(format!("{name}Section")))
-                    .add(
-                        PropertyValue::new("Target")
-                            .annotation_path(format!("{name}/@UI.LineItem")),
-                    ),
-            ),
-            _ => None,
-        })
-        .collect()
+/// Identifikator der Allgemein-Facette (Feldabschnitt `Main`).
+pub const GENERAL_FACET: &str = "General";
+/// Identifikator der Sammel-Facette fuer alle nicht genannten Felder.
+pub const DEFAULT_FACET: &str = "Default";
+
+/// Pfad des LineItems fuer eine Navigations-Facette. Ohne Facetten-Einstellung
+/// (oder mit Ansicht `default`) das unqualifizierte LineItem, sonst `#<ansicht>`.
+fn facet_target_path(x: &EntitySpec, nav: &str) -> String {
+    match x.facet(nav).and_then(|f| f.view.as_deref()) {
+        Some(view) if view != spec::ListView::DEFAULT => format!("{nav}/@UI.LineItem#{view}"),
+        _ => format!("{nav}/@UI.LineItem"),
+    }
 }
 
-/// `hidden`: Felder, die aus der Standard-FieldGroup fehlen (z. B. wenn eine Erweiterung sie als eigenen Abschnitt zeigt).
+/// Titel einer Facette: der konfigurierte Titel, sonst der Modelltitel der Navigation,
+/// sonst der Schluessel.
+fn facet_title(x: &EntitySpec, key: &str) -> String {
+    if let Some(title) = x.facet(key).and_then(|f| f.title.clone()) {
+        return title;
+    }
+    x.fields()
+        .find_map(|f| match f {
+            FieldSpec::Lookup { name, label, .. } if name == key => {
+                Some(label.clone().unwrap_or_else(|| name.clone()))
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| key.to_string())
+}
+
+/// Object-Page-Abschnitte einer Entitaet in der Reihenfolge von `EntitySpec.facets`.
+///
+/// * Ohne Konfiguration: `General` (alle Felder), danach je to-many Navigation ein Listenabschnitt.
+/// * `General` ist immer vorhanden. Steht es nicht in `facets`, wird es vorangestellt.
+/// * Navigationen, die nicht konfiguriert sind, folgen am Ende.
+/// * Eigene Schluessel mit `fields` erzeugen eine eigene `UI.FieldGroup#<schluessel>`.
+/// * `Default` sammelt alle Felder, die in keiner Facette genannt sind.
+///
+/// Liefert die Facetten-Records und die zugehoerigen FieldGroups.
+fn object_page_sections(
+    x: &EntitySpec,
+    hidden: &[String],
+    app_entities: &[String],
+) -> (Vec<Record>, Vec<Annotation>) {
+    let navs: Vec<String> = x
+        .fields()
+        .filter_map(|f| match f {
+            FieldSpec::Lookup { name, collection: true, .. } => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
+    let mentioned: Vec<&str> = x
+        .facets()
+        .iter()
+        .flat_map(|f| f.fields.iter().map(String::as_str))
+        .collect();
+    let remainder: Vec<String> = x
+        .fields()
+        .filter(|f| !matches!(f, FieldSpec::Lookup { collection: true, .. }))
+        .filter(|f| !mentioned.contains(&f.name()))
+        .map(|f| f.name().to_string())
+        .collect();
+
+    let configured: Vec<&str> = x.facets().iter().map(|f| f.facet.as_str()).collect();
+    let mut keys: Vec<String> = Vec::new();
+    if !configured.contains(&GENERAL_FACET) {
+        keys.push(GENERAL_FACET.to_string());
+    }
+    keys.extend(configured.iter().map(|k| k.to_string()));
+    for nav in &navs {
+        if !keys.contains(nav) {
+            keys.push(nav.clone());
+        }
+    }
+
+    let mut records = Vec::new();
+    let mut groups = Vec::new();
+    for key in &keys {
+        if navs.contains(key) {
+            records.push(list_facet_record(x, key));
+            continue;
+        }
+        let (selected, qualifier): (Option<Vec<String>>, &str) = if key == GENERAL_FACET {
+            let fields = x.facet(key).map(|f| f.fields.clone()).filter(|f| !f.is_empty());
+            (fields, "Main")
+        } else if key == DEFAULT_FACET {
+            if remainder.is_empty() {
+                continue;
+            }
+            (Some(remainder.clone()), DEFAULT_FACET)
+        } else {
+            (x.facet(key).map(|f| f.fields.clone()), key.as_str())
+        };
+        groups.push(field_group(qualifier, x, selected.as_deref(), hidden, app_entities));
+
+        if key == GENERAL_FACET {
+            records.push(
+                Record::new("UI.CollectionFacet")
+                    .add(PropertyValue::new("Label").string(facet_title(x, key)))
+                    .add(PropertyValue::new("ID").string("GeneralSection"))
+                    .add(PropertyValue::new("Facets").collection(Collection::new().add_record(
+                        Record::new("UI.ReferenceFacet")
+                            .add(PropertyValue::new("Label").string(facet_title(x, key)))
+                            .add(PropertyValue::new("Target").annotation_path("@UI.FieldGroup#Main")),
+                    ))),
+            );
+        } else {
+            records.push(
+                Record::new("UI.ReferenceFacet")
+                    .add(PropertyValue::new("Label").string(facet_title(x, key)))
+                    .add(PropertyValue::new("ID").string(format!("{key}Section")))
+                    .add(
+                        PropertyValue::new("Target")
+                            .annotation_path(format!("@UI.FieldGroup#{qualifier}")),
+                    ),
+            );
+        }
+    }
+    (records, groups)
+}
+
+/// Listenabschnitt (`UI.ReferenceFacet`) fuer eine to-many Navigation.
+fn list_facet_record(x: &EntitySpec, nav: &str) -> Record {
+    Record::new("UI.ReferenceFacet")
+        .add(PropertyValue::new("Label").string(facet_title(x, nav)))
+        .add(PropertyValue::new("ID").string(format!("{nav}Section")))
+        .add(PropertyValue::new("Target").annotation_path(facet_target_path(x, nav)))
+}
+
 /// Einzel-Verweis auf eine App-Entitaet als semantische Verlinkung:
 /// `UI.DataFieldWithIntentBasedNavigation` mit Intent `<Entitaet>-display`,
 /// Parameter `ID` aus dem Fremdschluessel.
@@ -703,51 +793,58 @@ fn lookup_intent_field(name: &str, entity: &str) -> Record {
         )))
 }
 
-fn prepare_field_group(x: &EntitySpec, hidden: &[String], app_entities: &[String]) -> Annotation {
-    let mut main_data = Collection::new();
-    // main_data = main_data
-    //     .add_record(Record::new("UI.DataField")
-    //     .add(PropertyValue::new("Value")
-    //     .path("ID")));
-    for f in x.fields() {
-        match f {
-            FieldSpec::Lookup {
-                name,
-                entity,
-                collection,
-                ..
-            } => {
-                if *collection {
-                } else if x.object_page_hidden().iter().any(|h| h == name) {
-                } else if app_entities.iter().any(|a| a == entity) {
-                    main_data = main_data.add_record(lookup_intent_field(name, entity));
-                } else {
-                    let name = format!("{name}_ID");
-                    main_data = main_data.add_record(
-                        Record::new("UI.DataField").add(PropertyValue::new("Value").path(name)),
-                    )
-                }
-            }
-            FieldSpec::Atom { name, .. } => {
-                if hidden.iter().any(|h| h == name)
-                    || x.object_page_hidden().iter().any(|h| h == name)
-                {
-                    continue;
-                }
-                main_data = main_data.add_record(
+/// FieldGroup mit dem Qualifier `qualifier`. `selected`: Felder in Anzeigereihenfolge,
+/// `None` = alle Felder der Entitaet.
+fn field_group(
+    qualifier: &str,
+    x: &EntitySpec,
+    selected: Option<&[String]>,
+    hidden: &[String],
+    app_entities: &[String],
+) -> Annotation {
+    let fields: Vec<&FieldSpec> = match selected {
+        Some(names) => names
+            .iter()
+            .filter_map(|name| x.fields().find(|f| f.name() == name))
+            .collect(),
+        None => x.fields().collect(),
+    };
+    let mut data = Collection::new();
+    for record in fields
+        .into_iter()
+        .filter_map(|f| field_record(f, hidden, app_entities))
+    {
+        data = data.add_record(record);
+    }
+    let mut ann = Annotation::new("UI.FieldGroup");
+    ann.qualifier = Some(qualifier.to_string());
+    ann.record(Record::new("UI.FieldGroupType").add(PropertyValue::new("Data").collection(data)))
+}
 
-                    Record::new("UI.DataField").add(PropertyValue::new("Value").path(name)),
+/// Ein `UI.DataField` fuer ein Feld. `None` fuer Felder ohne Zeile in der FieldGroup.
+fn field_record(f: &FieldSpec, hidden: &[String], app_entities: &[String]) -> Option<Record> {
+    match f {
+        FieldSpec::Lookup { name, entity, collection, .. } => {
+            if *collection {
+                None
+            } else if app_entities.iter().any(|a| a == entity) {
+                Some(lookup_intent_field(name, entity))
+            } else {
+                Some(
+                    Record::new("UI.DataField")
+                        .add(PropertyValue::new("Value").path(format!("{name}_ID"))),
                 )
             }
-            FieldSpec::Measure { .. } => todo!(),
         }
+        FieldSpec::Atom { name, .. } => {
+            if hidden.iter().any(|h| h == name) {
+                None
+            } else {
+                Some(Record::new("UI.DataField").add(PropertyValue::new("Value").path(name)))
+            }
+        }
+        FieldSpec::Measure { .. } => todo!(),
     }
-    let mut main_field_group = Annotation::new("UI.FieldGroup");
-    main_field_group.qualifier = Some("Main".to_string());
-    main_field_group = main_field_group.record(
-        Record::new("UI.FieldGroupType").add(PropertyValue::new("Data").collection(main_data)),
-    );
-    main_field_group
 }
 
 fn annotations_for_atom_value_list(name: &str, value_list: &AtomValueList) -> Vec<Annotation> {
@@ -1107,6 +1204,7 @@ fn render_info_page(state: &AppState) -> String {
                         entity: target_entity,
                         collection,
                         owned: _,
+                        ..
                     } => {
                         let target_set = ddic
                             .active_entity(target_entity)
@@ -2641,6 +2739,42 @@ mod tests {
     }
 
     #[test]
+    fn facet_target_uses_the_configured_view() {
+        let mut x = EntitySpec::new("Actor", "core", "Actors");
+        assert_eq!(facet_target_path(&x, "_ActorSceneMap"), "_ActorSceneMap/@UI.LineItem");
+        x.facets.push(spec::FacetSpec { facet: "_ActorSceneMap".into(), view: Some("reverse".into()), title: None, fields: vec![] });
+        assert_eq!(
+            facet_target_path(&x, "_ActorSceneMap"),
+            "_ActorSceneMap/@UI.LineItem#reverse"
+        );
+        x.facets[0].view = Some("default".into());
+        assert_eq!(facet_target_path(&x, "_ActorSceneMap"), "_ActorSceneMap/@UI.LineItem");
+    }
+
+    #[test]
+    fn facet_title_prefers_the_model_label_of_the_navigation() {
+        let mut x = EntitySpec::new("Actor", "core", "Actors");
+        x.fields.push(FieldSpec::Lookup {
+            name: "_ActorSceneMap".into(),
+            entity: "ActorSceneMap".into(),
+            collection: true,
+            owned: false,
+            label: Some("Scene assignments".into()),
+        });
+        assert_eq!(facet_title(&x, "_ActorSceneMap"), "Scene assignments");
+        x.facets.push(spec::FacetSpec { facet: "_ActorSceneMap".into(), view: None, title: Some("Szenen".into()), fields: vec![] });
+        assert_eq!(facet_title(&x, "_ActorSceneMap"), "Szenen");
+    }
+
+    #[test]
+    fn facet_title_defaults_to_the_navigation_name() {
+        let mut x = EntitySpec::new("Actor", "core", "Actors");
+        assert_eq!(facet_title(&x, "_ActorSceneMap"), "_ActorSceneMap");
+        x.facets.push(spec::FacetSpec { facet: "_ActorSceneMap".into(), view: None, title: Some("Szenen".into()), fields: vec![] });
+        assert_eq!(facet_title(&x, "_ActorSceneMap"), "Szenen");
+    }
+
+    #[test]
     fn facets_include_a_list_section_per_to_many_navigation() {
         let mut ddic = DataDictionary::new();
         ddic.activate();
@@ -2943,18 +3077,39 @@ mod list_view_annotation_tests {
     }
 
     #[test]
-    fn object_page_hidden_removes_field_only_from_the_object_page() {
+    fn general_facet_with_fields_restricts_the_main_group() {
         let mut e = active_video(vec![]);
-        e.object_page_hidden = vec!["title".into()];
+        e.facets.push(spec::FacetSpec { facet: "General".into(), view: None, title: None, fields: vec!["name".into()] });
+        let (_, groups) = object_page_sections(&e, &[], &[]);
+        let main = serde_json::to_string(&groups[0]).unwrap();
+        assert!(main.contains("\"name\""));
+        assert!(!main.contains("\"title\""));
+    }
 
-        let fg = serde_json::to_string(&prepare_field_group(&e, &[], &[])).unwrap();
-        assert!(fg.contains("\"name\""), "name bleibt in der ObjectPage");
-        assert!(!fg.contains("\"title\""), "title ist ausgeblendet");
+    #[test]
+    fn default_facet_collects_unmentioned_fields() {
+        let mut e = active_video(vec![]);
+        e.facets.push(spec::FacetSpec { facet: "General".into(), view: None, title: None, fields: vec!["name".into()] });
+        e.facets.push(spec::FacetSpec { facet: "Default".into(), view: None, title: Some("Weitere".into()), fields: vec![] });
+        let (records, groups) = object_page_sections(&e, &[], &[]);
+        let rest = groups.iter().find(|g| g.qualifier.as_deref() == Some("Default")).unwrap();
+        let rest = serde_json::to_string(rest).unwrap();
+        assert!(rest.contains("\"title\""));
+        assert!(!rest.contains("\"name\""), "genannte Felder stehen nicht in Default");
+        let default_ref = serde_json::to_string(&records).unwrap();
+        assert!(default_ref.contains("Weitere"));
+    }
 
-        // Listen und Entitaetsfelder bleiben unberuehrt.
-        assert!(e.fields().any(|f| f.name() == "title"));
-        let anns = line_item_annotations(&e);
-        assert_eq!(datafield_paths(&anns[0]), vec!["name"]);
+    #[test]
+    fn custom_facet_gets_its_own_field_group() {
+        let mut e = active_video(vec![]);
+        e.facets.push(spec::FacetSpec { facet: "Meta".into(), view: None, title: Some("Meta".into()), fields: vec!["title".into()] });
+        let (_, groups) = object_page_sections(&e, &[], &[]);
+        let meta = groups.iter().find(|g| g.qualifier.as_deref() == Some("Meta")).unwrap();
+        assert!(serde_json::to_string(meta).unwrap().contains("\"title\""));
+        // Ohne General-Konfiguration bleibt der Hauptabschnitt mit allen Feldern erhalten.
+        let main = groups.iter().find(|g| g.qualifier.as_deref() == Some("Main")).unwrap();
+        assert!(serde_json::to_string(main).unwrap().contains("\"name\""));
     }
 
     #[test]

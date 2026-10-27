@@ -238,10 +238,14 @@ separaten Datei, die die Runtime optional einliest:
 * Regeln (Merge in `fiori-server/src/overlay.rs`):
   * `package`, `type_name_plural`: überschreiben die Basis.
   * `list_views`: je Ansicht per `name`. Gleichnamige ersetzen die Basis, neue werden angehängt.
-  * `object_page_hidden`: Feldnamen, die nur aus der ObjectPage-FieldGroup entfernt werden.
-    Listen und das OData-Modell bleiben unberührt. Die Liste wird vereinigt, ein Overlay kann
-    also nur ausblenden.
-  * Unbekannte Entitäten, Pakete, Felder in `object_page_hidden` sowie unbekannte Schlüssel
+  * `facets`: Object-Page-Abschnitte, identifiziert über `facet`. Felder: `view`, `title`, `fields`.
+    * `General`: Feldabschnitt `Main`. Mit `fields` nur diese Felder, sonst alle Felder. Erlaubt: `title`, `fields`.
+    * `Default`: sammelt alle Felder, die in keiner Facette genannt sind. Erlaubt nur `title`.
+    * Navigation (to-many, z. B. `_ActorSceneMap`): Listenabschnitt. Erlaubt: `view` (Listenansicht der Zielentität), `title`.
+    * Eigener Schlüssel: eigener Feldabschnitt mit `fields` in der angegebenen Reihenfolge. Erlaubt: `title`, `fields`.
+    * Titel ohne Angabe ist der Schlüssel. Feldtitel kommen aus dem Modell (`Common.Label`).
+    * Ein Feld darf in mehreren Facetten stehen. Die Reihenfolge der Liste bestimmt die Reihenfolge der Abschnitte.
+  * Unbekannte Entitäten, Pakete, Felder in `facets` sowie unbekannte Schlüssel
     (z. B. Tippfehler) führen zum Startfehler.
   * `filter_defaults`: Feldname -> Standardwert für die Filterleiste (`Common.FilterDefaultValue`).
     Nur Atom-Felder, Werte als Text oder `true`/`false`. Zahlen und Datumswerte sind nicht
@@ -258,7 +262,10 @@ separaten Datei, die die Runtime optional einliest:
       "list_views": [
         { "name": "default", "columns": ["name", "file_size", "scene", "agent"] }
       ],
-      "object_page_hidden": ["file_size"]
+      "facets": [
+        { "facet": "General", "fields": ["name", "scene", "agent"] },
+        { "facet": "Default", "title": "Weitere Angaben" }
+      ]
     }
   ]
 }

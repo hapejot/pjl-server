@@ -14,6 +14,7 @@
       "list_views": [ { "name": "default", "columns": ["name", "is_online", "mount_path"] } ]
     } ,
     { "name": "SceneTagMap", "list_views": [ {"name":"default", "columns": ["tag"]} ] },
+    { "name": "Actor", "facets": [ {"facet": "General", "title": "Allgemein"},{ "facet": "_ActorSceneMap", "view": "reverse", "title": "Szenen" } ] },
     { "name": "ActorSceneMap", "list_views": [ {"name":"default", "columns": ["actor"]},{"name":"reverse", "columns": ["scene"]} ] }
   ]
 }

@@ -180,6 +180,8 @@ pub fn build_model(catalog: &PgCatalog) -> anyhow::Result<Model> {
         let mut rel = Relationship::new(format!("{}_{}", fk.child, fk.child_col), PACKAGE)
             .with_one(&parent.entity, collection_nav(&child.table))
             .with_many(&child.entity, nav_name(&fk.child_col));
+        rel.one_label = Some(human_label(&child.table));
+        rel.many_label = Some(human_label(&nav_name(&fk.child_col)));
         if composition {
             rel = rel.owned();
         }
@@ -511,10 +513,31 @@ fn atom_for(col: &PgColumn) -> AtomMap {
     }
 }
 
+/// Lesbarer Feldtitel aus dem technischen Namen: `file_size` -> `File size`,
+/// `legacy_id` -> `Legacy ID`. Bekannte Kürzel bleiben groß.
+pub fn human_label(name: &str) -> String {
+    let words: Vec<String> = name
+        .split('_')
+        .filter(|w| !w.is_empty())
+        .map(|w| match w {
+            "id" => "ID".to_string(),
+            "url" => "URL".to_string(),
+            "uuid" => "UUID".to_string(),
+            other => other.to_string(),
+        })
+        .collect();
+    let text = words.join(" ");
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => text,
+    }
+}
+
 fn atom_field(atom: &AtomMap) -> FieldSpec {
     FieldSpec::Atom {
         name: atom.name.clone(),
-        label: atom.name.clone(),
+        label: human_label(&atom.name),
         edm_type: atom.edm.clone(),
         package: None,
         max_length: atom.max_length,

@@ -95,6 +95,12 @@ pub struct Relationship {
     pub owned: bool,
     /// Logical package grouping (e.g. "itil", "asset_management").
     pub package: String,
+    /// Lesbarer Titel der Sammelnavigation auf der "one"-Seite (z. B. "Video tags").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub one_label: Option<String>,
+    /// Lesbarer Titel der Einzelnavigation auf der "many"-Seite (z. B. "Video").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub many_label: Option<String>,
 }
 
 impl Relationship {
@@ -107,6 +113,8 @@ impl Relationship {
             many: None,
             many_property: None,
             owned: false,
+            one_label: None,
+            many_label: None,
         }
     }
 

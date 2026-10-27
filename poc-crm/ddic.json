@@ -3,31 +3,31 @@
     {"name": "crm"}
   ],
   "entities": [
-    {"name": "Account", "package": "crm", "type_name_plural": "Accounts", "fields": [
+    {"name": "Account", "package": "crm", "type_name": "Firma", "type_name_plural": "Firmen", "fields": [
         {"Atom": {"name": "name", "label": "Name", "edm_type": "Edm.String", "max_length": 255}},
-        {"Atom": {"name": "industry", "label": "Industry", "edm_type": "Edm.String", "max_length": 100}},
-        {"Atom": {"name": "city", "label": "City", "edm_type": "Edm.String", "max_length": 100}},
-        {"Atom": {"name": "website", "label": "Website", "edm_type": "Edm.String", "max_length": 255}}
+        {"Atom": {"name": "industry", "label": "Branche", "edm_type": "Edm.String", "max_length": 100}},
+        {"Atom": {"name": "city", "label": "Stadt", "edm_type": "Edm.String", "max_length": 100}},
+        {"Atom": {"name": "website", "label": "Website", "edm_type": "Edm.String", "max_length": 255, "link": true}}
       ]},
-    {"name": "Contact", "package": "crm", "type_name_plural": "Contacts", "fields": [
+    {"name": "Contact", "package": "crm", "type_name": "Kontakt", "type_name_plural": "Kontakte", "fields": [
         {"Atom": {"name": "name", "label": "Name", "edm_type": "Edm.String", "max_length": 255}},
         {"Atom": {"name": "email", "label": "E-Mail", "edm_type": "Edm.String", "max_length": 255}},
-        {"Atom": {"name": "phone", "label": "Phone", "edm_type": "Edm.String", "max_length": 50}}
+        {"Atom": {"name": "phone", "label": "Telefon", "edm_type": "Edm.String", "max_length": 50}}
       ]},
-    {"name": "Opportunity", "package": "crm", "type_name_plural": "Opportunities", "fields": [
+    {"name": "Opportunity", "package": "crm", "type_name": "Verkaufschance", "type_name_plural": "Verkaufschancen", "fields": [
         {"Atom": {"name": "name", "label": "Name", "edm_type": "Edm.String", "max_length": 255}},
-        {"Atom": {"name": "stage", "label": "Stage", "edm_type": "Edm.String", "max_length": 50}},
-        {"Atom": {"name": "amount", "label": "Amount", "edm_type": "Edm.Decimal", "precision": 15, "scale": 2}},
-        {"Atom": {"name": "close_date", "label": "Close date", "edm_type": "Edm.Date"}}
+        {"Atom": {"name": "stage", "label": "Phase", "edm_type": "Edm.String", "max_length": 50}},
+        {"Atom": {"name": "amount", "label": "Betrag", "edm_type": "Edm.Decimal", "precision": 15, "scale": 2}},
+        {"Atom": {"name": "close_date", "label": "Abschlussdatum", "edm_type": "Edm.Date"}}
       ]}
   ],
   "relationships": [
-    {"name": "contact_account_id", "one": "Account", "one_field": "_Contacts", "many": "Contact", "many_property": "account", "package": "crm", "one_label": "Contacts", "many_label": "Account"},
-    {"name": "opportunity_account_id", "one": "Account", "one_field": "_Opportunities", "many": "Opportunity", "many_property": "account", "package": "crm", "one_label": "Opportunities", "many_label": "Account"}
+    {"name": "contact_account_id", "one": "Account", "one_field": "_Contacts", "many": "Contact", "many_property": "account", "package": "crm", "one_label": "Kontakte", "many_label": "Firma"},
+    {"name": "opportunity_account_id", "one": "Account", "one_field": "_Opportunities", "many": "Opportunity", "many_property": "account", "package": "crm", "one_label": "Verkaufschancen", "many_label": "Firma"}
   ],
   "apps": [
-    {"name": "accounts", "title": "Accounts", "main_entity": "Account", "subtitle": "Alle Kunden", "package": {"name": "crm"}},
-    {"name": "contacts", "title": "Contacts", "main_entity": "Contact", "subtitle": "Ansprechpartner", "package": {"name": "crm"}},
-    {"name": "opportunities", "title": "Opportunities", "main_entity": "Opportunity", "subtitle": "Verkaufschancen", "package": {"name": "crm"}}
+    {"name": "accounts", "title": "Firmen", "main_entity": "Account", "subtitle": "Alle Kunden", "package": {"name": "crm"}},
+    {"name": "contacts", "title": "Kontakte", "main_entity": "Contact", "subtitle": "Ansprechpartner", "package": {"name": "crm"}},
+    {"name": "opportunities", "title": "Verkaufschancen", "main_entity": "Opportunity", "subtitle": "Verkaufschancen", "package": {"name": "crm"}}
   ]
 }

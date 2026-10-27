@@ -1,0 +1,240 @@
+{
+  "packages": [
+    {
+      "name": "crm"
+    }
+  ],
+  "entities": [
+    {
+      "name": "Account",
+      "package": "crm",
+      "type_name_plural": "Accounts",
+      "fields": [
+        {
+          "Atom": {
+            "name": "name",
+            "label": "Name",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": 255,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "name": "industry",
+            "label": "Industry",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": 100,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "name": "city",
+            "label": "City",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": 100,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "name": "website",
+            "label": "Website",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": 255,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "Contact",
+      "package": "crm",
+      "type_name_plural": "Contacts",
+      "fields": [
+        {
+          "Atom": {
+            "name": "name",
+            "label": "Name",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": 255,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "name": "email",
+            "label": "E-Mail",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": 255,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "name": "phone",
+            "label": "Phone",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": 50,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "Opportunity",
+      "package": "crm",
+      "type_name_plural": "Opportunities",
+      "fields": [
+        {
+          "Atom": {
+            "name": "name",
+            "label": "Name",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": 255,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "name": "stage",
+            "label": "Stage",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": 50,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "name": "amount",
+            "label": "Amount",
+            "edm_type": "Edm.Decimal",
+            "package": null,
+            "max_length": null,
+            "precision": 15,
+            "scale": 2,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "name": "close_date",
+            "label": "Close date",
+            "edm_type": "Edm.Date",
+            "package": null,
+            "max_length": null,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "name": "contact_account_id",
+      "one": "Account",
+      "one_field": "_Contacts",
+      "many": "Contact",
+      "many_property": "account",
+      "owned": false,
+      "package": "crm",
+      "one_label": "Contacts",
+      "many_label": "Account"
+    },
+    {
+      "name": "opportunity_account_id",
+      "one": "Account",
+      "one_field": "_Opportunities",
+      "many": "Opportunity",
+      "many_property": "account",
+      "owned": false,
+      "package": "crm",
+      "one_label": "Opportunities",
+      "many_label": "Account"
+    }
+  ],
+  "apps": [
+    {
+      "name": "accounts",
+      "title": "Accounts",
+      "main_entity": "Account",
+      "subtitle": "Alle Kunden",
+      "icon": null,
+      "package": {
+        "name": "crm"
+      }
+    },
+    {
+      "name": "contacts",
+      "title": "Contacts",
+      "main_entity": "Contact",
+      "subtitle": "Ansprechpartner",
+      "icon": null,
+      "package": {
+        "name": "crm"
+      }
+    },
+    {
+      "name": "opportunities",
+      "title": "Opportunities",
+      "main_entity": "Opportunity",
+      "subtitle": "Verkaufschancen",
+      "icon": null,
+      "package": {
+        "name": "crm"
+      }
+    }
+  ]
+}

@@ -91,10 +91,13 @@ async fn site(State(_state): State<AppState>) -> Json<Value> {
             },
             "vizConfig": {
                 "sap.app": {
-                    "icon": icon_of(app),
                     "info": "",
                     "subTitle": subtitle_of(app),
                     "title": app.title()
+                },
+                // Die Kachel liest das Icon aus `sap.ui.icons.icon` (CDM-Adapter), nicht aus `sap.app`.
+                "sap.ui": {
+                    "icons": { "icon": icon_of(app) }
                 },
                 "sap.flp": {
                     "target": {

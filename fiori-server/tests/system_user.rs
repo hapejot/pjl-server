@@ -76,10 +76,10 @@ async fn default_user_exists_with_fixed_id() {
     let all = users(&env.store).await;
     let default = all
         .iter()
-        .find(|u| u["Username"] == "none@localhost")
+        .find(|u| u["name"] == "none@localhost")
         .expect("default user");
     assert_eq!(default["ID"], json!(default_user_id().to_string()));
-    assert_eq!(default["Active"], json!(true));
+    assert_eq!(default["active"], json!(true));
 }
 
 #[tokio::test]
@@ -117,10 +117,10 @@ async fn unknown_header_user_is_created_once_and_becomes_owner() {
     let created: Vec<_> = users(&env.store)
         .await
         .into_iter()
-        .filter(|u| u["Username"] == "peter@example.org")
+        .filter(|u| u["name"] == "peter@example.org")
         .collect();
     assert_eq!(created.len(), 1, "user must not be created twice");
-    assert_eq!(created[0]["Active"], json!(true));
+    assert_eq!(created[0]["active"], json!(true));
     assert_eq!(json!(created[0]["ID"]), owner);
 }
 
@@ -170,14 +170,14 @@ async fn inactive_user_is_forbidden() {
     let user_id = users(&env.store)
         .await
         .into_iter()
-        .find(|u| u["Username"] == "ina@example.org")
+        .find(|u| u["name"] == "ina@example.org")
         .map(|u| u["ID"].as_str().unwrap().parse().unwrap())
         .unwrap();
     env.store
         .patch_entity(
             SYSTEM_USER_SET,
             &EntityKey::new(user_id, true),
-            &json!({"Active": false}),
+            &json!({"active": false}),
         )
         .await
         .unwrap();
@@ -204,7 +204,7 @@ async fn duplicate_username_is_rejected() {
     .unwrap();
     let err = env
         .store
-        .create_entity(SYSTEM_USER_SET, &json!({"Username": "dup@example.org", "Active": true}))
+        .create_entity(SYSTEM_USER_SET, &json!({"name": "dup@example.org", "active": true}))
         .await
         .unwrap_err();
     assert!(matches!(err, StoreError::Conflict(_)), "{err:?}");
@@ -216,7 +216,7 @@ async fn default_user_cannot_be_deactivated_or_deleted_and_users_are_not_deleted
     let default_key = EntityKey::new(default_user_id(), true);
     let err = env
         .store
-        .patch_entity(SYSTEM_USER_SET, &default_key, &json!({"Active": false}))
+        .patch_entity(SYSTEM_USER_SET, &default_key, &json!({"active": false}))
         .await
         .unwrap_err();
     assert!(matches!(err, StoreError::Forbidden(_)), "{err:?}");
@@ -236,7 +236,7 @@ async fn ensure_default_user_is_idempotent() {
     let count = users(&env.store)
         .await
         .into_iter()
-        .filter(|u| u["Username"] == "none@localhost")
+        .filter(|u| u["name"] == "none@localhost")
         .count();
     assert_eq!(count, 1);
 }

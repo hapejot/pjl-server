@@ -12,9 +12,9 @@ pub const SYSTEM_USER: &str = "SystemUser";
 pub const SYSTEM_USER_SET: &str = "SystemUserSet";
 pub const PACKAGE: &str = "core";
 
-pub const USERNAME: &str = "Username";
-pub const NAME: &str = "Name";
-pub const ACTIVE: &str = "Active";
+pub const USERNAME: &str = "name";
+pub const NAME: &str = "fullname";
+pub const ACTIVE: &str = "active";
 
 pub const OWNER: &str = "Owner";
 pub const CREATED_BY: &str = "CreatedBy";

@@ -233,8 +233,8 @@ impl DataDictionary {
         self.add_package(Package::new(su::PACKAGE));
 
         let user_fields = [
-            FieldSpec::string(su::USERNAME, "Username", 255),
-            FieldSpec::string(su::NAME, "Name", 255),
+            FieldSpec::string(su::USERNAME, "Name", 255),
+            FieldSpec::string(su::NAME, "Full Name", 255),
             FieldSpec::bool_field(su::ACTIVE, "Active"),
         ];
         match self.entities.iter_mut().find(|e| e.name == su::SYSTEM_USER) {

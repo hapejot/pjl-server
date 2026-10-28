@@ -12,6 +12,7 @@ pub mod ddic_loader;
 pub mod extension;
 pub mod flp;
 pub mod hook;
+pub mod system_user;
 pub mod overlay;
 pub mod script;
 pub mod server;

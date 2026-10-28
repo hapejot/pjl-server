@@ -224,15 +224,21 @@ pub fn index_statements(set: &EntitySet) -> Vec<String> {
         .collect()
 }
 
-/// Nachtraeglich ergaenzte Spalten sind immer NULL-bar: fuer NOT NULL
-/// braeuchte es einen Default, und den kann das Schema nicht nachliefern,
-/// ohne ueber die bestehenden Zeilen zu entscheiden.
-pub fn add_column_sql(table: &str, column: &str, column_type: &str) -> String {
+/// Nachtraeglich ergaenzte Spalten sind NULL-bar. Hat die Spalte einen Default
+/// im Schema, bekommen bestehende Zeilen diesen Wert.
+pub fn add_column_sql(
+    table: &str,
+    column: &str,
+    column_type: &str,
+    default: Option<&str>,
+) -> String {
+    let default = default.map(|d| format!(" DEFAULT {d}")).unwrap_or_default();
     format!(
-        "ALTER TABLE {} ADD COLUMN {} {}",
+        "ALTER TABLE {} ADD COLUMN {} {}{}",
         quote(table),
         quote(column),
-        column_type
+        column_type,
+        default
     )
 }
 
@@ -301,7 +307,13 @@ pub async fn migration_plan(
                     continue;
                 }
                 info!("Migration: {}.{} wird ergaenzt", set.name, name);
-                plan.push(add_column_sql(&set.name, &name, &ty));
+                // Bestehende Zeilen bekommen den DEFAULT der Spalte (z. B. Default User).
+                let default = set
+                    .columns()
+                    .find(|c| c.name == name)
+                    .and_then(|c| c.default.as_ref())
+                    .map(|v| literal(dialect, v));
+                plan.push(add_column_sql(&set.name, &name, &ty, default.as_deref()));
             }
         } else {
             plan.push(create_table_sql(dialect, schema, set)?);
@@ -468,5 +480,22 @@ mod tests {
         );
         let orders = create_table_sql(&SQLITE, &schema, schema.set("OrderSet").unwrap()).unwrap();
         assert!(!orders.contains("Customer_ID\") REFERENCES"), "{orders}");
+    }
+}
+
+#[cfg(test)]
+mod add_column_default_tests {
+    use super::*;
+
+    #[test]
+    fn added_column_carries_default_when_given() {
+        let sql = add_column_sql("T", "Owner_ID", "TEXT", Some("'abc'"));
+        assert_eq!(sql, "ALTER TABLE \"T\" ADD COLUMN \"Owner_ID\" TEXT DEFAULT 'abc'");
+    }
+
+    #[test]
+    fn added_column_without_default_stays_plain() {
+        let sql = add_column_sql("T", "Note", "TEXT", None);
+        assert_eq!(sql, "ALTER TABLE \"T\" ADD COLUMN \"Note\" TEXT");
     }
 }

@@ -163,7 +163,13 @@ fn entity_set(
             // to-one: der Fremdschluessel liegt im eigenen Set.
             let column = format!("{name}{ID_SUFFIX}");
             if !set.has_column(&column) {
-                set = set.column(Column::foreign_key(&column, &target_set));
+                let mut fk = Column::foreign_key(&column, &target_set);
+                // Verweise auf Benutzer zeigen im Zweifel auf den Default User; das
+                // ist zugleich der DEFAULT fuer Spalten, die nachtraeglich entstehen.
+                if target.as_str() == spec::system_user::SYSTEM_USER {
+                    fk.default = Some(serde_json::json!(spec::system_user::default_user_id().to_string()));
+                }
+                set = set.column(fk);
             }
             set = set.association(Association {
                 name: name.clone(),

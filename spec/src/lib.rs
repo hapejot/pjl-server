@@ -10,6 +10,7 @@ pub mod package;
 
 pub mod app;
 pub mod value_list;
+pub mod system_user;
 pub use entity_spec::*;
 pub use value_list::{ValueEntry, ValueList};
 pub use relationship::*;

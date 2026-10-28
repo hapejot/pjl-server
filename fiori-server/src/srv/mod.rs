@@ -1592,6 +1592,11 @@ impl ODataError {
                 message: msg,
             },
             StoreError::PropertyNotFound(_) => Self::bad_request(e.to_string()),
+            StoreError::Forbidden(msg) => Self {
+                status: StatusCode::FORBIDDEN,
+                code: "Forbidden",
+                message: msg,
+            },
             _ => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 code: "InternalError",

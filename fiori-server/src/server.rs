@@ -64,6 +64,20 @@ pub async fn run_with(
         let schema_source = schema_source(&config, &base)?;
         open_store(&config, schema_source).await?
     };
+    // Benutzerverwaltung: Default User sicherstellen und den Akteur-Hook
+    // innerhalb aller anderen Hooks legen (siehe `system_user`).
+    let inner = if config.designer {
+        inner
+    } else {
+        crate::system_user::ensure_default_user(inner.as_ref())
+            .await
+            .context("cannot prepare default user")?;
+        let audited = base.entities().iter().map(|e| e.setname()).collect();
+        Extender::new(
+            inner,
+            Arc::new(crate::system_user::SystemUserHook::new(audited)),
+        )?
+    };
     let store = wrap_store(inner, &extensions)?;
 
     if !config.designer {
@@ -188,8 +202,10 @@ fn load_dictionary(config: &ServerConfig) -> anyhow::Result<DataDictionary> {
                 )
             })?;
             info!("loading ddic from {}", path.display());
-            let ddic: DataDictionary = serde_json::from_reader(std::io::BufReader::new(file))
+            let mut ddic: DataDictionary = serde_json::from_reader(std::io::BufReader::new(file))
                 .with_context(|| format!("'{}' is not a valid data dictionary", path.display()))?;
+            // Benutzerverwaltung direkt nach dem Einlesen (nur im Speicher).
+            ddic.inject_system_user();
             let ddic = match &config.ddic_overlay {
                 Some(path) => {
                     info!("applying ddic overlay {}", path.display());

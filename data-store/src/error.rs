@@ -28,6 +28,9 @@ pub enum StoreError {
     #[error("Conflict: {0}")]
     Conflict(String),
 
+    #[error("Forbidden: {0}")]
+    Forbidden(String),
+
     #[error("Property not Found {0}")]
     PropertyNotFound(String),
 

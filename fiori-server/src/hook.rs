@@ -71,6 +71,18 @@ pub trait Hook: Send + Sync {
         Ok(())
     }
 
+    /// Patch mit bekanntem Schluessel. Standard: wie [`Hook::before`] mit `Operation::Patch`.
+    async fn before_patch(
+        &self,
+        store: &Extender,
+        set_name: &str,
+        key: &EntityKey,
+        patch: &mut Value,
+    ) -> Result<(), HookError> {
+        let _ = key;
+        self.before(store, set_name, Operation::Patch, patch).await
+    }
+
     /// Lesezugriff, einmal pro Request, vor dem Store. `key` ist gesetzt bei
     /// Einzelzugriff, `None` bei Listen. Die Query darf ergaenzt oder reduziert werden.
     async fn before_read(
@@ -140,6 +152,12 @@ impl Extender {
             hook,
             navigation: Navigation::default(),
         }
+    }
+
+    /// Darunterliegender Store (ohne diesen Hook). Fuer Hooks, die selbst lesen
+    /// oder schreiben muessen, ohne sich rekursiv aufzurufen.
+    pub(crate) fn raw(&self) -> &Arc<dyn DraftDataStore> {
+        &self.inner
     }
 
     /// JSON-Key-Payload für `before`-Hooks.
@@ -293,7 +311,7 @@ impl DataStore for Extender {
     ) -> Result<Value, StoreError> {
         let mut value = patch.clone();
         self.hook
-            .before(self, set_name, Operation::Patch, &mut value)
+            .before_patch(self, set_name, key, &mut value)
             .await?;
         let result = self.inner.patch_entity(set_name, key, &value).await?;
         let mut record = self
@@ -340,7 +358,13 @@ impl DataStore for Extender {
                 WriteOp::Patch(key, patch) => (Operation::Patch, patch, Some(key)),
                 WriteOp::Delete(key) => (Operation::Delete, Self::key_value(&key), Some(key)),
             };
-            if let Err(e) = self.hook.before(self, set_name, kind, &mut value).await {
+            let before = match (kind, &key) {
+                (Operation::Patch, Some(k)) => {
+                    self.hook.before_patch(self, set_name, k, &mut value).await
+                }
+                _ => self.hook.before(self, set_name, kind, &mut value).await,
+            };
+            if let Err(e) = before {
                 results[i] = Some(Err(e.into()));
                 continue;
             }

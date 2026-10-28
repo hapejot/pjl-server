@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::system_user;
 use crate::value_list::{self, ValueList, ITEMS_ENTITY};
 use crate::{EntitySpec, FieldSpec, Relationship, app::App, package::Package};
 use tracing::*;
@@ -207,15 +208,67 @@ impl DataDictionary {
         if self.value_lists.is_empty() {
             return Vec::new();
         }
-        vec![
-            EntitySpec::new(ITEMS_ENTITY, "core", "FieldValueListItems")
-                // `name` ist Titel und Listenspalte; es traegt die Bezeichnung.
-                .field(FieldSpec::atom("name", "Bezeichnung", "Edm.String"))
-                .field(FieldSpec::atom("ListID", "Liste", "Edm.String"))
-                .field(FieldSpec::atom("value", "Wert", "Edm.String"))
-                .field(FieldSpec::atom("label", "Bezeichnung", "Edm.String"))
-                .field(FieldSpec::atom("sort", "Sortierung", "Edm.Int64")),
-        ]
+        let mut items = EntitySpec::new(ITEMS_ENTITY, "core", "FieldValueListItems")
+            // `name` ist Titel und Listenspalte; es traegt die Bezeichnung.
+            .field(FieldSpec::atom("name", "Bezeichnung", "Edm.String"))
+            .field(FieldSpec::atom("ListID", "Liste", "Edm.String"))
+            .field(FieldSpec::atom("value", "Wert", "Edm.String"))
+            .field(FieldSpec::atom("label", "Bezeichnung", "Edm.String"))
+            .field(FieldSpec::atom("sort", "Sortierung", "Edm.Int64"));
+        for field in system_user::audit_fields() {
+            items = items.field(field);
+        }
+        vec![items]
+    }
+
+    /// Ergaenzt das Dictionary um die Benutzerverwaltung: Entitaet `SystemUser`,
+    /// Audit-Felder (`Owner`, `CreatedBy`, `ChangedBy`, `CreatedAt`, `ChangedAt`)
+    /// auf jeder Entitaet und die App fuer `SystemUser`.
+    ///
+    /// Idempotent. Eine in der Datei deklarierte `SystemUser` wird ergaenzt;
+    /// gleichnamige Felder werden durch die Vorgabe ersetzt. Nur im Speicher.
+    pub fn inject_system_user(&mut self) {
+        use crate::system_user as su;
+
+        self.add_package(Package::new(su::PACKAGE));
+
+        let user_fields = [
+            FieldSpec::string(su::USERNAME, "Username", 255),
+            FieldSpec::string(su::NAME, "Name", 255),
+            FieldSpec::bool_field(su::ACTIVE, "Active"),
+        ];
+        match self.entities.iter_mut().find(|e| e.name == su::SYSTEM_USER) {
+            Some(entity) => {
+                for field in user_fields {
+                    replace_field(&mut entity.fields, field);
+                }
+            }
+            None => {
+                let mut entity =
+                    EntitySpec::new(su::SYSTEM_USER, su::PACKAGE, "System Users");
+                for field in user_fields {
+                    entity = entity.field(field);
+                }
+                self.entities.push(entity);
+            }
+        }
+
+        for entity in self.entities.iter_mut() {
+            for field in su::audit_fields() {
+                replace_field(&mut entity.fields, field);
+            }
+        }
+
+        if !self.apps.iter().any(|a| a.name() == "systemusers") {
+            self.apps.push(App::new(
+                "systemusers".into(),
+                "System Users".into(),
+                su::SYSTEM_USER.into(),
+                Some("Maintain System Users".into()),
+                Some("sap-icon://person-placeholder".into()),
+                Package::new(su::PACKAGE),
+            ));
+        }
     }
 
     pub fn entities(&self) -> Vec<EntitySpec> {
@@ -597,6 +650,12 @@ mod tests {
             Some("entity"),
         );
     }
+}
+
+/// Ersetzt ein gleichnamiges Feld oder haengt es an.
+fn replace_field(fields: &mut Vec<FieldSpec>, field: FieldSpec) {
+    fields.retain(|f| f.name() != field.name());
+    fields.push(field);
 }
 
 /// Prueft eine Listenspalte `col` der Entitaet `entity` (aktivierter Stand).

@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::system_user;
 use crate::value_list::{self, ValueList, ITEMS_ENTITY};
 use crate::{EntitySpec, FieldSpec, Relationship, app::App, package::Package};
 use tracing::*;
@@ -60,9 +59,11 @@ impl DataDictionary {
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
             .field(FieldSpec::atom("value", "Value", "Edm.String"))
             .field(FieldSpec::atom("label", "Label", "Edm.String"))
-            .field(FieldSpec::atom("sort", "Sort", "Edm.Int64"));
+            .field(FieldSpec::atom("sort", "Sort", "Edm.Int64"))
+            .without_audit();
         let value_list_ent = EntitySpec::new("ValueList", core.name(), "Value Lists")
-            .field(FieldSpec::atom("name", "Name", "Edm.String"));
+            .field(FieldSpec::atom("name", "Name", "Edm.String"))
+            .without_audit();
         // .field(FieldSpec::atom("package", "Package", "Edm.Guid"));
 
         let package_ent = EntitySpec::new("Package", core.name(), "Packages")
@@ -208,17 +209,14 @@ impl DataDictionary {
         if self.value_lists.is_empty() {
             return Vec::new();
         }
-        let mut items = EntitySpec::new(ITEMS_ENTITY, "core", "FieldValueListItems")
+        let items = EntitySpec::new(ITEMS_ENTITY, "core", "FieldValueListItems")
             // `name` ist Titel und Listenspalte; es traegt die Bezeichnung.
             .field(FieldSpec::atom("name", "Bezeichnung", "Edm.String"))
             .field(FieldSpec::atom("ListID", "Liste", "Edm.String"))
             .field(FieldSpec::atom("value", "Wert", "Edm.String"))
             .field(FieldSpec::atom("label", "Bezeichnung", "Edm.String"))
             .field(FieldSpec::atom("sort", "Sortierung", "Edm.Int64"));
-        for field in system_user::audit_fields() {
-            items = items.field(field);
-        }
-        vec![items]
+        vec![items.without_audit()]
     }
 
     /// Ergaenzt das Dictionary um die Benutzerverwaltung: Entitaet `SystemUser`,
@@ -253,7 +251,7 @@ impl DataDictionary {
             }
         }
 
-        for entity in self.entities.iter_mut() {
+        for entity in self.entities.iter_mut().filter(|e| e.is_audited()) {
             for field in su::audit_fields() {
                 replace_field(&mut entity.fields, field);
             }

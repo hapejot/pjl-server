@@ -372,6 +372,19 @@ pub struct EntitySpec {
     /// Fehlt ein Eintrag, gelten die Standardwerte.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub facets: Vec<FacetSpec>,
+
+    /// Auditierung (Owner, CreatedBy/At, ChangedBy/At). Standard: `true`.
+    /// `false` fuer Entitaeten wie Festwerte, die keinen Owner brauchen.
+    #[serde(default = "default_audited", skip_serializing_if = "is_true")]
+    pub audited: bool,
+}
+
+fn default_audited() -> bool {
+    true
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
 }
 
 /// Einstellungen fuer eine Object-Page-Facette, identifiziert ueber `facet`.
@@ -468,7 +481,18 @@ impl EntitySpec {
             filter_defaults: BTreeMap::new(),
             selection_fields: vec![],
             facets: vec![],
+            audited: true,
         }
+    }
+
+    /// Schaltet die Auditierung dieser Entitaet ab (kein Owner, keine Audit-Felder).
+    pub fn without_audit(mut self) -> Self {
+        self.audited = false;
+        self
+    }
+
+    pub fn is_audited(&self) -> bool {
+        self.audited
     }
 
     pub fn facets(&self) -> &[FacetSpec] {

@@ -72,7 +72,12 @@ pub async fn run_with(
         crate::system_user::ensure_default_user(inner.as_ref())
             .await
             .context("cannot prepare default user")?;
-        let audited = base.entities().iter().map(|e| e.setname()).collect();
+        let audited = base
+            .entities()
+            .iter()
+            .filter(|e| e.is_audited())
+            .map(|e| e.setname())
+            .collect();
         Extender::new(
             inner,
             Arc::new(crate::system_user::SystemUserHook::new(audited)),

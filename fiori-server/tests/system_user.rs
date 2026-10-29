@@ -25,7 +25,12 @@ async fn setup() -> Env {
     let mut ddic: DataDictionary =
         serde_json::from_str(&std::fs::read_to_string("../poc-crm/ddic.json").unwrap()).unwrap();
     ddic.inject_system_user();
-    let audited: HashSet<String> = ddic.entities().iter().map(|e| e.setname()).collect();
+    let audited: HashSet<String> = ddic
+        .entities()
+        .iter()
+        .filter(|e| e.is_audited())
+        .map(|e| e.setname())
+        .collect();
     let entity = ddic
         .entities()
         .into_iter()
@@ -239,4 +244,19 @@ async fn ensure_default_user_is_idempotent() {
         .filter(|u| u["name"] == "none@localhost")
         .count();
     assert_eq!(count, 1);
+}
+
+#[test]
+fn non_audited_entity_gets_no_owner_and_no_audit_fields() {
+    // ValueList stammt aus dem eingebauten Metamodell und ist nicht auditiert.
+    let mut ddic = DataDictionary::new();
+    ddic.inject_system_user();
+    let vl = ddic.entities().into_iter().find(|e| e.name() == "ValueList").unwrap();
+    assert!(!vl.is_audited());
+    assert!(vl.fields().all(|f| f.name() != "Owner"));
+    assert!(vl.fields().all(|f| f.name() != "CreatedAt"));
+
+    let entity = ddic.entities().into_iter().find(|e| e.name() == "Entity").unwrap();
+    assert!(entity.is_audited());
+    assert!(entity.fields().any(|f| f.name() == "Owner"));
 }

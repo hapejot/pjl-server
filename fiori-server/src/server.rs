@@ -138,8 +138,11 @@ async fn shutdown_signal() {
     }
 }
 
-/// Festwerte aus `ddic.json` in das generierte Set schreiben. Die Datei ist die
-/// einzige Quelle, daher wird das Set bei jedem Start vollstaendig neu befuellt.
+/// Festwerte aus `ddic.json` in die Listen-Entitaeten schreiben (je Liste ein Set
+/// `{Liste}Set`). IDs sind deterministisch (`value_list::entry_id`), Verweise aus
+/// Fremdschluesseln bleiben also ueber Neustarts gueltig. Vorhandene Eintraege
+/// werden aktualisiert statt geloescht; geloescht wird nur, was nicht mehr in der
+/// Liste steht.
 async fn seed_value_lists(
     store: &dyn DraftDataStore,
     ddic: &DataDictionary,
@@ -147,39 +150,75 @@ async fn seed_value_lists(
     use data_store::EntityKey;
     use odata::query::ODataQuery;
     use serde_json::json;
-    const SET: &str = "FieldValueListItemsSet";
+    use spec::value_list::{entry_id, CODE_FIELD, LABEL_FIELD, SORT_FIELD};
+    use std::collections::{HashMap, HashSet};
 
     if ddic.value_lists().is_empty() {
         return Ok(());
     }
     ddic.validate_value_lists().map_err(|e| anyhow::anyhow!("value lists: {e}"))?;
-    let old = store
-        .get_collection(SET, &ODataQuery::new())
-        .await
-        .map_err(|e| anyhow::anyhow!("cannot read {SET}: {e}"))?;
-    // Alle Saetze (auch Entwuerfe aus frueheren Starts) mit ihrem eigenen Schluessel entfernen.
-    for r in old {
-        store
-            .delete_entity(SET, &EntityKey::new(r.id(), r.is_active_entity()))
-            .await
-            .map_err(|e| anyhow::anyhow!("cannot clear {SET}: {e}"))?;
-    }
     let mut count = 0;
     for list in ddic.value_lists() {
+        let set = format!("{}Set", list.name);
+        let existing = store
+            .get_collection(&set, &ODataQuery::new())
+            .await
+            .map_err(|e| anyhow::anyhow!("cannot read {set}: {e}"))?;
+        let wanted: HashSet<uuid::Uuid> =
+            list.values.iter().map(|v| entry_id(&list.id, &v.code)).collect();
+        // Alle Saetze je ID (aktiv und Entwurf).
+        let mut by_id: HashMap<uuid::Uuid, Vec<_>> = HashMap::new();
+        for r in existing {
+            by_id.entry(r.id()).or_default().push(r);
+        }
+        for (id, rows) in &by_id {
+            if wanted.contains(id) {
+                continue;
+            }
+            for r in rows {
+                store
+                    .delete_entity(&set, &EntityKey::new(r.id(), r.is_active_entity()))
+                    .await
+                    .map_err(|e| anyhow::anyhow!("cannot remove stale entry in {set}: {e}"))?;
+            }
+        }
         for v in &list.values {
-            // Anlegen erzeugt immer einen Entwurf; die Value Help liest nur
-            // aktive Saetze, also sofort aktivieren.
-            let created = store
-                .create_entity(
-                    SET,
-                    &json!({"name": v.label, "ListID": list.id, "value": v.code, "label": v.label, "sort": v.sort}),
-                )
-                .await
-                .map_err(|e| anyhow::anyhow!("cannot seed {SET}: {e}"))?;
-            store
-                .draft_activate(SET, &EntityKey::new(created.id(), false))
-                .await
-                .map_err(|e| anyhow::anyhow!("cannot activate {SET}: {e}"))?;
+            let id = entry_id(&list.id, &v.code);
+            let rows = by_id.get(&id).map(Vec::as_slice).unwrap_or(&[]);
+            let active = rows.iter().find(|r| r.is_active_entity());
+            let wanted_data = json!({LABEL_FIELD: v.label, CODE_FIELD: v.code, SORT_FIELD: v.sort});
+            match active {
+                Some(record) => {
+                    let unchanged = record.get(LABEL_FIELD) == Some(json!(v.label))
+                        && record.get(CODE_FIELD) == Some(json!(v.code))
+                        && record.get(SORT_FIELD) == Some(json!(v.sort));
+                    if !unchanged {
+                        store
+                            .patch_entity(&set, &EntityKey::new(id, true), &wanted_data)
+                            .await
+                            .map_err(|e| anyhow::anyhow!("cannot update {set}: {e}"))?;
+                    }
+                    // Entwuerfe aus frueheren Starts verwerfen.
+                    for r in rows.iter().filter(|r| !r.is_active_entity()) {
+                        store
+                            .delete_entity(&set, &EntityKey::new(r.id(), false))
+                            .await
+                            .map_err(|e| anyhow::anyhow!("cannot remove draft in {set}: {e}"))?;
+                    }
+                }
+                None => {
+                    let mut data = wanted_data;
+                    data["ID"] = json!(id.to_string());
+                    let created = store
+                        .create_entity(&set, &data)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("cannot seed {set}: {e}"))?;
+                    store
+                        .draft_activate(&set, &EntityKey::new(created.id(), false))
+                        .await
+                        .map_err(|e| anyhow::anyhow!("cannot activate {set}: {e}"))?;
+                }
+            }
             count += 1;
         }
     }
@@ -211,7 +250,7 @@ fn load_dictionary(config: &ServerConfig) -> anyhow::Result<DataDictionary> {
                 .with_context(|| format!("'{}' is not a valid data dictionary", path.display()))?;
             // Benutzerverwaltung direkt nach dem Einlesen (nur im Speicher).
             ddic.inject_system_user();
-            let ddic = match &config.ddic_overlay {
+            let mut ddic = match &config.ddic_overlay {
                 Some(path) => {
                     info!("applying ddic overlay {}", path.display());
                     let overlay = crate::overlay::load(path)?;
@@ -220,7 +259,9 @@ fn load_dictionary(config: &ServerConfig) -> anyhow::Result<DataDictionary> {
                 }
                 None => ddic,
             };
-            ddic.validate_value_lists().map_err(|e| {
+            // Festwertlisten: Listen-Entitaeten erzeugen und Atome im Speicher zu Lookups
+            // machen (vor dem Schema, damit die Spalten dort stehen).
+            ddic.apply_value_list_lookups().map_err(|e| {
                 anyhow::anyhow!("'{}': ungueltige Festwertliste: {e}", path.display())
             })?;
             ddic.validate_list_views().map_err(|e| {

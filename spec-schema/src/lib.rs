@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use data_store::schema::{
+    LegacyValueColumn,
     Association, Cardinality, Column, DataType, EntitySet, ForeignKeySide, Ownership, Schema,
     SchemaBuilder, SchemaError, SchemaRevision, SchemaSource, ID_SUFFIX,
 };
@@ -29,7 +30,26 @@ pub fn schema_from_ddic(ddic: &DataDictionary) -> Result<Schema, SchemaError> {
 
     let mut builder = SchemaBuilder::default();
     for entity in entities.iter() {
-        builder.add(entity_set(ddic, entity, &ownership)?);
+        let mut set = entity_set(ddic, entity, &ownership)?;
+        for conv in ddic
+            .converted_value_fields()
+            .iter()
+            .filter(|c| c.entity == entity.name())
+        {
+            let Some(list) = ddic.value_lists().iter().find(|l| l.id == conv.list_id) else {
+                continue;
+            };
+            set.legacy_value_columns.push(LegacyValueColumn {
+                old_column: conv.field.clone(),
+                fk_column: format!("{}{ID_SUFFIX}", conv.field),
+                mapping: list
+                    .values
+                    .iter()
+                    .map(|v| (v.code.clone(), spec::value_list::entry_id(&list.id, &v.code)))
+                    .collect(),
+            });
+        }
+        builder.add(set);
     }
     builder.build()
 }

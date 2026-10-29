@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::value_list::{self, ValueList, ITEMS_ENTITY};
-use crate::{EntitySpec, FieldSpec, Relationship, app::App, package::Package};
+use crate::value_list::{self, ValueList, CODE_FIELD, LABEL_FIELD, SORT_FIELD};
+use crate::{AtomValueList, EntitySpec, FieldSpec, Relationship, app::App, package::Package};
 use tracing::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,6 +16,20 @@ pub struct DataDictionary {
     value_lists: Vec<ValueList>,
     #[serde(skip)]
     active: HashMap<String, EntitySpec>,
+    /// Atome mit Festwertliste, die `apply_value_list_lookups` in Lookups umgewandelt hat.
+    #[serde(skip)]
+    converted_value_fields: Vec<ConvertedValueField>,
+}
+
+/// Ein Atom mit Festwertliste, das im Speicher zu einem Lookup wurde.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConvertedValueField {
+    /// Entitaet, zu der das Feld gehoert.
+    pub entity: String,
+    /// Feldname (bleibt gleich, die Fremdschluesselspalte heisst `{field}_ID`).
+    pub field: String,
+    /// Liste, auf die das Feld zeigt.
+    pub list_id: String,
 }
 
 impl DataDictionary {
@@ -169,6 +183,7 @@ impl DataDictionary {
             apps: vec![a1, a2, a3, a4, a5, a6],
             value_lists: Vec::new(),
             active: HashMap::new(),
+            converted_value_fields: Vec::new(),
         }
     }
 
@@ -184,6 +199,7 @@ impl DataDictionary {
             apps: Vec::new(),
             value_lists: Vec::new(),
             active: HashMap::new(),
+            converted_value_fields: Vec::new(),
         }
     }
 
@@ -204,19 +220,87 @@ impl DataDictionary {
         value_list::validate(&self.value_lists)
     }
 
-    /// Generierte Entitaet mit allen Festwerten. Ohne Listen entsteht keine.
+    /// Je Festwertliste eine generierte Entitaet, benannt nach der Liste. Ohne
+    /// Listen entsteht keine.
     fn generated_entities(&self) -> Vec<EntitySpec> {
-        if self.value_lists.is_empty() {
-            return Vec::new();
+        self.value_lists
+            .iter()
+            .map(|list| {
+                EntitySpec::new(&list.name, "core", &list.name)
+                    .field(FieldSpec::atom(LABEL_FIELD, "Bezeichnung", "Edm.String"))
+                    .field(FieldSpec::atom(CODE_FIELD, "Wert", "Edm.String"))
+                    .field(FieldSpec::atom(SORT_FIELD, "Sortierung", "Edm.Int64"))
+                    .without_audit()
+            })
+            .collect()
+    }
+
+    /// Wandelt Atome mit Festwertliste im Speicher in Lookups auf die Listen-Entitaet
+    /// um. `ddic.json` bleibt unveraendert. Die Umwandlung merkt sich die Felder, damit
+    /// die Migration der alten Textspalten (Code -> ID) geplant werden kann.
+    ///
+    /// Muss vor dem Ableiten des Schemas laufen. Idempotent: bereits umgewandelte
+    /// Felder sind keine Atome mehr.
+    pub fn apply_value_list_lookups(&mut self) -> Result<(), String> {
+        self.validate_value_lists()?;
+        for list in &self.value_lists {
+            if !value_list::is_valid_entity_name(&list.name) {
+                return Err(format!(
+                    "value list '{}': Name ist kein gueltiger Entitaetsname",
+                    list.name
+                ));
+            }
+            if self.entities.iter().any(|e| e.name == list.name) {
+                return Err(format!(
+                    "value list '{}': Name kollidiert mit einer Entitaet",
+                    list.name
+                ));
+            }
         }
-        let items = EntitySpec::new(ITEMS_ENTITY, "core", "FieldValueListItems")
-            // `name` ist Titel und Listenspalte; es traegt die Bezeichnung.
-            .field(FieldSpec::atom("name", "Bezeichnung", "Edm.String"))
-            .field(FieldSpec::atom("ListID", "Liste", "Edm.String"))
-            .field(FieldSpec::atom("value", "Wert", "Edm.String"))
-            .field(FieldSpec::atom("label", "Bezeichnung", "Edm.String"))
-            .field(FieldSpec::atom("sort", "Sortierung", "Edm.Int64"));
-        vec![items.without_audit()]
+
+        let lists = self.value_lists.clone();
+        let mut converted = Vec::new();
+        for entity in self.entities.iter_mut() {
+            for field in entity.fields.iter_mut() {
+                let FieldSpec::Atom {
+                    name,
+                    label,
+                    value_list: Some(AtomValueList::FieldValueList { list_id, .. }),
+                    ..
+                } = field
+                else {
+                    continue;
+                };
+                let list = lists
+                    .iter()
+                    .find(|l| l.id.eq_ignore_ascii_case(list_id))
+                    .ok_or_else(|| {
+                        format!(
+                            "{}.{}: unbekannte Festwertliste '{}'",
+                            entity.name, name, list_id
+                        )
+                    })?;
+                converted.push(ConvertedValueField {
+                    entity: entity.name.clone(),
+                    field: name.clone(),
+                    list_id: list.id.clone(),
+                });
+                *field = FieldSpec::Lookup {
+                    name: name.clone(),
+                    entity: list.name.clone(),
+                    collection: false,
+                    owned: false,
+                    label: Some(label.clone()),
+                };
+            }
+        }
+        self.converted_value_fields = converted;
+        Ok(())
+    }
+
+    /// Felder, die bei `apply_value_list_lookups` von Atom zu Lookup wurden.
+    pub fn converted_value_fields(&self) -> &[ConvertedValueField] {
+        &self.converted_value_fields
     }
 
     /// Ergaenzt das Dictionary um die Benutzerverwaltung: Entitaet `SystemUser`,
@@ -782,3 +866,79 @@ mod list_view_tests {
     }
 }
 
+#[cfg(test)]
+mod value_list_tests {
+    use super::*;
+    use crate::value_list::{entry_id, is_valid_entity_name, ValueEntry, ValueList};
+    use crate::{AtomValueList, EntitySpec, FieldSpec};
+    use uuid::Uuid;
+
+    const LIST: &str = "79714635-4b3e-51a6-be78-dc009beb5f3c";
+
+    fn dictionary() -> DataDictionary {
+        let mut dd = DataDictionary::empty();
+        dd.value_lists = vec![ValueList {
+            id: LIST.into(),
+            name: "ProjectStatus".into(),
+            values: vec![
+                ValueEntry { code: "open".into(), label: "Offen".into(), sort: 1 },
+                ValueEntry { code: "done".into(), label: "Erledigt".into(), sort: 2 },
+            ],
+        }];
+        dd.entities.push(
+            EntitySpec::new("Project", "core", "Projects").field(
+                FieldSpec::atom("status", "Status", "Edm.String")
+                    .with_value_list(AtomValueList::FieldValueList {
+                        list_id: LIST.into(),
+                        prefer_dialog: false,
+                    }),
+            ),
+        );
+        dd
+    }
+
+    #[test]
+    fn entry_id_is_stable_and_depends_on_list_and_code() {
+        assert_eq!(entry_id(LIST, "open"), entry_id(LIST, "open"));
+        assert_ne!(entry_id(LIST, "open"), entry_id(LIST, "done"));
+        assert_ne!(entry_id(LIST, "open"), entry_id(&Uuid::new_v4().to_string(), "open"));
+    }
+
+    #[test]
+    fn value_list_becomes_entity_per_list() {
+        let dd = dictionary();
+        let names: Vec<String> = dd.entities().iter().map(|e| e.name.clone()).collect();
+        assert!(names.contains(&"ProjectStatus".to_string()));
+        assert!(!names.contains(&"FieldValueListItems".to_string()));
+    }
+
+    #[test]
+    fn atom_with_value_list_becomes_lookup_in_memory_only() {
+        let mut dd = dictionary();
+        dd.apply_value_list_lookups().unwrap();
+        let project = dd.entities().into_iter().find(|e| e.name == "Project").unwrap();
+        let field = project.fields().find(|f| f.name() == "status").unwrap().clone();
+        assert!(matches!(
+            field,
+            FieldSpec::Lookup { ref entity, collection: false, .. } if entity == "ProjectStatus"
+        ));
+        assert_eq!(dd.converted_value_fields().len(), 1);
+        // Die Quelle (ddic.json) kennt weiterhin das Atom mit Festwertliste.
+        let source = serde_json::to_string(&dictionary()).unwrap();
+        assert!(source.contains("FieldValueList"));
+    }
+
+    #[test]
+    fn unknown_list_is_an_error() {
+        let mut dd = dictionary();
+        dd.value_lists.clear();
+        assert!(dd.apply_value_list_lookups().is_err());
+    }
+
+    #[test]
+    fn list_name_must_be_an_entity_name() {
+        assert!(is_valid_entity_name("ProjectStatus"));
+        assert!(!is_valid_entity_name("Project Status"));
+        assert!(!is_valid_entity_name("1Status"));
+    }
+}

@@ -315,6 +315,7 @@ pub async fn migration_plan(
                     .map(|v| literal(dialect, v));
                 plan.push(add_column_sql(&set.name, &name, &ty, default.as_deref()));
             }
+            plan.extend(legacy_value_statements(&existing, dialect, set));
         } else {
             plan.push(create_table_sql(dialect, schema, set)?);
         }
@@ -322,6 +323,45 @@ pub async fn migration_plan(
         plan.extend(index_statements(set));
     }
     Ok(plan)
+}
+
+/// Uebersetzt Festwert-Codes einer frueheren Text-Spalte in Fremdschluessel-IDs
+/// und entfernt danach die alte Spalte. Laeuft nur, solange die alte Spalte existiert.
+/// Die Anweisungen stehen in dieser Reihenfolge, die neue Spalte wird vorher ergaenzt.
+fn legacy_value_statements(
+    existing: &HashSet<String>,
+    dialect: &dyn Dialect,
+    set: &data_store::schema::EntitySet,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for legacy in &set.legacy_value_columns {
+        if !existing.contains(&legacy.old_column) {
+            continue;
+        }
+        let table = quote(&set.name);
+        let old = quote(&legacy.old_column);
+        let fk = quote(&legacy.fk_column);
+        if !legacy.mapping.is_empty() {
+            let id_type = dialect.column_type(&DataType::Guid);
+            let whens: String = legacy
+                .mapping
+                .iter()
+                .map(|(code, id)| {
+                    format!(
+                        " WHEN {} THEN CAST({} AS {})",
+                        literal(dialect, &serde_json::Value::String(code.clone())),
+                        literal(dialect, &serde_json::Value::String(id.to_string())),
+                        id_type
+                    )
+                })
+                .collect();
+            out.push(format!(
+                "UPDATE {table} SET {fk} = CASE {old}{whens} END WHERE {old} IS NOT NULL AND {fk} IS NULL"
+            ));
+        }
+        out.push(format!("ALTER TABLE {table} DROP COLUMN {old}"));
+    }
+    out
 }
 
 /// Meldet Abweichungen, die [`migration_plan`] bewusst nicht behebt.
@@ -466,6 +506,41 @@ mod tests {
             .with_table("OrderSet", &["ID", "IsActiveEntity", "Customer_ID", "Eigen"])
             .with_foreign_key("OrderSet", "eigen_fk", &["Eigen"], "Anderes");
         assert!(foreign_key_plan(&catalog, &schema()).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn legacy_text_column_is_translated_then_dropped() {
+        use data_store::schema::{EntitySet, LegacyValueColumn, Column, DataType as DT};
+        let mut set = EntitySet::new("ProjectSet", "Project").drafts();
+        set = set.column(Column::new("status_ID", DT::Guid));
+        set.legacy_value_columns.push(LegacyValueColumn {
+            old_column: "status".into(),
+            fk_column: "status_ID".into(),
+            mapping: vec![(
+                "open".into(),
+                uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+            )],
+        });
+        let schema = Schema::builder().set(set).build().unwrap();
+        let catalog = FakeCatalog::default().with_table(
+            "ProjectSet",
+            &["ID", "IsActiveEntity", "status"],
+        );
+        let plan = migration_plan(&catalog, &SQLITE, &schema).await.unwrap();
+        let update = plan.iter().position(|s| s.starts_with("UPDATE \"ProjectSet\"")).expect("UPDATE");
+        let drop = plan.iter().position(|s| s.contains("DROP COLUMN \"status\"")).expect("DROP");
+        assert!(update < drop, "Uebersetzung muss vor dem Entfernen laufen");
+        assert!(plan[update].contains("WHEN 'open' THEN CAST('00000000-0000-0000-0000-000000000001' AS"));
+    }
+
+    #[tokio::test]
+    async fn fresh_legacy_free_table_has_no_drop() {
+        use data_store::schema::EntitySet;
+        let set = EntitySet::new("ProjectSet", "Project").drafts();
+        let schema = Schema::builder().set(set).build().unwrap();
+        let catalog = FakeCatalog::default().with_table("ProjectSet", &["ID"]);
+        let plan = migration_plan(&catalog, &SQLITE, &schema).await.unwrap();
+        assert!(!plan.iter().any(|s| s.contains("DROP COLUMN")));
     }
 
     /// Kompositionen bekommen einen Fremdschluessel inklusive

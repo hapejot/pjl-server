@@ -245,6 +245,21 @@ pub struct EntitySet {
     pub draft_enabled: bool,
     columns: IndexMap<String, Column>,
     associations: IndexMap<String, Association>,
+    /// Frueher als Text gespeicherte Festwerte, die jetzt ueber eine Fremdschluesselspalte
+    /// referenziert werden. Die Migration uebersetzt Codes in IDs (siehe `relational-core`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub legacy_value_columns: Vec<LegacyValueColumn>,
+}
+
+/// Umstellung einer Text-Spalte mit Festwert-Code auf eine Fremdschluesselspalte.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LegacyValueColumn {
+    /// Alte Spalte mit dem Code, z. B. `status`.
+    pub old_column: String,
+    /// Neue Fremdschluesselspalte, z. B. `status_ID`.
+    pub fk_column: String,
+    /// Code -> ID des Festwerts.
+    pub mapping: Vec<(String, uuid::Uuid)>,
 }
 
 impl EntitySet {
@@ -260,6 +275,7 @@ impl EntitySet {
             draft_enabled: false,
             columns,
             associations: IndexMap::new(),
+            legacy_value_columns: Vec::new(),
         }
     }
 

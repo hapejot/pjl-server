@@ -14,3 +14,5 @@ tracing = "0.1.44"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 anyhow = "1.0.104"
 data-store = { version = "0.1.0", path = "../data-store", features = ["conformance"] }
+
+uuid = { version = "1.24.0" }

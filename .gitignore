@@ -14,3 +14,5 @@ rel-data/data.sqlite
 rel-data
 design-data
 tmp.sql
+ddic.json
+dump.sql

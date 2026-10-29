@@ -69,6 +69,12 @@ pub fn audit_fields() -> Vec<FieldSpec> {
     ]
 }
 
+/// Ob `name` in der Oberflaeche nicht schreibbar ist. Alle Audit-Felder ausser
+/// `Owner`, der in der GUI setzbar bleibt (siehe `audit_fields`).
+pub fn is_read_only_audit_field(name: &str) -> bool {
+    matches!(name, CREATED_BY | CHANGED_BY | CREATED_AT | CHANGED_AT)
+}
+
 /// Name des Fremdschluessel-Feldes (`{name}_ID`) fuer eine Navigation.
 pub fn fk_column(navigation: &str) -> String {
     format!("{navigation}_ID")

@@ -510,6 +510,9 @@ impl Annotations {
                 ..
             } => {
                 if !collection {
+                    if spec::system_user::is_read_only_audit_field(f.name()) {
+                        annotations.push(Annotation::new("Org.OData.Core.V1.Computed").boolean(true));
+                    }
                     let name = format!("{}_ID", name);
                     target = format!("Service.{}/{}", service_name, name);
                     annotations.push(
@@ -546,7 +549,7 @@ impl Annotations {
                 value_list,
                 ..
             } => {
-                if *computed {
+                if *computed || spec::system_user::is_read_only_audit_field(name) {
                     annotations.push(Annotation::new("Org.OData.Core.V1.Computed").boolean(true));
                 }
                 if *immutable {

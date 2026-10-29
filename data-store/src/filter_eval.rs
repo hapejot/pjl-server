@@ -144,7 +144,7 @@ fn eval(record: &DataRecord, scope: &Scope, expr: &Expr) -> Value {
         Expr::String(s) => Value::String(s.clone()),
         Expr::Number(n) => number(*n),
         Expr::Bool(b) => Value::Bool(*b),
-        Expr::Guid(g) => Value::String(g.to_string()),
+        Expr::Guid(g) | Expr::DateTime(g) => Value::String(g.to_string()),
         Expr::Null => Value::Null,
         Expr::FunctionCall { name, args } => {
             let args: Vec<Value> = args.iter().map(|a| eval(record, scope, a)).collect();

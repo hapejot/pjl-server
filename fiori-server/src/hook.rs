@@ -4,7 +4,8 @@ use serde_json::{json, Value};
 use thiserror::Error;
 use tracing::debug;
 
-use data_store::{DataRecord, DataStore, DraftDataStore, EntityKey, Navigation, StoreError};
+use data_store::{DataRecord, DataStore, DraftDataStore, EntityKey, Navigation, StoreError, WriteOp};
+use odata::query::ODataQuery;
 
 /// Identifiziert eine durchlaufende Operation (für Logging/Vorschau im Hook).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,10 +24,10 @@ pub enum Operation {
 #[derive(Debug, Error)]
 pub enum HookError {
     /// Deine eigene Prüferenz (z. B. FK-Verstoß / berechneter Wert).
-    #[error("Hook Fehler: &1")]
+    #[error("Hook Fehler: {0}")]
     Hook(String),
     /// Originale Store-Fehler; wird so weitergeleitet (Cycle vermieden): kein `StoreError`.
-    #[error("Store Fehler: &1")]
+    #[error("Store Fehler: {0}")]
     Store(StoreError),
 }
 
@@ -45,7 +46,6 @@ impl From<HookError> for StoreError {
     }
 }
 
-#[async_trait::async_trait]
 #[async_trait::async_trait]
 pub trait Hook: Send + Sync {
     async fn before(
@@ -68,6 +68,56 @@ pub trait Hook: Send + Sync {
     ) -> Result<(), HookError> {
         let _ = store;
         debug!(set_name, ?op, ?value);
+        Ok(())
+    }
+
+    /// Patch mit bekanntem Schluessel. Standard: wie [`Hook::before`] mit `Operation::Patch`.
+    async fn before_patch(
+        &self,
+        store: &Extender,
+        set_name: &str,
+        key: &EntityKey,
+        patch: &mut Value,
+    ) -> Result<(), HookError> {
+        let _ = key;
+        self.before(store, set_name, Operation::Patch, patch).await
+    }
+
+    /// Lesezugriff, einmal pro Request, vor dem Store. `key` ist gesetzt bei
+    /// Einzelzugriff, `None` bei Listen. Die Query darf ergaenzt oder reduziert werden.
+    async fn before_read(
+        &self,
+        store: &Extender,
+        set_name: &str,
+        key: Option<&EntityKey>,
+        query: &mut ODataQuery,
+    ) -> Result<(), HookError> {
+        let _ = (store, set_name, key, query);
+        Ok(())
+    }
+
+    /// Ergebnisliste eines Lesezugriffs, einmal pro Request. Saetze duerfen
+    /// geaendert und entfernt werden.
+    async fn after_read_list(
+        &self,
+        store: &Extender,
+        set_name: &str,
+        records: &mut Vec<DataRecord>,
+    ) -> Result<(), HookError> {
+        let _ = (store, set_name, records);
+        Ok(())
+    }
+
+    /// Einzelne Property-Lesung (`$value`), einmal pro Request.
+    async fn after_property(
+        &self,
+        store: &Extender,
+        set_name: &str,
+        key: &EntityKey,
+        property: &str,
+        value: &mut Value,
+    ) -> Result<(), HookError> {
+        let _ = (store, set_name, key, property, value);
         Ok(())
     }
 }
@@ -102,6 +152,12 @@ impl Extender {
             hook,
             navigation: Navigation::default(),
         }
+    }
+
+    /// Darunterliegender Store (ohne diesen Hook). Fuer Hooks, die selbst lesen
+    /// oder schreiben muessen, ohne sich rekursiv aufzurufen.
+    pub(crate) fn raw(&self) -> &Arc<dyn DraftDataStore> {
+        &self.inner
     }
 
     /// JSON-Key-Payload für `before`-Hooks.
@@ -185,7 +241,33 @@ impl DataStore for Extender {
         set_name: &str,
         query: &odata::query::ODataQuery,
     ) -> Result<Vec<DataRecord>, StoreError> {
-        self.inner.get_collection(set_name, query).await
+        Ok(self.read_collection(set_name, query, false).await?.0)
+    }
+
+    /// Ein Request = ein `before_read` (Query), Store, ein `after_read_list`.
+    /// Die Gesamtzahl wird um die durch den Hook entfernten Saetze verringert.
+    async fn read_collection(
+        &self,
+        set_name: &str,
+        query: &odata::query::ODataQuery,
+        with_count: bool,
+    ) -> Result<(Vec<DataRecord>, Option<usize>), StoreError> {
+        let mut q = query.clone();
+        self.hook
+            .before_read(self, set_name, None, &mut q)
+            .await?;
+        let mut records = self.inner.get_collection(set_name, &q).await?;
+        let before = records.len();
+        self.hook
+            .after_read_list(self, set_name, &mut records)
+            .await?;
+        let removed = before.saturating_sub(records.len());
+        let count = if with_count {
+            Some(self.inner.count(set_name, &q).await.saturating_sub(removed))
+        } else {
+            None
+        };
+        Ok((records, count))
     }
 
     async fn count(&self, set_name: &str, query: &odata::query::ODataQuery) -> usize {
@@ -198,7 +280,15 @@ impl DataStore for Extender {
         key: &EntityKey,
         query: &odata::query::ODataQuery,
     ) -> Result<DataRecord, StoreError> {
-        self.inner.read_entity(set_name, key, query).await
+        let mut q = query.clone();
+        self.hook
+            .before_read(self, set_name, Some(key), &mut q)
+            .await?;
+        let mut record = self.inner.read_entity(set_name, key, &q).await?;
+        self.hook
+            .after(self, set_name, Operation::Read, &mut record)
+            .await?;
+        Ok(record)
     }
 
     async fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
@@ -206,7 +296,7 @@ impl DataStore for Extender {
         self.hook
             .before(self, set_name, Operation::Create, &mut value)
             .await?;
-        let mut r = self.inner.create_entity(set_name, data).await?;
+        let mut r = self.inner.create_entity(set_name, &value).await?;
         self.hook
             .after(self, set_name, Operation::Create, &mut r)
             .await?;
@@ -221,9 +311,9 @@ impl DataStore for Extender {
     ) -> Result<Value, StoreError> {
         let mut value = patch.clone();
         self.hook
-            .before(self, set_name, Operation::Patch, &mut value)
+            .before_patch(self, set_name, key, &mut value)
             .await?;
-        let result = self.inner.patch_entity(set_name, key, patch).await?;
+        let result = self.inner.patch_entity(set_name, key, &value).await?;
         let mut record = self
             .inner
             .read_entity(set_name, key, &odata::query::ODataQuery::new())
@@ -246,6 +336,73 @@ impl DataStore for Extender {
             .after(self, set_name, Operation::Delete, &mut record)
             .await?;
         Ok(())
+    }
+
+    /// Batch-Variante: Before-Hooks laufen pro Satz, die verbliebenen Operationen
+    /// gehen als Liste an den inneren Store, danach laufen After-Hooks pro Satz.
+    /// Ein Hook-Fehler betrifft nur seinen Satz.
+    async fn write_entities(
+        &self,
+        set_name: &str,
+        ops: Vec<WriteOp>,
+    ) -> Vec<Result<Option<DataRecord>, StoreError>> {
+        let mut results: Vec<Option<Result<Option<DataRecord>, StoreError>>> =
+            (0..ops.len()).map(|_| None).collect();
+        // Pro weitergereichter Operation: Index in `ops`, Operationsart, Schluessel bei Delete.
+        let mut pending: Vec<(usize, Operation, Option<EntityKey>)> = Vec::new();
+        let mut inner_ops = Vec::new();
+
+        for (i, op) in ops.into_iter().enumerate() {
+            let (kind, mut value, key) = match op {
+                WriteOp::Create(data) => (Operation::Create, data, None),
+                WriteOp::Patch(key, patch) => (Operation::Patch, patch, Some(key)),
+                WriteOp::Delete(key) => (Operation::Delete, Self::key_value(&key), Some(key)),
+            };
+            let before = match (kind, &key) {
+                (Operation::Patch, Some(k)) => {
+                    self.hook.before_patch(self, set_name, k, &mut value).await
+                }
+                _ => self.hook.before(self, set_name, kind, &mut value).await,
+            };
+            if let Err(e) = before {
+                results[i] = Some(Err(e.into()));
+                continue;
+            }
+            // Vom Before-Hook geaenderte Werte gehen an den inneren Store.
+            inner_ops.push(match (kind, &key) {
+                (Operation::Create, _) => WriteOp::Create(value),
+                (Operation::Patch, Some(k)) => WriteOp::Patch(k.clone(), value),
+                (Operation::Delete, Some(k)) => WriteOp::Delete(k.clone()),
+                _ => unreachable!("Patch und Delete haben immer einen Schluessel"),
+            });
+            pending.push((i, kind, key));
+        }
+
+        let inner_results = self.inner.write_entities(set_name, inner_ops).await;
+        for ((i, kind, key), result) in pending.into_iter().zip(inner_results) {
+            let result = match result {
+                Ok(Some(mut record)) => {
+                    match self.hook.after(self, set_name, kind, &mut record).await {
+                        Ok(()) => Ok(Some(record)),
+                        Err(e) => Err(e.into()),
+                    }
+                }
+                Ok(None) => {
+                    // Delete: After-Hook mit dem Schluessel-Datensatz, wie in delete_entity.
+                    let mut record = Self::key_record(key.as_ref().expect("Delete hat einen Schluessel"));
+                    match self.hook.after(self, set_name, kind, &mut record).await {
+                        Ok(()) => Ok(None),
+                        Err(e) => Err(e.into()),
+                    }
+                }
+                Err(e) => Err(e),
+            };
+            results[i] = Some(result);
+        }
+        results
+            .into_iter()
+            .map(|r| r.expect("jede Operation hat ein Ergebnis"))
+            .collect()
     }
 
     async fn delete_entity_tree_only(
@@ -271,7 +428,15 @@ impl DataStore for Extender {
         set_name: &str,
         key: &EntityKey,
     ) -> Result<DataRecord, StoreError> {
-        self.inner.read_sibling_entity(set_name, key).await
+        let mut q = ODataQuery::new();
+        self.hook
+            .before_read(self, set_name, Some(key), &mut q)
+            .await?;
+        let mut record = self.inner.read_sibling_entity(set_name, key).await?;
+        self.hook
+            .after(self, set_name, Operation::Read, &mut record)
+            .await?;
+        Ok(record)
     }
 
     async fn get_property(
@@ -280,7 +445,11 @@ impl DataStore for Extender {
         key: &EntityKey,
         property: &str,
     ) -> Result<Value, StoreError> {
-        self.inner.get_property(set_name, key, property).await
+        let mut value = self.inner.get_property(set_name, key, property).await?;
+        self.hook
+            .after_property(self, set_name, key, property, &mut value)
+            .await?;
+        Ok(value)
     }
 
     async fn commit(&self) {
@@ -326,65 +495,6 @@ impl Hook for DefaultHook {
     ) -> Result<(), HookError> {
         debug!(set_name, ?op, ?value, "after");
         let _ = store;
-        Ok(())
-    }
-}
-
-/// Beim Anlegen eines `EntitySet`-Datensatzes werden automatisch zwei
-/// `FieldSet`-Kinder angelegt (`name` und `title`). Die Kinder erben den
-/// Draft-Zustand des Parents; Nutzer koennen sie spaeter umbenennen oder
-/// loeschen.
-///
-/// Semantik:
-/// * feuert im `after`-Callback von [`Operation::Create`] fuer `set_name ==
-///   "EntitySet"`,
-/// * legt die Kinder ueber [`Extender::create_entity`] an -- damit gelten
-///   dieselben Hook-/Validierungspfade wie bei jedem anderen Kind-Create,
-/// * uebernimmt den `IsActiveEntity`-Zustand des Parents; im Draft-Modus
-///   entstehen also Draft-Kinder, aktiv angelegte Parents erhalten aktive
-///   Kinder.
-#[derive(Default)]
-pub struct EntityDefaultsHook;
-
-impl EntityDefaultsHook {
-    const PARENT_SET: &'static str = "EntitySet";
-    const CHILD_SET: &'static str = "FieldSet";
-    /// Foreign-Key-Spalte in `FieldSet`, die auf das Parent-`EntitySet` zeigt.
-    const CHILD_FK: &'static str = "entity_ID";
-    /// Namen der automatisch angelegten Felder.
-    const DEFAULT_FIELDS: &'static [&'static str] = &["name", "title"];
-}
-
-#[async_trait::async_trait]
-impl Hook for EntityDefaultsHook {
-    async fn after(
-        &self,
-        store: &Extender,
-        set_name: &str,
-        op: Operation,
-        value: &mut DataRecord,
-    ) -> Result<(), HookError> {
-        // Nur beim Anlegen eines EntitySet greifen. Draft-Aktivierung und
-        // Draft-Prepare beruehren den Datensatz nicht neu: die Kinder wurden
-        // beim urspruenglichen Create schon mitgeschrieben und werden vom
-        // Draft-Aktivierungspfad zusammen mit dem Parent uebernommen.
-        if set_name != Self::PARENT_SET || op != Operation::Create {
-            return Ok(());
-        }
-        let parent_id = value.id().to_string();
-        let is_active = value.is_active_entity();
-        for field_name in Self::DEFAULT_FIELDS {
-            store
-                .create_entity(
-                    Self::CHILD_SET,
-                    &json!({
-                        "name": field_name,
-                        Self::CHILD_FK: parent_id,
-                        "IsActiveEntity": is_active,
-                    }),
-                )
-                .await?;
-        }
         Ok(())
     }
 }

@@ -1,0 +1,16 @@
+[package]
+name = "script-hooks"
+version = "0.1.0"
+edition = "2021"
+description = "Rhai-Skripte pro Entity Set als Lese-/Schreib-Hooks (mit Hot-Reload)."
+
+[dependencies]
+anyhow = "1.0"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+notify = "8"
+odata = { version = "0.1.0", path = "../odata" }
+rhai = { version = "1.27", features = ["serde", "sync"] }
+serde = "1.0"
+serde_json = "1.0"
+thiserror = "2.0.20"
+tracing = "0.1"

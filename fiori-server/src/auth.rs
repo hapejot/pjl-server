@@ -5,6 +5,8 @@
 //! `AUTH_USER_HEADER` (Standard `X-Forwarded-User`). Dieser Header wird hier
 //! gelesen und als [`CurrentUser`] in die Request-Extensions gelegt.
 //!
+//! Ohne Header gilt der Default User (`none@localhost`), siehe [`crate::system_user`].
+//!
 //! Wichtig: Der Proxy muss den Header von eingehenden Anfragen entfernen und
 //! selbst setzen. Sonst kann ein Client die Identitaet frei vorgeben.
 
@@ -37,14 +39,14 @@ pub async fn identity(
         .filter(|v| !v.is_empty())
         .map(str::to_string);
 
-    match user {
-        Some(name) => {
-            req.extensions_mut().insert(CurrentUser(name));
-        }
-        None if config.auth_required => return Err(StatusCode::UNAUTHORIZED),
-        None => {}
+    if user.is_none() && config.auth_required {
+        return Err(StatusCode::UNAUTHORIZED);
     }
-    Ok(next.run(req).await)
+    if let Some(name) = &user {
+        req.extensions_mut().insert(CurrentUser(name.clone()));
+    }
+    // Der Benutzer gilt fuer die ganze Anfrage (Hooks lesen ihn ueber CURRENT_USER).
+    Ok(crate::system_user::CURRENT_USER.scope(user, next.run(req)).await)
 }
 
 #[cfg(test)]

@@ -1,0 +1,49 @@
+# PoC CRM: eigenstaendiger Start, unabhaengig vom video-store.
+#
+#   cp poc-crm/.env.example poc-crm/.env   # Passwort setzen
+#   docker compose -f poc-crm/compose.yaml up -d --build
+#   OData      -> http://localhost:8090/Service/$metadata
+#   Launchpad  -> http://localhost:8090/   (App-Manifest: /apps/<Entitaet>/manifest.json, z. B. Account)
+#   Daten neu  -> docker compose -f poc-crm/compose.yaml down -v
+#
+# Store: PostgreSQL (Dienst db). Das Schema wird beim Start aus poc-crm/ddic.json angelegt.
+# Das Modell liegt in poc-crm/ddic.json (read-only eingebunden).
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: crm
+      POSTGRES_PASSWORD: ${CRM_DB_PASSWORD:?CRM_DB_PASSWORD in poc-crm/.env setzen}
+      POSTGRES_DB: crm
+    volumes:
+      - crm-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crm -d crm"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  runtime:
+    build:
+      context: ..
+      dockerfile: poc-crm/Dockerfile
+    image: hapejot/pjl-runtime:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DDIC: /app/model/ddic.json
+      STORE_PG_URL: postgres://crm:${CRM_DB_PASSWORD}@db:5432/crm
+      PORT: "8080"
+      RUST_LOG: info
+    ports:
+      - "8090:8080"
+      - "3271:3270"
+    volumes:
+      - ./ddic.json:/app/model/ddic.json:ro
+    restart: unless-stopped
+
+volumes:
+  crm-db:

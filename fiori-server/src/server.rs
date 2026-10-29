@@ -3,12 +3,11 @@
 //! Beide Binaries laufen durch diese Funktion. Was sie unterscheidet, ist
 //! ausschliesslich die Herkunft von Dictionary und Schema:
 //!
-//! | | Designer | Laufzeit |
+//! | | Designer (`--designer`) | Laufzeit |
 //! |---|---|---|
-//! | Dictionary | eincompiliertes Metamodell | `--ddic` (vom Designer exportiert) |
-//! | Schema | daraus abgeleitet | `--schema`, sonst daraus abgeleitet |
-//! | Store-Hook | legt Standardfelder an | keiner |
-//! | Export | `POST /Service/export` | - |
+//! | Dictionary | eincompiliertes Metamodell | `--ddic` |
+//! | Store | `DdicStore` auf `ddic.json` | SQLite / PostgreSQL |
+//! | Schema | - | `--schema`, sonst abgeleitet |
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -24,7 +23,8 @@ use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::info;
 
 use crate::config::{ServerConfig, ServerMode};
-use crate::hook::{EntityDefaultsHook, Extender};
+use crate::ddic_store::DdicStore;
+use crate::hook::Extender;
 use crate::{batch, flp, srv, AppState};
 
 /// Server ohne Erweiterungen starten.
@@ -35,18 +35,62 @@ pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
 /// Server mit Erweiterungen (siehe `extension::Extension`) aufbauen und bis zum Abbruch bedienen.
 pub async fn run_with(
     config: ServerConfig,
-    extensions: crate::extension::Extensions,
+    mut extensions: crate::extension::Extensions,
 ) -> anyhow::Result<()> {
     let config = Arc::new(config);
-    info!("starting {} server", config.mode.label());
+    crate::status::hub().set_config(crate::status::config_json(&config));
+    info!(
+        "starting {} server{}",
+        config.mode.label(),
+        if config.designer { " (designer)" } else { "" }
+    );
+
+    // Skripte zuletzt registriert: ihre Hooks liegen aussen und sehen jeden Request zuerst.
+    if let Some(dir) = &config.scripts_dir {
+        let hooks = script_hooks::ScriptHooks::load(dir)
+            .with_context(|| format!("cannot load scripts '{}'", dir.display()))?;
+        extensions.push(Arc::new(crate::script::ScriptExtension::new(hooks)));
+    }
 
     let base = load_dictionary(&config)?;
-    let schema_source = schema_source(&config, &base)?;
-    let (inner, sqlite) = open_store(&config, schema_source).await?;
-    let store = wrap_store(&config, inner)?;
+    let (inner, sqlite) = if config.designer {
+        // Designer: Metamodell als Basis, Daten aus `ddic.json`.
+        let path = config.ddic.clone().context("designer needs --ddic")?;
+        let store = DdicStore::open(&path)
+            .with_context(|| format!("cannot open designer file '{}'", path.display()))?;
+        info!("designer on '{}' (metamodel, file store)", path.display());
+        (Arc::new(store) as Arc<dyn DraftDataStore>, None)
+    } else {
+        let schema_source = schema_source(&config, &base)?;
+        open_store(&config, schema_source).await?
+    };
+    // Benutzerverwaltung: Default User sicherstellen und den Akteur-Hook
+    // innerhalb aller anderen Hooks legen (siehe `system_user`).
+    let inner = if config.designer {
+        inner
+    } else {
+        crate::system_user::ensure_default_user(inner.as_ref())
+            .await
+            .context("cannot prepare default user")?;
+        let audited = base
+            .entities()
+            .iter()
+            .filter(|e| e.is_audited())
+            .map(|e| e.setname())
+            .collect();
+        Extender::new(
+            inner,
+            Arc::new(crate::system_user::SystemUserHook::new(audited)),
+        )?
+    };
+    let store = wrap_store(inner, &extensions)?;
 
+    if !config.designer {
+        seed_value_lists(store.as_ref(), &base).await?;
+    }
     let state = AppState::new(store, config.clone(), base).with_extensions(extensions);
     state.reload();
+    crate::term3270::spawn(&config, &state);
 
     let app = router(state, &config);
 
@@ -94,12 +138,65 @@ async fn shutdown_signal() {
     }
 }
 
+/// Festwerte aus `ddic.json` in das generierte Set schreiben. Die Datei ist die
+/// einzige Quelle, daher wird das Set bei jedem Start vollstaendig neu befuellt.
+async fn seed_value_lists(
+    store: &dyn DraftDataStore,
+    ddic: &DataDictionary,
+) -> anyhow::Result<()> {
+    use data_store::EntityKey;
+    use odata::query::ODataQuery;
+    use serde_json::json;
+    const SET: &str = "FieldValueListItemsSet";
+
+    if ddic.value_lists().is_empty() {
+        return Ok(());
+    }
+    ddic.validate_value_lists().map_err(|e| anyhow::anyhow!("value lists: {e}"))?;
+    let old = store
+        .get_collection(SET, &ODataQuery::new())
+        .await
+        .map_err(|e| anyhow::anyhow!("cannot read {SET}: {e}"))?;
+    // Alle Saetze (auch Entwuerfe aus frueheren Starts) mit ihrem eigenen Schluessel entfernen.
+    for r in old {
+        store
+            .delete_entity(SET, &EntityKey::new(r.id(), r.is_active_entity()))
+            .await
+            .map_err(|e| anyhow::anyhow!("cannot clear {SET}: {e}"))?;
+    }
+    let mut count = 0;
+    for list in ddic.value_lists() {
+        for v in &list.values {
+            // Anlegen erzeugt immer einen Entwurf; die Value Help liest nur
+            // aktive Saetze, also sofort aktivieren.
+            let created = store
+                .create_entity(
+                    SET,
+                    &json!({"name": v.label, "ListID": list.id, "value": v.code, "label": v.label, "sort": v.sort}),
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("cannot seed {SET}: {e}"))?;
+            store
+                .draft_activate(SET, &EntityKey::new(created.id(), false))
+                .await
+                .map_err(|e| anyhow::anyhow!("cannot activate {SET}: {e}"))?;
+            count += 1;
+        }
+    }
+    info!("{count} value list entries loaded");
+    Ok(())
+}
+
 /// Ausgangs-Dictionary bestimmen.
 ///
 /// Der Designer kennt sein Modell selbst. Die Laufzeit hat ohne Exportdatei
 /// nichts zu tun und bricht deshalb mit einem Hinweis ab, statt mit einem
 /// leeren Launchpad zu starten.
 fn load_dictionary(config: &ServerConfig) -> anyhow::Result<DataDictionary> {
+    if config.designer {
+        // Der Designer zeigt sein eincompiliertes Metamodell; die Daten liegen im Store.
+        return Ok(DataDictionary::new());
+    }
     match (&config.ddic, config.mode) {
         (Some(path), _) => {
             let file = std::fs::File::open(path).with_context(|| {
@@ -110,8 +207,22 @@ fn load_dictionary(config: &ServerConfig) -> anyhow::Result<DataDictionary> {
                 )
             })?;
             info!("loading ddic from {}", path.display());
-            let ddic: DataDictionary = serde_json::from_reader(std::io::BufReader::new(file))
+            let mut ddic: DataDictionary = serde_json::from_reader(std::io::BufReader::new(file))
                 .with_context(|| format!("'{}' is not a valid data dictionary", path.display()))?;
+            // Benutzerverwaltung direkt nach dem Einlesen (nur im Speicher).
+            ddic.inject_system_user();
+            let ddic = match &config.ddic_overlay {
+                Some(path) => {
+                    info!("applying ddic overlay {}", path.display());
+                    let overlay = crate::overlay::load(path)?;
+                    crate::overlay::apply(ddic, &overlay)
+                        .with_context(|| format!("ddic overlay '{}'", path.display()))?
+                }
+                None => ddic,
+            };
+            ddic.validate_value_lists().map_err(|e| {
+                anyhow::anyhow!("'{}': ungueltige Festwertliste: {e}", path.display())
+            })?;
             ddic.validate_list_views().map_err(|e| {
                 anyhow::anyhow!("'{}': ungueltige Listenansicht: {e}", path.display())
             })?;
@@ -123,7 +234,6 @@ fn load_dictionary(config: &ServerConfig) -> anyhow::Result<DataDictionary> {
             );
             Ok(ddic)
         }
-        (None, ServerMode::Designer) => Ok(DataDictionary::new()),
         (None, ServerMode::Runtime) => {
             anyhow::bail!("the runtime server needs --ddic (or EXPORT_DIR/ddic.json)")
         }
@@ -184,18 +294,19 @@ async fn open_store(
     Ok((store.clone(), Some(store)))
 }
 
-/// Haengt die modusabhaengigen Wrapper um den Store.
+/// Haengt die Erweiterungs-Hooks um den Store.
 fn wrap_store(
-    config: &ServerConfig,
     store: Arc<dyn DraftDataStore>,
+    extensions: &crate::extension::Extensions,
 ) -> anyhow::Result<Arc<dyn DraftDataStore>> {
-    match config.mode {
-        // Nur beim Modellieren sinnvoll: eine neue Entitaet bekommt sofort
-        // die Felder `name` und `title`. In der Laufzeit waere das ein
-        // Eingriff in fachliche Daten.
-        ServerMode::Designer => Ok(Extender::new(store, Arc::new(EntityDefaultsHook))?),
-        ServerMode::Runtime => Ok(store),
+    let mut store = store;
+    // Erweiterungs-Hooks: der zuletzt umhuellende Hook sieht den Request zuerst.
+    // Damit `before` in Registrierungsreihenfolge laeuft, wird rueckwaerts gewickelt.
+    let hooks: Vec<_> = extensions.iter().flat_map(|ext| ext.hooks()).collect();
+    for hook in hooks.into_iter().rev() {
+        store = Extender::new(store, hook)?;
     }
+    Ok(store)
 }
 
 fn router(state: AppState, config: &ServerConfig) -> Router {
@@ -209,8 +320,8 @@ fn router(state: AppState, config: &ServerConfig) -> Router {
             "/apps/{app}/Component-preload.js",
             get(flp::component_preload_handler),
         )
-        .route("/apps/{app}/ext/Publish.js", get(flp::publish_ext_handler))
         .route("/", get(flp::index))
+        .merge(crate::status::router())
         .route("/sap/bc/lrep/flex/settings", get(flp::lrep_settings))
         .route("/sap/bc/lrep/flex/data/{*rest}", get(flp::lrep_flex_data))
         .with_state(state.clone());
@@ -222,5 +333,6 @@ fn router(state: AppState, config: &ServerConfig) -> Router {
             identity_config,
             crate::auth::identity,
         ))
+        .layer(axum::middleware::from_fn(crate::status::count_requests))
         .layer(TraceLayer::new_for_http())
 }

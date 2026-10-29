@@ -20,6 +20,7 @@ spec-schema = { version = "0.1.0", path = "../spec-schema" }
 postgres-relational-store = { version = "0.1.0", path = "../postgres-relational-store" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tokio-postgres = "0.7"
+deadpool-postgres = "0.14"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 uuid = { version = "1", features = ["v5"] }
@@ -31,7 +32,7 @@ uuid = { version = "1", features = ["v5"] }
 docker-tests = []
 
 [dev-dependencies]
-deadpool-postgres = "0.14"
+relational-core = { version = "0.1.0", path = "../relational-core" }
 tempfile = "=3.10.1"
 odata = { version = "0.1.0", path = "../odata" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

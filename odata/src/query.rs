@@ -159,6 +159,9 @@ pub enum Token {
     Identifier(String),
     String(String),
     Number(f64),
+    /// ISO-8601-Literal ohne Quotes, z. B. `2026-03-21T23:43:13.863Z` (Edm.DateTimeOffset)
+    /// oder `2026-03-21` (Edm.Date). Wird unveraendert als Text weitergereicht.
+    DateTime(String),
     Guid(String),
     Bool(bool),
     Null,
@@ -189,6 +192,7 @@ static TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| {
         r"(?P<ws>\s+)",
         r"|(?P<string>'(?:[^']|'')*')",
         r"|(?P<guid>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})",
+        r"|(?P<datetime>\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?)?)",
         r"|(?P<number>-?\d+(?:\.\d+)?)",
         r"|(?P<lparen>\()",
         r"|(?P<rparen>\))",
@@ -233,6 +237,8 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
             tokens.push(Token::String(unescaped));
         } else if let Some(m) = caps.name("guid") {
             tokens.push(Token::Guid(m.as_str().to_string()));
+        } else if let Some(m) = caps.name("datetime") {
+            tokens.push(Token::DateTime(m.as_str().to_string()));
         } else if let Some(m) = caps.name("number") {
             let n: f64 = m.as_str().parse().expect("Regex garantiert gültige Zahl");
             tokens.push(Token::Number(n));
@@ -279,6 +285,7 @@ pub enum Expr {
     Path(Vec<String>), // z.B. Category/Name
     String(String),
     Number(f64),
+    DateTime(String),
     Bool(bool),
     Guid(String),
     Null,
@@ -485,6 +492,10 @@ impl Parser {
                 self.advance();
                 Ok(Expr::Number(n))
             }
+            Some(Token::DateTime(d)) => {
+                self.advance();
+                Ok(Expr::DateTime(d))
+            }
             Some(Token::Bool(b)) => {
                 self.advance();
                 Ok(Expr::Bool(b))
@@ -620,4 +631,23 @@ impl Parser {
 
 pub fn parse_filter(input: &str) -> Result<Expr, String> {
     Expr::parse(input)
+}
+
+#[cfg(test)]
+mod datetime_literal_tests {
+    use super::*;
+
+    #[test]
+    fn datetime_offset_literal_parses_as_one_token() {
+        let input = "name eq 'x' and created_at eq 2026-03-21T23:43:13.8630000Z and IsActiveEntity eq true";
+        let expr = parse_filter(input).expect("Filter mit Zeitliteral parst");
+        let text = format!("{expr:?}");
+        assert!(text.contains("DateTime(\"2026-03-21T23:43:13.8630000Z\")"), "{text}");
+    }
+
+    #[test]
+    fn plain_date_and_negative_numbers_still_work() {
+        assert!(parse_filter("due eq 2026-03-21").is_ok());
+        assert!(parse_filter("Amount gt -3").is_ok());
+    }
 }

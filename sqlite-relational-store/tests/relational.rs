@@ -558,3 +558,65 @@ async fn a_failed_patch_changes_nothing() {
     assert_eq!(record.get("Titel"), Some(json!("Drucker klemmt")));
     assert_eq!(store.count_draft_admin(), 1);
 }
+
+#[tokio::test]
+async fn select_keeps_is_active_entity_of_active_records() {
+    // Regression: `$select=ID` darf den aktiven Satz nicht als Draft ausgeben.
+    let store = seeded().await;
+    let query = ODataQuery::new().select("ID");
+    let rows = store.get_collection(ORDERS, &query).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].is_active_entity());
+    assert!(!rows[0].has_draft_entity());
+}
+
+#[tokio::test]
+async fn filter_on_computed_draft_flags_is_accepted() {
+    // Fiori schickt `HasActiveEntity eq false and HasDraftEntity eq false`.
+    let store = seeded().await;
+    let filter = Expr::BinaryOp {
+        op: BinOp::And,
+        left: Box::new(bin(BinOp::Eq, Expr::Identifier("HasActiveEntity".into()), Expr::Bool(false))),
+        right: Box::new(bin(BinOp::Eq, Expr::Identifier("HasDraftEntity".into()), Expr::Bool(false))),
+    };
+    let query = ODataQuery::new().filter(filter);
+    let rows = store.get_collection(ORDERS, &query).await.expect("Filter ist gueltig");
+    assert_eq!(rows.len(), 1);
+}
+
+#[tokio::test]
+async fn select_accepts_computed_draft_flags() {
+    let store = seeded().await;
+    let query = ODataQuery::new()
+        .select("ID")
+        .select("IsActiveEntity")
+        .select("HasActiveEntity")
+        .select("HasDraftEntity");
+    let rows = store.get_collection(ORDERS, &query).await.expect("$select ist gueltig");
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].is_active_entity());
+}
+
+/// Regression: ein verworfener Entwurf hinterliess seine Verwaltungszeile
+/// in `DraftAdministrativeData` (sie wurde nie entfernt).
+#[tokio::test]
+async fn discarded_draft_removes_its_admin_row() {
+    let store = seeded().await;
+    let before = store.count_draft_admin();
+    store.draft_edit(ORDERS, &active(1)).await.unwrap();
+    // Jeder Knoten des Entwurfsbaums (Auftrag plus Positionen) hat eine Zeile.
+    assert!(store.count_draft_admin() > before);
+    store.delete_entity(ORDERS, &draft(1)).await.unwrap();
+    assert_eq!(store.count_draft_admin(), before);
+}
+
+/// Regression: auch die Aktivierung entfernt die Verwaltungszeile des Entwurfs.
+#[tokio::test]
+async fn activated_draft_removes_its_admin_row() {
+    let store = seeded().await;
+    let before = store.count_draft_admin();
+    store.draft_edit(ORDERS, &active(1)).await.unwrap();
+    assert!(store.count_draft_admin() > before);
+    store.draft_activate(ORDERS, &draft(1)).await.unwrap();
+    assert_eq!(store.count_draft_admin(), before);
+}

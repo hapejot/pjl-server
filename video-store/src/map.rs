@@ -46,33 +46,26 @@ pub const IMPLICIT_FKS: &[(&str, &str, &str)] = &[
 ];
 
 /// Komposition erzwingen, obwohl die Datenbank keine CASCADE-Regel hat.
-/// `video_jobs.agent_id` ist NOT NULL, hat aber kein ON DELETE.
-pub const FORCE_COMPOSITION: &[(&str, &str)] = &[("video_jobs", "agent_id")];
+/// Leer: keine Komposition erzwungen.
+pub const FORCE_COMPOSITION: &[(&str, &str)] = &[];
 
 /// Komposition verbieten, obwohl die Datenbank CASCADE hat.
 /// `video_jobs.video_id` ist nullable (Agent-Jobs ohne Video) und darf daher
 /// kein Kind einer Komposition sein.
+/// `video_jobs.agent_id` ist nullable (Jobs ohne Agent sind erlaubt). Als
+/// Komposition verlangt der Store beim Anlegen einen Agenten, daher Assoziation.
 /// `videos.agent_id` ist NOT NULL mit CASCADE, soll aber nur eine Assoziation sein:
 /// Sonst waere `Video` ein DraftNode unter `Agent`, und die App mit Hauptentitaet
 /// `Video` bietet keine Bearbeitung an. Dadurch ist `Video` DraftRoot.
 pub const FORCE_ASSOCIATION: &[(&str, &str)] = &[
     ("video_jobs", "video_id"),
+    ("video_jobs", "agent_id"),
     ("videos", "agent_id"),
 ];
 
 /// Quellspalte, die als Feld `name` gefuehrt wird, wenn die Tabelle keine Spalte
 /// `name` hat. Sonst wird `name` aus den Schluesseln abgeleitet.
 pub const NAME_SOURCE: &[(&str, &str)] = &[("videos", "file_name"), ("scenes", "title")];
-
-/// Listenansichten je Quelltabelle: `(tabelle, ansicht, spalten)`. Spalten sind
-/// Feldnamen des Modells (Atome oder einwertige Navigationen). Die Ansicht
-/// `default` ist die Standardtabelle. Pflege hier, nicht in `ddic.json`: die Datei
-/// wird bei jeder Migration neu erzeugt.
-pub const LIST_VIEWS: &[(&str, &str, &[&str])] = &[
-    ("videos", "default", &["name", "file_size", "scene", "agent"]),
-    // Tag-Zuordnungen zeigen den Tag-Namen (Navigation `tag` -> `tag/name`) statt der IDs.
-    ("video_tags", "default", &["tag", "source"]),
-];
 
 /// Wie der Primaerschluessel einer Quelltabelle in die Store-ID uebergeht.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,12 +157,6 @@ pub fn build_model(catalog: &PgCatalog) -> anyhow::Result<Model> {
     let fks = effective_fks(catalog)?;
     let compositions = choose_compositions(catalog, &fks)?;
 
-    for (table, _, _) in LIST_VIEWS {
-        if !catalog.tables.contains_key(*table) {
-            bail!("LIST_VIEWS: Tabelle '{table}' fehlt");
-        }
-    }
-
     let mut ddic = DataDictionary::empty();
     ddic.add_package(Package::new(PACKAGE));
 
@@ -179,9 +166,6 @@ pub fn build_model(catalog: &PgCatalog) -> anyhow::Result<Model> {
         let mut entity = EntitySpec::new(&map.entity, PACKAGE, pascal(&table.name));
         for atom in &map.atoms {
             entity = entity.field(atom_field(atom));
-        }
-        for (_, view, columns) in LIST_VIEWS.iter().filter(|(t, _, _)| *t == table.name) {
-            entity = entity.list_view(spec::ListView::new(*view, columns));
         }
         if !ddic.add_entity(entity) {
             bail!("Entitaet '{}' doppelt", map.entity);
@@ -196,6 +180,8 @@ pub fn build_model(catalog: &PgCatalog) -> anyhow::Result<Model> {
         let mut rel = Relationship::new(format!("{}_{}", fk.child, fk.child_col), PACKAGE)
             .with_one(&parent.entity, collection_nav(&child.table))
             .with_many(&child.entity, nav_name(&fk.child_col));
+        rel.one_label = Some(human_label(&child.table));
+        rel.many_label = Some(human_label(&nav_name(&fk.child_col)));
         if composition {
             rel = rel.owned();
         }
@@ -204,14 +190,51 @@ pub fn build_model(catalog: &PgCatalog) -> anyhow::Result<Model> {
         }
     }
 
-    ddic.validate_list_views()
-        .map_err(|e| anyhow::anyhow!("LIST_VIEWS ungueltig: {e}"))?;
-
     ddic.add_app(App::new(
         "videos".into(),
         "Videos".into(),
         "Video".into(),
         Some("List Videos".into()),
+        None,
+        Package::new(PACKAGE),
+    ));
+    ddic.add_app(App::new(
+        "tags".into(),
+        "Tags".into(),
+        "Tag".into(),
+        Some("Manage Tags".into()),
+        None,
+        Package::new(PACKAGE),
+    ));
+    ddic.add_app(App::new(
+        "agents".into(),
+        "Agents".into(),
+        "Agent".into(),
+        Some("Manage Agents".into()),
+        None,
+        Package::new(PACKAGE),
+    ));
+    ddic.add_app(App::new(
+        "jobs".into(),
+        "Jobs".into(),
+        "VideoJob".into(),
+        Some("Monitor Jobs".into()),
+        None,
+        Package::new(PACKAGE),
+    ));
+    ddic.add_app(App::new(
+        "actors".into(),
+        "Actors".into(),
+        "Actor".into(),
+        Some("Manage Actors".into()),
+        None,
+        Package::new(PACKAGE),
+    ));
+    ddic.add_app(App::new(
+        "scenes".into(),
+        "Scenes".into(),
+        "Scene".into(),
+        Some("Manage Scenes".into()),
         None,
         Package::new(PACKAGE),
     ));
@@ -490,10 +513,31 @@ fn atom_for(col: &PgColumn) -> AtomMap {
     }
 }
 
+/// Lesbarer Feldtitel aus dem technischen Namen: `file_size` -> `File size`,
+/// `legacy_id` -> `Legacy ID`. Bekannte Kürzel bleiben groß.
+pub fn human_label(name: &str) -> String {
+    let words: Vec<String> = name
+        .split('_')
+        .filter(|w| !w.is_empty())
+        .map(|w| match w {
+            "id" => "ID".to_string(),
+            "url" => "URL".to_string(),
+            "uuid" => "UUID".to_string(),
+            other => other.to_string(),
+        })
+        .collect();
+    let text = words.join(" ");
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => text,
+    }
+}
+
 fn atom_field(atom: &AtomMap) -> FieldSpec {
     FieldSpec::Atom {
         name: atom.name.clone(),
-        label: atom.name.clone(),
+        label: human_label(&atom.name),
         edm_type: atom.edm.clone(),
         package: None,
         max_length: atom.max_length,
@@ -502,6 +546,8 @@ fn atom_field(atom: &AtomMap) -> FieldSpec {
         computed: false,
         immutable: atom.immutable,
         value_list: None,
+        link: false,
+        multiline: false,
     }
 }
 

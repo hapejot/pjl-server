@@ -13,7 +13,7 @@ use data_store::schema::{
 };
 use data_store::{
     json_to_param, param_to_json, DataRecord, DataStore, DraftDataStore, EntityKey, Navigation,
-    SqlParam, StoreError,
+    SqlParam, StoreError, WriteOp,
 };
 use deadpool_postgres::GenericClient;
 use deadpool_postgres::{Object, Pool};
@@ -31,6 +31,7 @@ use tracing::{debug, trace};
 use uuid::Uuid;
 
 use crate::catalog::PostgresCatalog;
+use crate::sqltrace;
 use crate::value::{from_postgres, PgParam};
 
 macro_rules! sql_err {
@@ -65,9 +66,7 @@ fn pg(e: &tokio_postgres::Error) -> String {
 /// parallel.
 macro_rules! conn {
     ($self:expr) => {
-        $self
-            .pool
-            .get()
+        $crate::sqltrace::conn(&$self.pool)
             .await
             .map_err(|e| sql_err!(Conversion, e))?
     };
@@ -79,18 +78,25 @@ macro_rules! conn {
 /// laufen hier echte Nebenlaeufer gegen dieselbe Datenbank. Ein abgebrochener
 /// Schreibvorgang darf keinen halben Zustand hinterlassen: scheitert `body`,
 /// wird die Transaktion beim Verlassen des Blocks verworfen.
-macro_rules! in_transaction {
-    ($self:expr, |$tx:ident| $body:block) => {{
-        let mut connection = conn!($self);
-        let $tx = connection
-            .transaction()
+/// Fuehrt `body` in einer Transaktion auf einer bereits geholten Verbindung aus.
+macro_rules! in_transaction_on {
+    ($conn:expr, |$tx:ident| $body:block) => {{
+        let $tx = $crate::sqltrace::begin(&mut *$conn)
             .await
             .map_err(|e| sql_err!(Conversion, pg(&e)))?;
         let result = async { $body }.await?;
-        $tx.commit()
+        $crate::sqltrace::commit($tx)
             .await
             .map_err(|e| sql_err!(Conversion, pg(&e)))?;
         result
+    }};
+}
+
+/// Fuehrt `body` in einer Transaktion auf einer Verbindung aus dem Pool aus.
+macro_rules! in_transaction {
+    ($self:expr, |$tx:ident| $body:block) => {{
+        let mut connection = conn!($self);
+        in_transaction_on!(connection, |$tx| $body)
     }};
 }
 
@@ -139,7 +145,7 @@ impl PostgresStore {
             .schema()
             .map_err(|e| StoreError::Metadata(e.to_string()))?;
         {
-            let mut client = pool.get().await.map_err(|e| sql_err!(Metadata, e))?;
+            let mut client = sqltrace::conn(&pool).await.map_err(|e| sql_err!(Metadata, e))?;
             apply_schema(&mut client, &POSTGRES, &schema).await?;
             set_applied_revision(&client, &POSTGRES, schema_source.revision().0).await?;
         }
@@ -197,13 +203,11 @@ impl PostgresStore {
             return 0;
         };
         let set = schema.set(set_name).expect("geprueft");
-        let Ok(client) = self.pool.get().await else {
+        let Ok(client) = sqltrace::conn(&self.pool).await else {
             return 0;
         };
         let result = if set.draft_enabled {
-            client
-                .query_one(
-                    &format!(
+            sqltrace::query_one(&client, &format!(
                         "SELECT COUNT(*) FROM {} WHERE {} = $1",
                         quote(set_name),
                         quote(IS_ACTIVE_COLUMN)
@@ -212,8 +216,7 @@ impl PostgresStore {
                 )
                 .await
         } else if is_active {
-            client
-                .query_one(&format!("SELECT COUNT(*) FROM {}", quote(set_name)), &[])
+            sqltrace::query_one(&client, &format!("SELECT COUNT(*) FROM {}", quote(set_name)), &[])
                 .await
         } else {
             return 0;
@@ -223,12 +226,10 @@ impl PostgresStore {
 
     /// Anzahl der Draft-Verwaltungssaetze. Diagnose- und Testhilfe.
     pub async fn count_draft_admin(&self) -> usize {
-        let Ok(client) = self.pool.get().await else {
+        let Ok(client) = sqltrace::conn(&self.pool).await else {
             return 0;
         };
-        client
-            .query_one(
-                &format!("SELECT COUNT(*) FROM {}", quote(DRAFT_ADMIN_TABLE)),
+        sqltrace::query_one(&client, &format!("SELECT COUNT(*) FROM {}", quote(DRAFT_ADMIN_TABLE)),
                 &[],
             )
             .await
@@ -243,9 +244,7 @@ impl PostgresStore {
         conn: &impl GenericClient,
         draft_uuid: &str,
     ) -> Result<Option<Value>, StoreError> {
-        let rows = conn
-            .query(
-                &format!(
+        let rows = sqltrace::query(conn, &format!(
                     "SELECT {uuid}, {created}, {in_process}, {changed} FROM {table} \
                      WHERE {uuid} = $1",
                     uuid = quote("DraftUUID"),
@@ -278,7 +277,7 @@ impl PostgresStore {
             return Ok(None);
         };
         let uuid = admin.draft_uuid.to_string();
-        conn.execute(
+        sqltrace::execute(conn, 
             &format!(
                 "INSERT INTO {table} ({uuid}, {created}, {in_process}, {changed}) \
                  VALUES ($1, $2, $3, $4) \
@@ -360,7 +359,7 @@ impl PostgresStore {
         );
         trace!("write: {sql}");
         let bound = bind(&values);
-        conn.execute(&sql, &as_refs(&bound))
+        sqltrace::execute(conn, &sql, &as_refs(&bound))
             .await
             .map_err(|e| sql_err!(Metadata, pg(&e)))?;
         Ok(())
@@ -445,8 +444,7 @@ impl PostgresStore {
         debug!("query: {sql}");
 
         let bound = bind(&params);
-        let rows = conn
-            .query(&sql, &as_refs(&bound))
+        let rows = sqltrace::query(conn, &sql, &as_refs(&bound))
             .await
             .map_err(|e| sql_err!(Metadata, format!("{} in {sql}", pg(&e))))?;
 
@@ -522,8 +520,7 @@ impl PostgresStore {
                 params.push(SqlParam::Bool(key.is_active_entity));
             }
             let bound = bind(&params);
-            let rows = conn
-                .query(&sql, &as_refs(&bound))
+            let rows = sqltrace::query(conn, &sql, &as_refs(&bound))
                 .await
                 .map_err(|e| sql_err!(Metadata, pg(&e)))?;
             for row in rows {
@@ -538,12 +535,99 @@ impl PostgresStore {
         Ok(result)
     }
 
+    /// Verwaltungszeile (`DraftAdministrativeData_ID`) eines Entwurfssatzes.
+    async fn draft_admin_of(
+        &self,
+        conn: &impl GenericClient,
+        set: &EntitySet,
+        key: &EntityKey,
+    ) -> Result<Option<String>, StoreError> {
+        let sql = format!(
+            "SELECT {} FROM {} WHERE {} = $1 AND {} = $2",
+            quote(DRAFT_ADMIN_COLUMN),
+            quote(&set.name),
+            quote(ID_COLUMN),
+            quote(IS_ACTIVE_COLUMN)
+        );
+        let params = Self::key_params(set, key);
+        let bound = bind(&params);
+        let rows = sqltrace::query(conn, &sql, &as_refs(&bound))
+            .await
+            .map_err(|e| sql_err!(Metadata, pg(&e)))?;
+        Ok(rows.first().and_then(|r| r.get::<_, Option<String>>(0)))
+    }
+
+    /// Entfernt die Verwaltungszeile, sobald kein Satz in einem Draft-Set mehr
+    /// darauf verweist. Gilt fuer Abbruch (DELETE) und Aktivierung gleichermassen,
+    /// denn beide entfernen die Draft-Zeile ueber `delete_row`.
+    async fn purge_orphan_draft_admin(
+        &self,
+        conn: &impl GenericClient,
+        draft_uuid: &str,
+    ) -> Result<(), StoreError> {
+        let schema = self.schema();
+        let unreferenced: Vec<String> = schema
+            .sets()
+            .filter(|s| s.draft_enabled)
+            .map(|s| {
+                format!(
+                    "NOT EXISTS (SELECT 1 FROM {} WHERE {} = $1)",
+                    quote(&s.name),
+                    quote(DRAFT_ADMIN_COLUMN)
+                )
+            })
+            .collect();
+        if unreferenced.is_empty() {
+            return Ok(());
+        }
+        let sql = format!(
+            "DELETE FROM {} WHERE {} = $1 AND {}",
+            quote(DRAFT_ADMIN_TABLE),
+            quote("DraftUUID"),
+            unreferenced.join(" AND ")
+        );
+        sqltrace::execute(conn, &sql, &[&draft_uuid])
+            .await
+            .map_err(|e| sql_err!(Metadata, pg(&e)))?;
+        Ok(())
+    }
+
+    /// Verwaltungszeilen eines Entwurfsbaums (Satz und Kinder, rekursiv). Die
+    /// Kinder fallen beim Loeschen des Parents per CASCADE, ihre Zeilen muessen
+    /// deshalb vorher eingesammelt werden.
+    fn draft_tree_admins<'a>(
+        &'a self,
+        conn: &'a impl GenericClient,
+        set_name: &'a str,
+        key: &'a EntityKey,
+        out: &'a mut Vec<String>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), StoreError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            let schema = self.entity_set(set_name)?;
+            let set = schema.set(set_name).expect("geprueft");
+            if let Some(uuid) = self.draft_admin_of(conn, set, key).await? {
+                out.push(uuid);
+            }
+            for (child_set, child_key) in self.child_keys(conn, set, key).await? {
+                self.draft_tree_admins(conn, &child_set, &child_key, out).await?;
+            }
+            Ok(())
+        })
+    }
+
     async fn delete_row(
         &self,
         conn: &impl GenericClient,
         set: &EntitySet,
         key: &EntityKey,
     ) -> Result<(), StoreError> {
+        // Verwaltungszeilen des Teilbaums vor dem Loeschen merken, danach aufraeumen.
+        let mut admin_uuids = Vec::new();
+        if set.draft_enabled && !key.is_active_entity {
+            self.draft_tree_admins(conn, &set.name, key, &mut admin_uuids)
+                .await?;
+        }
         // ON DELETE CASCADE raeumt die Kompositionskinder ab.
         let sql = format!(
             "DELETE FROM {} WHERE {} = $1{}",
@@ -557,9 +641,12 @@ impl PostgresStore {
         );
         let params = Self::key_params(set, key);
         let bound = bind(&params);
-        conn.execute(&sql, &as_refs(&bound))
+        sqltrace::execute(conn, &sql, &as_refs(&bound))
             .await
             .map_err(|e| sql_err!(Metadata, pg(&e)))?;
+        for uuid in admin_uuids {
+            self.purge_orphan_draft_admin(conn, &uuid).await?;
+        }
         Ok(())
     }
 
@@ -642,7 +729,10 @@ impl PostgresStore {
                 continue;
             }
             match set.get_association(name) {
-                Ok(assoc) => self.expand_association(conn, rows, assoc).await?,
+                Ok(assoc) => {
+                    self.expand_association(conn, rows, assoc, &item.nested_query)
+                        .await?
+                }
                 Err(e) if strict => return Err(StoreError::Metadata(e.to_string())),
                 Err(_) => {}
             }
@@ -650,11 +740,15 @@ impl PostgresStore {
         Ok(())
     }
 
+    /// Laedt die Zielsaetze einer Navigation. Verschachtelte `$expand`-Teile
+    /// des Unterabfragen (z. B. `_VideoTags($expand=tag)`) werden auf den
+    /// geladenen Zielzeilen rekursiv ausgefuehrt, bevor sie eingebettet werden.
     async fn expand_association(
         &self,
         conn: &impl GenericClient,
         rows: &mut [DataRecord],
         assoc: &Association,
+        nested: &ODataQuery,
     ) -> Result<(), StoreError> {
         let schema = self.schema();
         let target = schema
@@ -686,9 +780,12 @@ impl PostgresStore {
                     .filter_raw(raw, params)
                     .shadow_drafts()
                     .build()?;
-                let found = self
+                let mut found = self
                     .query_records(conn, target, sql.text, sql.params, None, "")
                     .await?;
+                if !nested.expand.is_empty() {
+                    Box::pin(self.expand_rows(conn, target, &mut found, nested, false)).await?;
+                }
                 let by_id: HashMap<String, Value> = found
                     .iter()
                     .map(|r| (r.id().to_string(), r.core_json()))
@@ -715,9 +812,12 @@ impl PostgresStore {
                     .filter_raw(raw, params)
                     .shadow_drafts()
                     .build()?;
-                let found = self
+                let mut found = self
                     .query_records(conn, target, sql.text, sql.params, None, "")
                     .await?;
+                if !nested.expand.is_empty() {
+                    Box::pin(self.expand_rows(conn, target, &mut found, nested, false)).await?;
+                }
 
                 let mut grouped: HashMap<String, Vec<Value>> = HashMap::new();
                 for record in found.iter() {
@@ -743,11 +843,14 @@ async fn apply_schema(
     dialect: &dyn Dialect,
     schema: &Schema,
 ) -> Result<(), StoreError> {
-    let plan = ddl::migration_plan(&PostgresCatalog::new(&*client), dialect, schema).await?;
+    let catalog = PostgresCatalog::new(&*client);
+    let mut plan = ddl::migration_plan(&catalog, dialect, schema).await?;
+    // Fremdschluessel bestehender Tabellen an die Ownership der (uebersteuerten)
+    // ddic angleichen. Neu angelegte Tabellen tragen ihren Constraint schon im CREATE.
+    plan.extend(ddl::foreign_key_plan(&catalog, schema).await?);
     for statement in plan {
         debug!("DDL: {statement}");
-        client
-            .batch_execute(&statement)
+        sqltrace::batch_execute(client, &statement)
             .await
             .map_err(|e| sql_err!(Conversion, format!("{} in {statement}", pg(&e))))?;
     }
@@ -755,8 +858,7 @@ async fn apply_schema(
 }
 
 async fn applied_revision(client: &impl GenericClient) -> Option<u64> {
-    client
-        .query_one(&ddl::revision_select_sql(), &[])
+    sqltrace::query_one(client, &ddl::revision_select_sql(), &[])
         .await
         .ok()
         .map(|row| row.get::<_, i64>(0) as u64)
@@ -767,15 +869,133 @@ async fn set_applied_revision(
     dialect: &dyn Dialect,
     revision: u64,
 ) -> Result<(), StoreError> {
-    client
-        .execute(&ddl::revision_delete_sql(), &[])
+    sqltrace::execute(client, &ddl::revision_delete_sql(), &[])
         .await
         .map_err(|e| sql_err!(Conversion, pg(&e)))?;
-    client
-        .execute(&ddl::revision_insert_sql(dialect), &[&(revision as i64)])
+    sqltrace::execute(client, &ddl::revision_insert_sql(dialect), &[&(revision as i64)])
         .await
         .map_err(|e| sql_err!(Conversion, pg(&e)))?;
     Ok(())
+}
+
+impl PostgresStore {
+    async fn create_on(
+        &self,
+        conn: &mut Object,
+        set_name: &str,
+        data: &Value,
+    ) -> Result<DataRecord, StoreError> {
+        let schema = self.entity_set(set_name)?;
+        let set = schema.set(set_name).expect("geprueft");
+        let mut record = DataRecord::from_json(data)?;
+
+        // Unbekannte Felder sind ein Fehler: im relationalen Modell gibt es
+        // keine Spalte, in der sie verschwinden koennten.
+        if let Some(object) = data.as_object() {
+            for field in object.keys() {
+                let known = set.has_column(field)
+                    || matches!(
+                        field.as_str(),
+                        "ID" | "IsActiveEntity"
+                            | "HasActiveEntity"
+                            | "HasDraftEntity"
+                            | "DraftAdministrativeData"
+                            | "DraftMessages"
+                    )
+                    || set.get_association(field).is_ok();
+                if !known {
+                    return Err(StoreError::PropertyNotFound(format!("{set_name}.{field}")));
+                }
+            }
+        }
+
+        // Pruefung des Parents und das Schreiben gehoeren zusammen: sonst
+        // koennte der Parent dazwischen aktiviert oder geloescht werden.
+        in_transaction_on!(conn, |tx| {
+            if let Some(parent) = set.composition_parent() {
+                let parent_set = schema
+                    .set(&parent.target_set)
+                    .map_err(|e| StoreError::Metadata(e.to_string()))?;
+                let fk = parent.foreign_key.column();
+                let parent_id = record
+                    .get(fk)
+                    .and_then(|v| v.as_str().map(str::to_string))
+                    .ok_or_else(|| StoreError::PropertyNotFound(format!("{set_name}.{fk}")))?;
+                let parent_uuid =
+                    Uuid::parse_str(&parent_id).map_err(|e| StoreError::Conflict(e.to_string()))?;
+                let parent_key = EntityKey::new(parent_uuid, record.is_active_entity());
+                let parent_record = self.load_one(&tx, parent_set, &parent_key).await?;
+
+                match (record.is_active_entity(), parent_record.draft_admin_data()) {
+                    (true, None) => {}
+                    (true, Some(_)) => return Err(StoreError::InvalidState),
+                    (false, None) => return Err(StoreError::InvalidState),
+                    (false, Some(admin)) => record.set_draft_uuid(admin.draft_uuid),
+                }
+            } else if !record.is_active_entity() {
+                record.create_draft();
+            }
+
+            self.write_record(&tx, set, &record).await?;
+            Ok::<_, StoreError>(())
+        });
+        Ok(record)
+    }
+
+    async fn patch_on(
+        &self,
+        conn: &mut Object,
+        set_name: &str,
+        key: &EntityKey,
+        patch: &Value,
+    ) -> Result<DataRecord, StoreError> {
+        let schema = self.entity_set(set_name)?;
+        let set = schema.set(set_name).expect("geprueft");
+        if let Some(object) = patch.as_object() {
+            for field in object.keys() {
+                if !set.has_column(field) {
+                    return Err(StoreError::PropertyNotFound(format!("{set_name}.{field}")));
+                }
+                let column = set
+                    .get_column(field)
+                    .map_err(|e| StoreError::Metadata(e.to_string()))?;
+                if column.is_immutable_on_change() {
+                    return Err(StoreError::Conflict(format!(
+                        "{set_name}.{field} ist unveraenderlich"
+                    )));
+                }
+            }
+        }
+        // Lesen, Zusammenfuehren und Schreiben sind ein Vorgang - sonst
+        // ueberschreibt der spaetere Patch die Aenderung des frueheren.
+        let record = in_transaction_on!(conn, |tx| {
+            let mut record = self.load_one(&tx, set, key).await?;
+            record.merge(patch);
+            self.write_record(&tx, set, &record).await?;
+            Ok::<_, StoreError>(record)
+        });
+        Ok(record)
+    }
+
+    async fn delete_on(
+        &self,
+        conn: &mut Object,
+        set_name: &str,
+        key: &EntityKey,
+    ) -> Result<(), StoreError> {
+        let schema = self.entity_set(set_name)?;
+        let set = schema.set(set_name).expect("geprueft");
+        // Ein Draft verwirft immer auch seinen aktiven Zwilling; beide
+        // Loeschungen gelten gemeinsam oder gar nicht.
+        in_transaction_on!(conn, |tx| {
+            self.delete_row(&tx, set, key).await?;
+            if !key.is_active_entity {
+                self.delete_row(&tx, set, &key.sibling()).await?;
+            }
+            Ok::<_, StoreError>(())
+        });
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -811,6 +1031,7 @@ impl DataStore for PostgresStore {
         for s in query.select.iter() {
             sql = sql.select(s);
         }
+        sql = sql.select_record_keys();
         // Fremdschluessel fuer $expand mitlesen, auch wenn $select sie nicht nennt.
         let helper_cols: Vec<String> = if query.select.is_empty() {
             vec![]
@@ -860,12 +1081,31 @@ impl DataStore for PostgresStore {
         Ok(records)
     }
 
+    /// `SELECT COUNT(*)` mit denselben Bedingungen wie `$filter`. Es werden
+    /// keine Zeilen uebertragen; Sortierung, Paging und Expand entfallen.
     async fn count(&self, set_name: &str, query: &ODataQuery) -> usize {
-        let mut q = data_store::query::count_query(query);
-        q.orderby.clear();
-        self.get_collection(set_name, &q)
+        let Ok(schema) = self.entity_set(set_name) else {
+            return 0;
+        };
+        let set = schema.set(set_name).expect("geprueft");
+        // Gleiche Translator-Kette wie in get_collection, damit Zaehlung und
+        // Seitenabfrage dieselben Saetze treffen (inkl. Draft-Schattierung).
+        let mut sql = Translator::new(set, self.dialect())
+            .with_schema(&schema)
+            .shadow_drafts();
+        if let Some(filter) = &query.filter {
+            sql = sql.filter(filter);
+        }
+        let Ok(sql) = sql.build_count() else {
+            return 0;
+        };
+        let Ok(client) = sqltrace::conn(&self.pool).await else {
+            return 0;
+        };
+        let bound = bind(&sql.params);
+        sqltrace::query_one(&client, &sql.text, &as_refs(&bound))
             .await
-            .map(|r| r.len())
+            .map(|r| r.get::<_, i64>(0) as usize)
             .unwrap_or(0)
     }
 
@@ -883,113 +1123,6 @@ impl DataStore for PostgresStore {
             .await?;
         let [row] = rows;
         Ok(row)
-    }
-
-    async fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
-        let schema = self.entity_set(set_name)?;
-        let set = schema.set(set_name).expect("geprueft");
-        let mut record = DataRecord::from_json(data)?;
-
-        // Unbekannte Felder sind ein Fehler: im relationalen Modell gibt es
-        // keine Spalte, in der sie verschwinden koennten.
-        if let Some(object) = data.as_object() {
-            for field in object.keys() {
-                let known = set.has_column(field)
-                    || matches!(
-                        field.as_str(),
-                        "ID" | "IsActiveEntity"
-                            | "HasActiveEntity"
-                            | "HasDraftEntity"
-                            | "DraftAdministrativeData"
-                            | "DraftMessages"
-                    )
-                    || set.get_association(field).is_ok();
-                if !known {
-                    return Err(StoreError::PropertyNotFound(format!("{set_name}.{field}")));
-                }
-            }
-        }
-
-        // Pruefung des Parents und das Schreiben gehoeren zusammen: sonst
-        // koennte der Parent dazwischen aktiviert oder geloescht werden.
-        in_transaction!(self, |tx| {
-            if let Some(parent) = set.composition_parent() {
-                let parent_set = schema
-                    .set(&parent.target_set)
-                    .map_err(|e| StoreError::Metadata(e.to_string()))?;
-                let fk = parent.foreign_key.column();
-                let parent_id = record
-                    .get(fk)
-                    .and_then(|v| v.as_str().map(str::to_string))
-                    .ok_or_else(|| StoreError::PropertyNotFound(format!("{set_name}.{fk}")))?;
-                let parent_uuid =
-                    Uuid::parse_str(&parent_id).map_err(|e| StoreError::Conflict(e.to_string()))?;
-                let parent_key = EntityKey::new(parent_uuid, record.is_active_entity());
-                let parent_record = self.load_one(&tx, parent_set, &parent_key).await?;
-
-                match (record.is_active_entity(), parent_record.draft_admin_data()) {
-                    (true, None) => {}
-                    (true, Some(_)) => return Err(StoreError::InvalidState),
-                    (false, None) => return Err(StoreError::InvalidState),
-                    (false, Some(admin)) => record.set_draft_uuid(admin.draft_uuid),
-                }
-            } else if !record.is_active_entity() {
-                record.create_draft();
-            }
-
-            self.write_record(&tx, set, &record).await?;
-            Ok::<_, StoreError>(())
-        });
-        Ok(record)
-    }
-
-    async fn patch_entity(
-        &self,
-        set_name: &str,
-        key: &EntityKey,
-        patch: &Value,
-    ) -> Result<Value, StoreError> {
-        let schema = self.entity_set(set_name)?;
-        let set = schema.set(set_name).expect("geprueft");
-        if let Some(object) = patch.as_object() {
-            for field in object.keys() {
-                if !set.has_column(field) {
-                    return Err(StoreError::PropertyNotFound(format!("{set_name}.{field}")));
-                }
-                let column = set
-                    .get_column(field)
-                    .map_err(|e| StoreError::Metadata(e.to_string()))?;
-                if column.is_immutable_on_change() {
-                    return Err(StoreError::Conflict(format!(
-                        "{set_name}.{field} ist unveraenderlich"
-                    )));
-                }
-            }
-        }
-        // Lesen, Zusammenfuehren und Schreiben sind ein Vorgang - sonst
-        // ueberschreibt der spaetere Patch die Aenderung des frueheren.
-        in_transaction!(self, |tx| {
-            let mut record = self.load_one(&tx, set, key).await?;
-            record.merge(patch);
-            self.write_record(&tx, set, &record).await?;
-            Ok::<_, StoreError>(())
-        });
-        Ok(patch.clone())
-    }
-
-    async fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
-        let schema = self.entity_set(set_name)?;
-        let set = schema.set(set_name).expect("geprueft");
-        // Ein Draft verwirft immer auch seinen aktiven Zwilling; beide
-        // Loeschungen gelten gemeinsam oder gar nicht.
-        in_transaction!(self, |tx| {
-            self.delete_row(&tx, set, key).await?;
-            if !key.is_active_entity {
-                self.delete_row(&tx, set, &key.sibling()).await?;
-            }
-            Ok::<_, StoreError>(())
-        });
-        Ok(())
     }
 
     async fn delete_entity_tree_only(
@@ -1027,6 +1160,59 @@ impl DataStore for PostgresStore {
             .await?
             .get(property)
             .ok_or_else(|| StoreError::PropertyNotFound(property.into()))
+    }
+
+    async fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
+        let mut conn = conn!(self);
+        self.create_on(&mut conn, set_name, data).await
+    }
+
+    async fn patch_entity(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+        patch: &Value,
+    ) -> Result<Value, StoreError> {
+        let mut conn = conn!(self);
+        self.patch_on(&mut conn, set_name, key, patch).await?;
+        Ok(patch.clone())
+    }
+
+    async fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
+        let mut conn = conn!(self);
+        self.delete_on(&mut conn, set_name, key).await
+    }
+
+    /// Batch-Variante: eine Verbindung fuer die ganze Liste. Jeder Satz laeuft
+    /// weiterhin in seiner eigenen Transaktion, Fehler betreffen nur ihren Satz.
+    async fn write_entities(
+        &self,
+        set_name: &str,
+        ops: Vec<WriteOp>,
+    ) -> Vec<Result<Option<DataRecord>, StoreError>> {
+        let mut conn = match sqltrace::conn(&self.pool).await {
+            Ok(conn) => conn,
+            Err(e) => {
+                let msg = e.to_string();
+                return ops
+                    .iter()
+                    .map(|_| Err(sql_err!(Conversion, msg.clone())))
+                    .collect();
+            }
+        };
+        let mut results = Vec::with_capacity(ops.len());
+        for op in ops {
+            let result = match op {
+                WriteOp::Create(data) => self.create_on(&mut conn, set_name, &data).await.map(Some),
+                WriteOp::Patch(key, patch) => self
+                    .patch_on(&mut conn, set_name, &key, &patch)
+                    .await
+                    .map(Some),
+                WriteOp::Delete(key) => self.delete_on(&mut conn, set_name, &key).await.map(|()| None),
+            };
+            results.push(result);
+        }
+        results
     }
 
     async fn commit(&self) {}

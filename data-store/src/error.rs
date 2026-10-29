@@ -4,7 +4,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum StoreError {
-    #[error("Datei {path} nicht gefunden in {bt}")]
+    #[error("Satz {path} nicht gefunden")]
     NotFound { path: PathBuf, bt: Box<Backtrace> },
 
     #[error("IO Fehler: {0}")]
@@ -27,6 +27,9 @@ pub enum StoreError {
 
     #[error("Conflict: {0}")]
     Conflict(String),
+
+    #[error("Forbidden: {0}")]
+    Forbidden(String),
 
     #[error("Property not Found {0}")]
     PropertyNotFound(String),

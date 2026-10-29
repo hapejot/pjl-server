@@ -1,17 +1,22 @@
-//! Tag-Facetten-Endpunkt fuer die Video-Oberflaeche.
+//! Tag-Facetten und Trefferliste fuer die Video-Oberflaeche. Alle Abfragen laufen
+//! direkt als SQL gegen die PostgreSQL-Datenbank, es gibt keinen Speicher-Index.
 //!
 //! * `GET /ext/video/tags/facets?selected=<id>,<id>&top=20&q=<text>`
-//!   `q` filtert die angebotenen Tags nach Name (Teilstring, ohne Gross-/Kleinschreibung).
 //!   liefert `{ "matches": n, "tags": [{ "id", "name", "count" }] }`.
-//!   `matches` ist die Anzahl Videos mit allen gewaehlten Tags, `tags` die noch
-//!   sinnvoll waehlbaren Tags (mindestens ein Treffer), absteigend nach Trefferzahl.
-//! * `503` solange der Index noch geladen wird, `400` bei unbekannter Tag-ID.
+//!   `matches` ist die Anzahl Videos mit allen gewaehlten Tags, `tags` die
+//!   uebrigen Tags mit mindestens einem Treffer, absteigend nach Trefferzahl.
+//! * `GET /ext/video/tags/videos?selected=..&skip=0&top=100`
+//!   liefert `{ "count": n, "value": [{ "ID", "name", "duration_seconds" }] }`,
+//!   sortiert nach Name.
+//! * Gezaehlt werden nur aktive, sichtbare Tags und aktive, nicht geloeschte Videos.
+//! * `400` bei unbekannter Tag-ID, `503` ohne PostgreSQL-Store.
 //!
-//! Der Index (`crate::tag_index`) wird beim Start einmal aus dem Store aufgebaut.
-//! Aenderungen an Tag-Zuordnungen werden erst nach einem Neustart sichtbar.
+//! Die Ergebnisse ohne Auswahl (Rangliste ueber alle Tags) sind fuer
+//! `TAG_CACHE_SECS` Sekunden zwischengespeichert. Mit Auswahl wird immer frisch gerechnet.
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use axum::{
     extract::{Query, State},
@@ -20,29 +25,40 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use data_store::DataRecord;
+use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
 use fiori_server::{extension::Extension, AppState};
-use odata::query::ODataQuery;
+use postgres_relational_store::sqltrace;
 use serde_json::{json, Value};
-use tokio::sync::OnceCell;
-use tracing::{error, info};
-
-use crate::tag_index::{FacetError, TagIndex};
+use tokio::sync::Mutex;
+use tokio_postgres::NoTls;
+use tracing::error;
 
 const DEFAULT_TOP: usize = 20;
 const MAX_TOP: usize = 200;
 const DEFAULT_LIST: usize = 100;
 const MAX_LIST: usize = 200;
+const TAG_CACHE_SECS: u64 = 60;
 
-pub struct VideoTagFacets {
-    index: Arc<OnceCell<Arc<TagIndex>>>,
+/// Facette: Tag mit Trefferzahl.
+#[derive(Debug, Clone)]
+struct Facet {
+    id: String,
+    name: String,
+    count: i64,
 }
+
+/// Rangliste ohne Auswahl: Gesamtzahl und alle sichtbaren Tags mit Treffern.
+#[derive(Debug)]
+struct Ranking {
+    total: i64,
+    tags: Vec<Facet>,
+}
+
+pub struct VideoTagFacets;
 
 impl VideoTagFacets {
     pub fn new() -> Self {
-        Self {
-            index: Arc::new(OnceCell::new()),
-        }
+        Self
     }
 }
 
@@ -53,6 +69,10 @@ impl Default for VideoTagFacets {
 }
 
 impl Extension for VideoTagFacets {
+    fn status(&self) -> Option<(String, Value)> {
+        Some(("video.tags".into(), crate::status::tags_json()))
+    }
+
     fn ui5_modules(&self) -> Vec<String> {
         vec!["video/ext/TagSearch".into()]
     }
@@ -76,25 +96,14 @@ impl Extension for VideoTagFacets {
     }
 
     fn routes(&self, app: AppState) -> Router {
-        // Index im Hintergrund laden; der Server ist sofort erreichbar.
-        let cell = self.index.clone();
-        let store_app = app.clone();
-        tokio::spawn(async move {
-            info!("loading tag index");
-            match load_index(&store_app).await {
-                Ok(idx) => {
-                    info!(
-                        videos = idx.video_count(),
-                        tags = idx.tag_count(),
-                        "tag index ready"
-                    );
-                    let _ = cell.set(Arc::new(idx));
-                }
-                Err(e) => error!("tag index could not be built: {e:#}"),
+        let pool = match app.config.store_pg_url.as_deref().map(build_pool) {
+            Some(Ok(pool)) => Some(pool),
+            Some(Err(e)) => {
+                error!("tag facets: pool could not be built: {e:#}");
+                None
             }
-            info!("tag index completed");
-        });
-
+            None => None,
+        };
         Router::new()
             .route("/ext/video/tags/facets", get(facets))
             .route("/ext/video/tags/videos", get(videos))
@@ -109,9 +118,27 @@ impl Extension for VideoTagFacets {
                 get(list_controller),
             )
             .with_state(Arc::new(FacetState {
-                index: self.index.clone(),
+                pool,
+                ranking: Mutex::new(None),
             }))
     }
+}
+
+fn build_pool(url: &str) -> anyhow::Result<Pool> {
+    let config: tokio_postgres::Config = url.parse()?;
+    let manager = Manager::from_config(
+        config,
+        NoTls,
+        ManagerConfig {
+            recycling_method: RecyclingMethod::Fast,
+        },
+    );
+    Ok(Pool::builder(manager).max_size(8).build()?)
+}
+
+struct FacetState {
+    pool: Option<Pool>,
+    ranking: Mutex<Option<(Instant, Arc<Ranking>)>>,
 }
 
 const SEARCH_PAGE: &str = include_str!("../tagsearch/index.html");
@@ -169,19 +196,20 @@ async fn search_app() -> Response {
         .into_response()
 }
 
-struct FacetState {
-    index: Arc<OnceCell<Arc<TagIndex>>>,
-}
 
 fn parse_selected(q: &HashMap<String, String>) -> Vec<String> {
-    q.get("selected")
+    let mut ids: Vec<String> = q
+        .get("selected")
         .map(String::as_str)
         .unwrap_or_default()
         .split(',')
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
-        .collect()
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
 }
 
 fn parse_usize(q: &HashMap<String, String>, key: &str, default: usize, max: usize) -> usize {
@@ -191,216 +219,252 @@ fn parse_usize(q: &HashMap<String, String>, key: &str, default: usize, max: usiz
         .min(max)
 }
 
-fn not_ready() -> Response {
-    (
-        StatusCode::SERVICE_UNAVAILABLE,
-        Json(json!({ "error": "tag index is loading" })),
-    )
-        .into_response()
+fn error_response(status: StatusCode, msg: impl Into<String>) -> Response {
+    (status, Json(json!({ "error": msg.into() }))).into_response()
 }
 
-fn unknown_tag(id: String) -> Response {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(json!({ "error": format!("unknown tag {id}") })),
+fn internal(e: impl std::fmt::Display) -> Response {
+    error!("tag facets: {e}");
+    error_response(StatusCode::INTERNAL_SERVER_ERROR, "database error")
+}
+
+/// Gemeinsame CTE: Videos, die alle gewaehlten Tags haben (aktiv, nicht geloescht).
+const MATCHED_CTE: &str = r#"
+matched AS (
+  SELECT vt."video_ID" AS vid
+  FROM "VideoTagSet" vt
+  JOIN "VideoSet" v
+    ON v."ID" = vt."video_ID" AND v."IsActiveEntity" AND v."deleted_at" IS NULL
+  WHERE vt."IsActiveEntity" AND vt."tag_ID" = ANY($1)
+  GROUP BY vt."video_ID"
+  HAVING COUNT(DISTINCT vt."tag_ID") = $2
+)"#;
+
+/// Prueft, dass alle Auswahl-IDs sichtbare aktive Tags sind.
+async fn check_selection(
+    client: &deadpool_postgres::Object,
+    selected: &[String],
+) -> Result<(), Response> {
+    if selected.is_empty() {
+        return Ok(());
+    }
+    let rows = sqltrace::query(
+        client,
+        r#"SELECT "ID" FROM "TagSet"
+           WHERE "IsActiveEntity" AND "visible" IS NOT FALSE AND "ID" = ANY($1)"#,
+        &[&selected],
     )
-        .into_response()
+    .await
+    .map_err(internal)?;
+    let known: Vec<String> = rows.iter().map(|r| r.get::<_, String>(0)).collect();
+    match selected.iter().find(|id| !known.contains(id)) {
+        Some(id) => Err(error_response(
+            StatusCode::BAD_REQUEST,
+            format!("unknown tag {id}"),
+        )),
+        None => Ok(()),
+    }
+}
+
+/// Rangliste ohne Auswahl, aus dem Cache wenn frisch genug.
+async fn ranking(st: &FacetState, client: &deadpool_postgres::Object) -> Result<Arc<Ranking>, Response> {
+    let mut cache = st.ranking.lock().await;
+    if let Some((at, r)) = cache.as_ref() {
+        if at.elapsed() < Duration::from_secs(TAG_CACHE_SECS) {
+            crate::status::tag_cache_hit();
+            return Ok(r.clone());
+        }
+    }
+    let total: i64 = sqltrace::query_one(
+        client,
+        r#"SELECT COUNT(*) FROM "VideoSet" WHERE "IsActiveEntity" AND "deleted_at" IS NULL"#,
+        &[],
+    )
+    .await
+    .map_err(internal)?
+    .get(0);
+    let rows = sqltrace::query(
+        client,
+        r#"SELECT t."ID", t."name", COUNT(*)::bigint
+           FROM "VideoTagSet" vt
+           JOIN "VideoSet" v
+             ON v."ID" = vt."video_ID" AND v."IsActiveEntity" AND v."deleted_at" IS NULL
+           JOIN "TagSet" t
+             ON t."ID" = vt."tag_ID" AND t."IsActiveEntity" AND t."visible" IS NOT FALSE
+           WHERE vt."IsActiveEntity"
+           GROUP BY t."ID", t."name""#,
+        &[],
+    )
+    .await
+    .map_err(internal)?;
+    let mut tags: Vec<Facet> = rows
+        .iter()
+        .map(|r| Facet {
+            id: r.get(0),
+            name: r.get(1),
+            count: r.get(2),
+        })
+        .collect();
+    tags.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.name.cmp(&b.name)));
+    let result = Arc::new(Ranking { total, tags });
+    *cache = Some((Instant::now(), result.clone()));
+    crate::status::tag_cache_refreshed();
+    Ok(result)
 }
 
 /// Trefferliste: `GET /ext/video/tags/videos?selected=..&skip=0&top=100`
-/// Liefert `{ "count": n, "value": [{ "ID", "name", "duration_seconds" }] }`, sortiert nach Name.
-async fn videos(
-    State(st): State<Arc<FacetState>>,
-    Query(q): Query<HashMap<String, String>>,
-) -> Response {
-    let Some(index) = st.index.get() else {
-        return not_ready();
+async fn videos(State(st): State<Arc<FacetState>>, Query(q): Query<HashMap<String, String>>) -> Response {
+    let Some(pool) = st.pool.as_ref() else {
+        return error_response(StatusCode::SERVICE_UNAVAILABLE, "no postgres store");
     };
     let selected = parse_selected(&q);
-    let skip = parse_usize(&q, "skip", 0, usize::MAX);
-    let top = parse_usize(&q, "top", DEFAULT_LIST, MAX_LIST).max(1);
-
-    let index = index.clone();
-    let result = tokio::task::spawn_blocking(move || index.videos(&selected, skip, top)).await;
-    match result {
-        Ok(Ok((count, rows))) => Json(json!({
-            "count": count,
-            "value": rows.iter().map(|r| json!({
-                "ID": r.id,
-                "name": r.name,
-                "duration_seconds": r.duration_seconds,
-            })).collect::<Vec<Value>>(),
-        }))
-        .into_response(),
-        Ok(Err(FacetError::UnknownTag(id))) => unknown_tag(id),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    let skip = parse_usize(&q, "skip", 0, usize::MAX) as i64;
+    let top = parse_usize(&q, "top", DEFAULT_LIST, MAX_LIST).max(1) as i64;
+    let client = match pool.get().await {
+        Ok(c) => c,
+        Err(e) => return internal(e),
+    };
+    if let Err(resp) = check_selection(&client, &selected).await {
+        return resp;
     }
+
+    let (count, rows) = if selected.is_empty() {
+        let total = match ranking(&st, &client).await {
+            Ok(r) => r.total,
+            Err(resp) => return resp,
+        };
+        let rows = sqltrace::query(
+            &client,
+            r#"SELECT v."ID", v."name", CAST(NULLIF(v."duration_seconds", '') AS double precision)
+               FROM "VideoSet" v
+               WHERE v."IsActiveEntity" AND v."deleted_at" IS NULL
+               ORDER BY v."name" COLLATE "C", v."ID"
+               LIMIT $1 OFFSET $2"#,
+            &[&top, &skip],
+        )
+        .await;
+        (total, rows)
+    } else {
+        let n = selected.len() as i64;
+        let count = sqltrace::query_one(
+            &client,
+            &format!("WITH {MATCHED_CTE} SELECT COUNT(*) FROM matched"),
+            &[&selected, &n],
+        )
+        .await
+        .map(|r| r.get::<_, i64>(0));
+        let count = match count {
+            Ok(c) => c,
+            Err(e) => return internal(e),
+        };
+        let rows = sqltrace::query(
+            &client,
+            &format!(
+                r#"WITH {MATCHED_CTE}
+                   SELECT v."ID", v."name", CAST(NULLIF(v."duration_seconds", '') AS double precision)
+                   FROM "VideoSet" v JOIN matched m ON m.vid = v."ID"
+                   WHERE v."IsActiveEntity"
+                   ORDER BY v."name" COLLATE "C", v."ID"
+                   LIMIT $3 OFFSET $4"#
+            ),
+            &[&selected, &n, &top, &skip],
+        )
+        .await;
+        (count, rows)
+    };
+    let rows = match rows {
+        Ok(r) => r,
+        Err(e) => return internal(e),
+    };
+    Json(json!({
+        "count": count,
+        "value": rows.iter().map(|r| json!({
+            "ID": r.get::<_, String>(0),
+            "name": r.get::<_, Option<String>>(1),
+            "duration_seconds": r.get::<_, Option<f64>>(2),
+        })).collect::<Vec<Value>>(),
+    }))
+    .into_response()
 }
 
-async fn facets(
-    State(st): State<Arc<FacetState>>,
-    Query(q): Query<HashMap<String, String>>,
-) -> Response {
-    let Some(index) = st.index.get() else {
-        return not_ready();
+/// Facetten: `GET /ext/video/tags/facets?selected=..&top=20&q=..`
+async fn facets(State(st): State<Arc<FacetState>>, Query(q): Query<HashMap<String, String>>) -> Response {
+    let Some(pool) = st.pool.as_ref() else {
+        return error_response(StatusCode::SERVICE_UNAVAILABLE, "no postgres store");
     };
     let selected = parse_selected(&q);
     let top = parse_usize(&q, "top", DEFAULT_TOP, MAX_TOP).max(1);
-    let needle = q.get("q").cloned().unwrap_or_default();
-
-    // Die Berechnung ist CPU-lastig; ausserhalb des Async-Threads ausfuehren.
-    let index = index.clone();
-    let result =
-        tokio::task::spawn_blocking(move || index.facets_matching(&selected, top, &needle)).await;
-    match result {
-        Ok(Ok(r)) => Json(json!({
-            "matches": r.matches,
-            "tags": r.tags.iter().map(|f| json!({
-                "id": f.id, "name": f.name, "count": f.count
-            })).collect::<Vec<Value>>(),
-        }))
-        .into_response(),
-        Ok(Err(FacetError::UnknownTag(id))) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": format!("unknown tag {id}") })),
-        )
-            .into_response(),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    let needle = q.get("q").map(|s| s.trim().to_lowercase()).unwrap_or_default();
+    let client = match pool.get().await {
+        Ok(c) => c,
+        Err(e) => return internal(e),
+    };
+    if let Err(resp) = check_selection(&client, &selected).await {
+        return resp;
     }
-}
 
-/// Index aus Tags, Zuordnungen und Videos des Stores aufbauen.
-async fn load_index(app: &AppState) -> anyhow::Result<TagIndex> {
-    let query = ODataQuery::new();
-    let tags = app
-        .store
-        .get_collection("TagSet", &query)
-        .await
-        .map_err(|e| anyhow::anyhow!("TagSet: {e}"))?;
-    let rows = app
-        .store
-        .get_collection("VideoTagSet", &query)
-        .await
-        .map_err(|e| anyhow::anyhow!("VideoTagSet: {e}"))?;
-    let videos = app
-        .store
-        .get_collection("VideoSet", &query)
-        .await
-        .map_err(|e| anyhow::anyhow!("VideoSet: {e}"))?;
-
-    // Der Aufbau kostet einige Sekunden; blockierend im Hintergrund-Thread.
-    let index = tokio::task::spawn_blocking(move || {
-        let (names, assignments) = index_inputs(&tags, &rows);
-        let mut index = TagIndex::build(assignments, &names);
-        index.attach_videos(video_meta(&videos));
-        index
-    })
-    .await?;
-    Ok(index)
-}
-
-/// Video-Metadaten (ID, Name, Dauer) der aktiven Videos.
-pub(crate) fn video_meta(videos: &[DataRecord]) -> Vec<(String, String, Option<f64>)> {
-    videos
-        .iter()
-        .filter(|r| r.is_active_entity())
-        .filter_map(|r| {
-            let id = r.get("ID")?.as_str()?.to_string();
-            let name = r
-                .get("name")
-                .and_then(|v| v.as_str().map(str::to_string))
-                .unwrap_or_default();
-            let duration = r.get("duration_seconds").and_then(|v| v.as_f64());
-            Some((id, name, duration))
-        })
-        .collect()
-}
-
-/// Eingaben fuer den Index aus Tag- und Zuordnungs-Records.
-///
-/// Unsichtbare Tags (`visible = false`) fliegen komplett raus: weder als Facette
-/// noch als Auswahl. Zuordnungen zu solchen Tags werden ebenfalls verworfen.
-/// Fehlt das Feld `visible`, gilt der Tag als sichtbar.
-pub(crate) fn index_inputs(
-    tags: &[DataRecord],
-    rows: &[DataRecord],
-) -> (HashMap<String, String>, Vec<(String, String)>) {
-    let mut names: HashMap<String, String> = HashMap::new();
-    for t in tags.iter().filter(|r| r.is_active_entity()) {
-        if t.get("visible").and_then(|v| v.as_bool()) == Some(false) {
-            continue;
-        }
-        if let (Some(id), Some(name)) = (
-            t.get("ID").and_then(|v| v.as_str().map(str::to_string)),
-            t.get("name").and_then(|v| v.as_str().map(str::to_string)),
-        ) {
-            names.insert(id, name);
-        }
+    if selected.is_empty() {
+        let r = match ranking(&st, &client).await {
+            Ok(r) => r,
+            Err(resp) => return resp,
+        };
+        let tags: Vec<Value> = r
+            .tags
+            .iter()
+            .filter(|f| needle.is_empty() || f.name.to_lowercase().contains(&needle))
+            .take(top)
+            .map(facet_json)
+            .collect();
+        return Json(json!({ "matches": r.total, "tags": tags })).into_response();
     }
-    let assignments = rows
+
+    let n = selected.len() as i64;
+    let top_i = top as i64;
+    let matches = sqltrace::query_one(
+        &client,
+        &format!("WITH {MATCHED_CTE} SELECT COUNT(*) FROM matched"),
+        &[&selected, &n],
+    )
+    .await
+    .map(|r| r.get::<_, i64>(0));
+    let matches = match matches {
+        Ok(m) => m,
+        Err(e) => return internal(e),
+    };
+    let rows = sqltrace::query(
+        &client,
+        &format!(
+            r#"WITH {MATCHED_CTE}
+               SELECT t."ID", t."name", COUNT(*)::bigint AS c
+               FROM matched m
+               JOIN "VideoTagSet" vt ON vt."video_ID" = m.vid AND vt."IsActiveEntity"
+               JOIN "TagSet" t ON t."ID" = vt."tag_ID" AND t."IsActiveEntity" AND t."visible" IS NOT FALSE
+               WHERE NOT (vt."tag_ID" = ANY($1))
+                 AND ($3 = '' OR strpos(lower(t."name"), $3) > 0)
+               GROUP BY t."ID", t."name"
+               ORDER BY c DESC, t."name" COLLATE "C"
+               LIMIT $4"#
+        ),
+        &[&selected, &n, &needle, &top_i],
+    )
+    .await;
+    let rows = match rows {
+        Ok(r) => r,
+        Err(e) => return internal(e),
+    };
+    let tags: Vec<Value> = rows
         .iter()
-        .filter(|r| r.is_active_entity())
-        .filter_map(|r| {
-            let video = r.get("video_ID")?.as_str()?.to_string();
-            let tag = r.get("tag_ID")?.as_str()?.to_string();
-            names.contains_key(&tag).then_some((video, tag))
+        .map(|r| {
+            facet_json(&Facet {
+                id: r.get(0),
+                name: r.get(1),
+                count: r.get(2),
+            })
         })
         .collect();
-    (names, assignments)
+    Json(json!({ "matches": matches, "tags": tags })).into_response()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn rec(v: Value) -> DataRecord {
-        DataRecord::from_json(&v).expect("record")
-    }
-
-    #[test]
-    fn invisible_tags_and_their_assignments_are_dropped() {
-        let tags = vec![
-            rec(
-                json!({"ID": "11111111-1111-4111-8111-111111111111", "IsActiveEntity": true, "name": "sichtbar", "visible": true}),
-            ),
-            rec(
-                json!({"ID": "22222222-2222-4222-8222-222222222222", "IsActiveEntity": true, "name": "versteckt", "visible": false}),
-            ),
-            rec(
-                json!({"ID": "33333333-3333-4333-8333-333333333333", "IsActiveEntity": true, "name": "ohne Feld"}),
-            ),
-        ];
-        let rows = vec![
-            rec(
-                json!({"ID": "c1111111-1111-4111-8111-111111111111", "IsActiveEntity": true, "video_ID": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "tag_ID": "11111111-1111-4111-8111-111111111111"}),
-            ),
-            rec(
-                json!({"ID": "c2222222-2222-4222-8222-222222222222", "IsActiveEntity": true, "video_ID": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "tag_ID": "22222222-2222-4222-8222-222222222222"}),
-            ),
-            rec(
-                json!({"ID": "c3333333-3333-4333-8333-333333333333", "IsActiveEntity": true, "video_ID": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "tag_ID": "33333333-3333-4333-8333-333333333333"}),
-            ),
-        ];
-        let (names, assignments) = index_inputs(&tags, &rows);
-        assert!(names.contains_key("11111111-1111-4111-8111-111111111111"));
-        assert!(!names.contains_key("22222222-2222-4222-8222-222222222222"));
-        assert!(
-            names.contains_key("33333333-3333-4333-8333-333333333333"),
-            "fehlendes visible gilt als sichtbar"
-        );
-        assert_eq!(
-            assignments,
-            vec![
-                (
-                    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
-                    "11111111-1111-4111-8111-111111111111".to_string()
-                ),
-                (
-                    "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb".to_string(),
-                    "33333333-3333-4333-8333-333333333333".to_string()
-                ),
-            ]
-        );
-    }
+fn facet_json(f: &Facet) -> Value {
+    json!({ "id": f.id, "name": f.name, "count": f.count })
 }

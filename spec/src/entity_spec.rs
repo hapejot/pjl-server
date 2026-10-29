@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
@@ -101,6 +102,11 @@ impl AtomValueList {
 /// source so no caller hard-codes the string.
 pub const ID_SUFFIX: &str = "_ID";
 
+/// Hilfsfunktion fuer `skip_serializing_if`: Default-`false` wird nicht geschrieben.
+pub(crate) fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// A field specification — describes the entity's own data (leaves on the relationship tree).
 ///
 /// Only two variants: Atom (simple values) and Measure (value + unit/currency dependency).
@@ -112,6 +118,8 @@ pub enum FieldSpec {
         entity: String,
         collection: bool,
         owned: bool,
+        /// Lesbarer Titel der Navigation (aus der Relationship). Fehlt er, gilt der Name.
+        label: Option<String>,
     },
     /// Simple value: text, number, date, boolean, coded value with optional dropdown.
     Atom {
@@ -119,16 +127,29 @@ pub enum FieldSpec {
         label: String,
         edm_type: String,
         /// Logical package grouping (e.g. "itil", "asset_management").
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         package: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         max_length: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         precision: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         scale: Option<u32>,
         /// Server-generated field — never editable (Core.Computed + NonInsertable).
+        #[serde(default, skip_serializing_if = "is_false")]
         computed: bool,
         /// Set at creation, read-only afterward (Core.Immutable).
+        #[serde(default, skip_serializing_if = "is_false")]
         immutable: bool,
         /// Optional value help (dropdown/dialog).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         value_list: Option<AtomValueList>,
+        /// Wert ist eine URL: wird als anklickbarer Link dargestellt (`UI.DataFieldWithUrl`).
+        #[serde(default, skip_serializing_if = "is_false")]
+        link: bool,
+        /// Langtext: mehrzeilige Eingabe (`UI.MultiLineText`). `max_length` begrenzt die Laenge.
+        #[serde(default, skip_serializing_if = "is_false")]
+        multiline: bool,
     },
     /// Amount/quantity with a unit/currency companion field.
     /// Generates `Org.OData.Measures.V1.ISOCurrency` or `.Unit` annotation.
@@ -136,8 +157,11 @@ pub enum FieldSpec {
         name: String,
         label: String,
         /// Logical package grouping (e.g. "itil", "asset_management").
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         package: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         precision: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         scale: Option<u32>,
         /// Name of the companion Atom field holding the unit/currency code (e.g. "Currency").
         unit_field: String,
@@ -177,6 +201,8 @@ impl FieldSpec {
             computed: false,
             immutable: false,
             value_list: None,
+            link: false,
+            multiline: false,
         }
     }
 
@@ -192,6 +218,8 @@ impl FieldSpec {
             computed: false,
             immutable: false,
             value_list: None,
+            link: false,
+            multiline: false,
         }
     }
 
@@ -215,6 +243,8 @@ impl FieldSpec {
             computed: false,
             immutable: false,
             value_list: None,
+            link: false,
+            multiline: false,
         }
     }
 
@@ -278,7 +308,7 @@ impl FieldSpec {
         match self {
             FieldSpec::Atom { label, .. } => label,
             FieldSpec::Measure { label, .. } => label,
-            FieldSpec::Lookup { name, .. } => name,
+            FieldSpec::Lookup { name, label, .. } => label.as_deref().unwrap_or(name),
         }
     }
 
@@ -314,6 +344,11 @@ pub struct EntitySpec {
     /// Logical package grouping (e.g. "itil", "asset_management").
     pub package: String,
 
+    /// Singular display name for the Object Page header (e.g. "Customer").
+    /// Frei definierbar, unabhaengig vom Entitaetsnamen. Fehlt er, gilt der Name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_name: Option<String>,
+
     /// Plural display name (e.g. "Orders"). Default: set_name.
     pub type_name_plural: String,
 
@@ -324,6 +359,62 @@ pub struct EntitySpec {
     /// Benannte Listenansichten (Spaltenauswahl). Leer = Standard (nur `name`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub list_views: Vec<ListView>,
+
+    /// Vorbelegte Filterwerte je Atom-Feld (`Common.FilterDefaultValue`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub filter_defaults: BTreeMap<String, FilterDefault>,
+
+    /// Felder der Filterleiste in dieser Reihenfolge (`UI.SelectionFields`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub selection_fields: Vec<String>,
+
+    /// Einstellungen je Object-Page-Facette (Tabellenabschnitt einer to-many Navigation).
+    /// Fehlt ein Eintrag, gelten die Standardwerte.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub facets: Vec<FacetSpec>,
+
+    /// Auditierung (Owner, CreatedBy/At, ChangedBy/At). Standard: `true`.
+    /// `false` fuer Entitaeten wie Festwerte, die keinen Owner brauchen.
+    #[serde(default = "default_audited", skip_serializing_if = "is_true")]
+    pub audited: bool,
+}
+
+fn default_audited() -> bool {
+    true
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
+}
+
+/// Einstellungen fuer eine Object-Page-Facette, identifiziert ueber `facet`.
+/// Weitere Einstellungen kommen als zusaetzliche Felder hinzu.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FacetSpec {
+    /// Identifikator der Facette: eine to-many Navigation des Eigentuemers
+    /// (z. B. `_ActorSceneMap`), `General` (Feldabschnitt Main), `Default`
+    /// (nicht genannte Felder) oder ein frei gewaehlter Schluessel mit `fields`.
+    pub facet: String,
+    /// Listenansicht der Zielentitaet. Fehlt sie oder ist `default`, gilt das Standard-LineItem.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
+    /// Titel des Facetten-Abschnitts. Fehlt er, wird der Schluessel verwendet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Felder des Abschnitts in Anzeigereihenfolge (Atome oder einwertige Navigationen).
+    /// Bei `General` ohne Angabe: alle Felder. Bei `Default`: nicht genannte Felder.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<String>,
+}
+
+/// Konstanter Standardwert fuer einen Filter. Zahlen und Datumswerte sind
+/// bewusst nicht enthalten (eigener Literal-Typ noetig).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum FilterDefault {
+    Text(String),
+    Flag(bool),
 }
 
 /// Eine benannte Listenansicht einer Entitaet.
@@ -383,10 +474,41 @@ impl EntitySpec {
         Self {
             name: name.into(),
             package: package.into(),
+            type_name: None,
             type_name_plural: type_name_plural.into(),
             fields: vec![],
             list_views: vec![],
+            filter_defaults: BTreeMap::new(),
+            selection_fields: vec![],
+            facets: vec![],
+            audited: true,
         }
+    }
+
+    /// Schaltet die Auditierung dieser Entitaet ab (kein Owner, keine Audit-Felder).
+    pub fn without_audit(mut self) -> Self {
+        self.audited = false;
+        self
+    }
+
+    pub fn is_audited(&self) -> bool {
+        self.audited
+    }
+
+    pub fn facets(&self) -> &[FacetSpec] {
+        &self.facets
+    }
+
+    pub fn facet(&self, key: &str) -> Option<&FacetSpec> {
+        self.facets.iter().find(|f| f.facet == key)
+    }
+
+    pub fn selection_fields(&self) -> &[String] {
+        &self.selection_fields
+    }
+
+    pub fn filter_defaults(&self) -> &BTreeMap<String, FilterDefault> {
+        &self.filter_defaults
     }
 
     pub fn list_view(mut self, view: ListView) -> Self {
@@ -410,6 +532,11 @@ impl EntitySpec {
 
     pub fn fields(&self) -> impl Iterator<Item = &FieldSpec> {
         self.fields.iter()
+    }
+
+    /// Singularer Anzeigename: `type_name`, sonst der Entitaetsname.
+    pub fn type_name(&self) -> &str {
+        self.type_name.as_deref().unwrap_or(&self.name)
     }
 
     pub fn setname(&self) -> String {

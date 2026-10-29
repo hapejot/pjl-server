@@ -26,6 +26,9 @@ fn naming_rules() {
     assert_eq!(map::nav_name("video_id"), "video");
     assert_eq!(map::nav_name("category_key"), "category");
     assert_eq!(map::collection_nav("video_tags"), "_VideoTags");
+    assert_eq!(map::human_label("file_size"), "File size");
+    assert_eq!(map::human_label("legacy_id"), "Legacy ID");
+    assert_eq!(map::human_label("name"), "Name");
 }
 
 #[test]
@@ -68,9 +71,10 @@ fn cascade_on_not_null_becomes_composition_once_per_child() {
 }
 
 #[test]
-fn override_forces_video_jobs_under_agent() {
+fn video_jobs_agent_is_optional_association() {
     let schema = model().schema().unwrap();
-    assert_eq!(assoc(&schema, "VideoJobSet", "agent").ownership, Ownership::Composition);
+    assert_eq!(assoc(&schema, "VideoJobSet", "agent").ownership, Ownership::Association);
+    assert!(schema.set("VideoJobSet").unwrap().has_column("agent_ID"));
     assert_eq!(assoc(&schema, "VideoJobSet", "video").ownership, Ownership::Association);
 }
 
@@ -138,13 +142,24 @@ fn ddic_round_trips_through_json() {
 }
 
 #[test]
-fn list_views_from_constant_reach_the_video_entity() {
-    let model = model();
-    let video = model.ddic.entities().into_iter().find(|e| e.name() == "Video").unwrap();
+fn overlay_list_views_reach_the_video_entities() {
+    // Wie der Runtime-Start: Basis ist die ddic.json, nicht der Katalog-Build
+    // (der Testkatalog enthaelt z. B. keine Volumes).
+    let base_path = concat!(env!("CARGO_MANIFEST_DIR"), "/ddic.json");
+    let base: spec::data_dictionary::DataDictionary =
+        serde_json::from_str(&std::fs::read_to_string(base_path).expect("ddic.json lesbar"))
+            .expect("ddic.json parsbar");
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/overlay/ddic.overlay.json");
+    let overlay = fiori_server::overlay::load(std::path::Path::new(path)).expect("overlay lesbar");
+    let ddic = fiori_server::overlay::apply(base, &overlay).expect("overlay passt");
+    ddic.validate_list_views().expect("Overlay-Listenansichten valide");
+
+    let video = ddic.entities().into_iter().find(|e| e.name() == "Video").unwrap();
     let views = video.list_views();
     assert_eq!(views.len(), 1);
     assert_eq!(views[0].name, "default");
-    assert_eq!(views[0].columns, vec!["name", "file_size", "scene", "agent"]);
-    // Die Konstante ist gegen das aktivierte Modell validiert.
-    model.ddic.validate_list_views().expect("LIST_VIEWS valide");
+    assert_eq!(views[0].columns, vec!["name", "scene", "agent"]);
+
+    let tag = ddic.entities().into_iter().find(|e| e.name() == "VideoTag").unwrap();
+    assert_eq!(tag.list_views()[0].columns, vec!["tag", "source"]);
 }

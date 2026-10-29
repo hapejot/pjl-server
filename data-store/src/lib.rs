@@ -11,7 +11,7 @@ pub mod sql_value;
 pub mod conformance;
 
 pub use datastore::{
-    DataRecord, DataStore, DraftAction, DraftAdministrativeData, DraftMessage, Navigation,
+    DataRecord, DataStore, DraftAction, DraftAdministrativeData, DraftMessage, Navigation, WriteOp,
 };
 pub use nav::{DRAFT_ADMIN_SET, NavLink, nav_links};
 pub use schema::{

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::value_list::{self, ValueList, ITEMS_ENTITY};
 use crate::{EntitySpec, FieldSpec, Relationship, app::App, package::Package};
 use tracing::*;
 
@@ -11,6 +12,8 @@ pub struct DataDictionary {
     entities: Vec<EntitySpec>,
     relationships: Vec<Relationship>,
     apps: Vec<App>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    value_lists: Vec<ValueList>,
     #[serde(skip)]
     active: HashMap<String, EntitySpec>,
 }
@@ -34,7 +37,8 @@ impl DataDictionary {
             .field(FieldSpec::atom("precision", "Precision", "Edm.Int64"))
             .field(FieldSpec::atom("scale", "Scale", "Edm.Int64"))
             .field(FieldSpec::atom("computed", "Computed", "Edm.Boolean"))
-            .field(FieldSpec::atom("immutable", "Immutable", "Edm.Boolean"));
+            .field(FieldSpec::atom("immutable", "Immutable", "Edm.Boolean"))
+            .field(FieldSpec::atom("multiline", "Multiline", "Edm.Boolean"));
 
         let relation_ent = EntitySpec::new("Relation", core.name(), "Relations")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
@@ -50,10 +54,16 @@ impl DataDictionary {
                 "Edm.String",
             ));
 
+        // `name` ist Titel und Listenspalte (Annotationen verweisen darauf); es traegt den Code.
         let value_ent = EntitySpec::new("Value", core.name(), "Values")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
             .field(FieldSpec::atom("value", "Value", "Edm.String"))
-            .field(FieldSpec::atom("label", "Label", "Edm.String"));
+            .field(FieldSpec::atom("label", "Label", "Edm.String"))
+            .field(FieldSpec::atom("sort", "Sort", "Edm.Int64"))
+            .without_audit();
+        let value_list_ent = EntitySpec::new("ValueList", core.name(), "Value Lists")
+            .field(FieldSpec::atom("name", "Name", "Edm.String"))
+            .without_audit();
         // .field(FieldSpec::atom("package", "Package", "Edm.Guid"));
 
         let package_ent = EntitySpec::new("Package", core.name(), "Packages")
@@ -86,6 +96,12 @@ impl DataDictionary {
         let r6 = Relationship::new("app_entity", core.name())
             .with_one("Entity", "_Apps")
             .with_many("App", "main_entity");
+        let r8 = Relationship::new("value_list_values", core.name())
+            .with_one("ValueList", "_Values")
+            .with_many("Value", "list");
+        let r9 = Relationship::new("value_list_fields", core.name())
+            .with_one("ValueList", "_Fields")
+            .with_many("Field", "value_list");
         let r7 = Relationship::new("app_package", core.name())
             .with_one("Package", "_Apps")
             .with_many("App", "package");
@@ -121,6 +137,14 @@ impl DataDictionary {
             Some("sap-icon://world".into()),
             core.clone(),
         );
+        let a6 = App::new(
+            "valuelists".into(),
+            "Value Lists".into(),
+            "ValueList".into(),
+            Some("Maintain Value Lists".into()),
+            Some("sap-icon://world".into()),
+            core.clone(),
+        );
         let a5 = App::new(
             "apps".into(),
             "Apps".into(),
@@ -139,9 +163,11 @@ impl DataDictionary {
                 value_ent,
                 package_ent,
                 app_ent,
+                value_list_ent,
             ],
-            relationships: vec![rel, r2, r3, r4, r5, r6, r7],
-            apps: vec![a1, a2, a3, a4, a5],
+            relationships: vec![rel, r2, r3, r4, r5, r6, r7, r8, r9],
+            apps: vec![a1, a2, a3, a4, a5, a6],
+            value_lists: Vec::new(),
             active: HashMap::new(),
         }
     }
@@ -156,6 +182,7 @@ impl DataDictionary {
             entities: Vec::new(),
             relationships: Vec::new(),
             apps: Vec::new(),
+            value_lists: Vec::new(),
             active: HashMap::new(),
         }
     }
@@ -168,8 +195,83 @@ impl DataDictionary {
         self.packages.iter()
     }
 
+    pub fn value_lists(&self) -> &[ValueList] {
+        &self.value_lists
+    }
+
+    /// Festwertlisten pruefen (siehe [`value_list::validate`]).
+    pub fn validate_value_lists(&self) -> Result<(), String> {
+        value_list::validate(&self.value_lists)
+    }
+
+    /// Generierte Entitaet mit allen Festwerten. Ohne Listen entsteht keine.
+    fn generated_entities(&self) -> Vec<EntitySpec> {
+        if self.value_lists.is_empty() {
+            return Vec::new();
+        }
+        let items = EntitySpec::new(ITEMS_ENTITY, "core", "FieldValueListItems")
+            // `name` ist Titel und Listenspalte; es traegt die Bezeichnung.
+            .field(FieldSpec::atom("name", "Bezeichnung", "Edm.String"))
+            .field(FieldSpec::atom("ListID", "Liste", "Edm.String"))
+            .field(FieldSpec::atom("value", "Wert", "Edm.String"))
+            .field(FieldSpec::atom("label", "Bezeichnung", "Edm.String"))
+            .field(FieldSpec::atom("sort", "Sortierung", "Edm.Int64"));
+        vec![items.without_audit()]
+    }
+
+    /// Ergaenzt das Dictionary um die Benutzerverwaltung: Entitaet `SystemUser`,
+    /// Audit-Felder (`Owner`, `CreatedBy`, `ChangedBy`, `CreatedAt`, `ChangedAt`)
+    /// auf jeder Entitaet und die App fuer `SystemUser`.
+    ///
+    /// Idempotent. Eine in der Datei deklarierte `SystemUser` wird ergaenzt;
+    /// gleichnamige Felder werden durch die Vorgabe ersetzt. Nur im Speicher.
+    pub fn inject_system_user(&mut self) {
+        use crate::system_user as su;
+
+        self.add_package(Package::new(su::PACKAGE));
+
+        let user_fields = [
+            FieldSpec::string(su::USERNAME, "Name", 255),
+            FieldSpec::string(su::NAME, "Full Name", 255),
+            FieldSpec::bool_field(su::ACTIVE, "Active"),
+        ];
+        match self.entities.iter_mut().find(|e| e.name == su::SYSTEM_USER) {
+            Some(entity) => {
+                for field in user_fields {
+                    replace_field(&mut entity.fields, field);
+                }
+            }
+            None => {
+                let mut entity =
+                    EntitySpec::new(su::SYSTEM_USER, su::PACKAGE, "System Users");
+                for field in user_fields {
+                    entity = entity.field(field);
+                }
+                self.entities.push(entity);
+            }
+        }
+
+        for entity in self.entities.iter_mut().filter(|e| e.is_audited()) {
+            for field in su::audit_fields() {
+                replace_field(&mut entity.fields, field);
+            }
+        }
+
+        if !self.apps.iter().any(|a| a.name() == "systemusers") {
+            self.apps.push(App::new(
+                "systemusers".into(),
+                "System Users".into(),
+                su::SYSTEM_USER.into(),
+                Some("Maintain System Users".into()),
+                Some("sap-icon://person-placeholder".into()),
+                Package::new(su::PACKAGE),
+            ));
+        }
+    }
+
     pub fn entities(&self) -> Vec<EntitySpec> {
         let mut entities = self.entities.clone();
+        entities.extend(self.generated_entities());
         for relation in self.relationships.iter() {
             let Relationship {
                 one,
@@ -188,6 +290,7 @@ impl DataDictionary {
                     entity: many.clone().unwrap(),
                     collection: true,
                     owned: false,
+                    label: relation.one_label.clone(),
                 });
             }
 
@@ -201,6 +304,7 @@ impl DataDictionary {
                     entity: one.clone().unwrap(),
                     collection: false,
                     owned: false,
+                    label: relation.many_label.clone(),
                 });
             }
         }
@@ -298,6 +402,7 @@ impl DataDictionary {
             entity: target,
             collection,
             owned: _,
+            label: _,
         } = lookup
         else {
             return None;
@@ -322,6 +427,7 @@ impl DataDictionary {
                         entity: rev_entity,
                         collection: false,
                         owned,
+                        ..
                     } if rev_entity == source.name() => Some(rev_name.clone()),
                     _ => None,
                 })
@@ -351,7 +457,7 @@ impl DataDictionary {
     }
 
     pub fn activate(&mut self) {
-        for entitiy in self.entities.iter() {
+        for entitiy in self.entities.iter().chain(self.generated_entities().iter()) {
             let mut active = entitiy.clone();
 
             for r in self.relationships() {
@@ -371,6 +477,7 @@ impl DataDictionary {
                                 entity: many.clone(),
                                 collection: true,
                                 owned: false,
+                                label: r.one_label.clone(),
                             });
                         }
                     }
@@ -382,6 +489,7 @@ impl DataDictionary {
                                 entity: one.clone(),
                                 collection: false,
                                 owned: false,
+                                label: r.many_label.clone(),
                             });
                         }
                     }
@@ -473,7 +581,7 @@ mod tests {
 
         assert!(package_fields.iter().any(|field| matches!(
             field,
-            FieldSpec::Lookup { name, entity, collection, owned }
+            FieldSpec::Lookup { name, entity, collection, owned, .. }
                 if name == "_Entities" && entity == "Entity" && *collection
         )));
 
@@ -484,17 +592,17 @@ mod tests {
 
         assert!(entity_fields.iter().any(|field| matches!(
             field,
-            FieldSpec::Lookup { name, entity, collection, owned }
+            FieldSpec::Lookup { name, entity, collection, owned, .. }
                 if name == "_Fields" && entity == "Field" && *collection
         )));
         assert!(entity_fields.iter().any(|field| matches!(
             field,
-            FieldSpec::Lookup { name, entity, collection, owned }
+            FieldSpec::Lookup { name, entity, collection, owned, .. }
                 if name == "_Many" && entity == "Relation" && *collection
         )));
         assert!(entity_fields.iter().any(|field| matches!(
             field,
-            FieldSpec::Lookup { name, entity, collection, owned }
+            FieldSpec::Lookup { name, entity, collection, owned, .. }
                 if name == "package" && entity == "Package" && !*collection
         )));
 
@@ -505,7 +613,7 @@ mod tests {
 
         assert!(field_fields.iter().any(|field| matches!(
             field,
-            FieldSpec::Lookup { name, entity, collection, owned }
+            FieldSpec::Lookup { name, entity, collection, owned, .. }
                 if name == "entity" && entity == "Entity" && !*collection
         )));
 
@@ -540,6 +648,12 @@ mod tests {
             Some("entity"),
         );
     }
+}
+
+/// Ersetzt ein gleichnamiges Feld oder haengt es an.
+fn replace_field(fields: &mut Vec<FieldSpec>, field: FieldSpec) {
+    fields.retain(|f| f.name() != field.name());
+    fields.push(field);
 }
 
 /// Prueft eine Listenspalte `col` der Entitaet `entity` (aktivierter Stand).
@@ -592,6 +706,8 @@ mod list_view_tests {
             computed: false,
             immutable: false,
             value_list: None,
+            link: false,
+            multiline: false,
         }
     }
 

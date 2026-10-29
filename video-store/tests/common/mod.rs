@@ -51,6 +51,8 @@ pub fn catalog() -> PgCatalog {
         col("file_size", "int8", false),
         col("duration_seconds", "float8", true),
         col("scene_id", "text", true),
+        col("is_streamable", "bool", false),
+        col("is_reviewed", "bool", false),
     ]);
     add("tags", &["id"], vec![col("id", "uuid", false), col("name", "varchar", false)]);
     add("video_tags", &["id"], vec![

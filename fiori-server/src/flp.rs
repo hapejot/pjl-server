@@ -91,10 +91,13 @@ async fn site(State(_state): State<AppState>) -> Json<Value> {
             },
             "vizConfig": {
                 "sap.app": {
-                    "icon": icon_of(app),
                     "info": "",
                     "subTitle": subtitle_of(app),
                     "title": app.title()
+                },
+                // Die Kachel liest das Icon aus `sap.ui.icons.icon` (CDM-Adapter), nicht aus `sap.app`.
+                "sap.ui": {
+                    "icons": { "icon": icon_of(app) }
                 },
                 "sap.flp": {
                     "target": {
@@ -604,93 +607,12 @@ fn list_control_configuration_with_extensions(
     config
 }
 
-/// Zusatzkonfiguration der ListReport-Tabelle.
-///
-/// Im Designer bekommt jede Liste einen Toolbar-Button "Publish Dictionary".
-/// Der Button ist eine Fiori-Elements-*custom action* - das betrifft aber nur
-/// die Darstellung. Ausgeloest wird die ungebundene OData-Aktion `export`
-/// (siehe `srv::export_action`), die regulaer im `$metadata` deklariert ist.
-///
-/// Fiori Elements kennt fuer Toolbar-Buttons nur `DataFieldForAction` auf
-/// *gebundene* Aktionen; ein ungebundener Action Import laesst sich nicht
-/// annotieren. Deshalb der Umweg ueber einen eigenen Handler, der die Aktion
-/// selbst am Modell aufruft.
-///
-/// Der Laufzeitserver bekommt den Button nicht - dort ist die Aktion gar nicht
-/// erst deklariert.
-fn list_control_configuration(state: &AppState, app_id: &str) -> Value {
-    if !state.mode().is_designer() {
-        return json!({});
-    }
-    json!({
-      "@com.sap.vocabularies.UI.v1.LineItem": {
-        "actions": {
-          "publishDictionary": {
-            "enabled": true,
-            // Modulpfad relativ zum Komponenten-Namensraum: UI5 laedt
-            // `./apps/<Entity>/ext/Publish.js`, siehe `publish_ext_handler`.
-            "press": format!("{app_id}.ext.Publish.publish"),
-            "text": "Publish Dictionary",
-            "visible": true
-          }
-        }
-      }
-    })
+/// Zusatzkonfiguration der ListReport-Tabelle. Der Designer schreibt jede
+/// Aenderung sofort in `ddic.json`; ein Veroeffentlichungs-Button entfaellt.
+fn list_control_configuration(_state: &AppState, _app_id: &str) -> Value {
+    json!({})
 }
 
-/// Handler-Modul hinter dem "Publish Dictionary"-Button.
-///
-/// Ruft die ungebundene Aktion ueber das OData-V4-Modell auf. Ein
-/// Operation-Binding auf den Action Import (`/export(...)`) statt eines
-/// direkten `fetch`: so laeuft der Aufruf durch dieselbe Modellschicht wie
-/// jede andere Aktion des Service - inklusive der Fehlerbehandlung des
-/// Modells - und der Pfad stammt aus dem `$metadata` statt aus einer hier
-/// fest verdrahteten URL.
-pub async fn publish_ext_handler(
-    Path(app): Path<String>,
-    State(_state): State<AppState>,
-) -> impl IntoResponse {
-    debug!("ext/Publish.js for {}", app);
-    (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
-        format!(
-            r##"sap.ui.define([
-    "sap/m/MessageBox",
-    "sap/m/MessageToast"
-], function (MessageBox, MessageToast) {{
-    "use strict";
-    return {{
-        publish: function () {{
-            // `this` ist die Fiori-Elements ExtensionAPI der ListReport-Seite.
-            var oModel = this.getModel();
-            // Ungebundene Aktion: das Binding haengt an der Wurzel des
-            // Service, nicht an einem Kontext. Die drei Punkte sind die
-            // V4-Schreibweise fuer "noch nicht ausgefuehrt".
-            var oOperation = oModel.bindContext("/{action}(...)");
-            MessageToast.show("Publishing data dictionary...");
-            oOperation.execute().then(function () {{
-                var r = oOperation.getBoundContext().getObject();
-                MessageBox.success(
-                    "Data dictionary published.\n\n" +
-                    r.entities + " entities, " + r.relationships + " relationships, " +
-                    r.apps + " apps, " + r.entity_sets + " entity sets.\n\n" +
-                    r.ddic_path + "\n" + r.schema_path + "\n\n" +
-                    "Restart the runtime server to pick up the changes."
-                );
-            }}).catch(function (oError) {{
-                MessageBox.error("Export failed: " + (oError.message || oError));
-            }});
-        }}
-    }};
-}});
-"##,
-            action = crate::srv::EXPORT_ACTION
-        ),
-    )
-}
 
 
 pub async fn app_handler(

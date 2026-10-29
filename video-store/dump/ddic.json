@@ -1,0 +1,3668 @@
+{
+  "apps": [
+    {
+      "icon": null,
+      "main_entity": "Host",
+      "name": "hosts",
+      "package": {
+        "name": "video"
+      },
+      "subtitle": "Alle Hosts",
+      "title": "Hosts"
+    },
+    {
+      "icon": null,
+      "main_entity": "Volume",
+      "name": "volumes",
+      "package": {
+        "name": "video"
+      },
+      "subtitle": "Alle Volumes",
+      "title": "Volumes"
+    },
+    {
+      "icon": null,
+      "main_entity": "Video",
+      "name": "videos",
+      "package": {
+        "name": "video"
+      },
+      "subtitle": "List Videos",
+      "title": "Videos"
+    },
+    {
+      "icon": null,
+      "main_entity": "Tag",
+      "name": "tags",
+      "package": {
+        "name": "video"
+      },
+      "subtitle": "Manage Tags",
+      "title": "Tags"
+    },
+    {
+      "icon": null,
+      "main_entity": "Agent",
+      "name": "agents",
+      "package": {
+        "name": "video"
+      },
+      "subtitle": "Manage Agents",
+      "title": "Agents"
+    },
+    {
+      "icon": null,
+      "main_entity": "VideoJob",
+      "name": "jobs",
+      "package": {
+        "name": "video"
+      },
+      "subtitle": "Monitor Jobs",
+      "title": "Jobs"
+    },
+    {
+      "icon": null,
+      "main_entity": "Actor",
+      "name": "actors",
+      "package": {
+        "name": "video"
+      },
+      "subtitle": "Manage Actors",
+      "title": "Actors"
+    },
+    {
+      "icon": null,
+      "main_entity": "Scene",
+      "name": "scenes",
+      "package": {
+        "name": "video"
+      },
+      "subtitle": "Manage Scenes",
+      "title": "Scenes"
+    }
+  ],
+  "entities": [
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "list_views": [
+        {
+          "columns": [
+            "actor"
+          ],
+          "name": "default"
+        },
+        {
+          "columns": [
+            "scene"
+          ],
+          "name": "reverse"
+        }
+      ],
+      "name": "ActorSceneMap",
+      "package": "video",
+      "type_name_plural": "ActorSceneMap"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "ActorTagMap",
+      "package": "video",
+      "type_name_plural": "ActorTagMap"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": true,
+            "label": "legacy_id",
+            "max_length": null,
+            "name": "legacy_id",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "category",
+            "max_length": null,
+            "name": "category",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "category_order",
+            "max_length": null,
+            "name": "category_order",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "normalized_name",
+            "max_length": null,
+            "name": "normalized_name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "ActorTag",
+      "package": "video",
+      "type_name_plural": "ActorTags"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": true,
+            "label": "legacy_id",
+            "max_length": null,
+            "name": "legacy_id",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "bio",
+            "max_length": null,
+            "name": "bio",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "birth_place",
+            "max_length": null,
+            "name": "birth_place",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "birthday",
+            "max_length": null,
+            "name": "birthday",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "gender",
+            "max_length": null,
+            "name": "gender",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "height",
+            "max_length": null,
+            "name": "height",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "last_scene_release_date",
+            "max_length": null,
+            "name": "last_scene_release_date",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "measurements",
+            "max_length": null,
+            "name": "measurements",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "rank",
+            "max_length": null,
+            "name": "rank",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "weight",
+            "max_length": null,
+            "name": "weight",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "normalized_name",
+            "max_length": null,
+            "name": "normalized_name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "Actor",
+      "package": "video",
+      "type_name_plural": "Actors"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "job_type",
+            "max_length": null,
+            "name": "job_type",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "schema_version",
+            "max_length": null,
+            "name": "schema_version",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "parameter_schema",
+            "max_length": null,
+            "name": "parameter_schema",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "result_schema",
+            "max_length": null,
+            "name": "result_schema",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Boolean",
+            "immutable": false,
+            "label": "requires_video",
+            "max_length": null,
+            "name": "requires_video",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "registered_at",
+            "max_length": null,
+            "name": "registered_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "updated_at",
+            "max_length": null,
+            "name": "updated_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "AgentCapability",
+      "package": "video",
+      "type_name_plural": "AgentCapabilities"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": 255,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "key",
+            "max_length": 100,
+            "name": "key",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "value",
+            "max_length": null,
+            "name": "value",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "updated_at",
+            "max_length": null,
+            "name": "updated_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "AgentSetting",
+      "package": "video",
+      "type_name_plural": "AgentSettings"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "path",
+            "max_length": null,
+            "name": "path",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Boolean",
+            "immutable": false,
+            "label": "recursive",
+            "max_length": null,
+            "name": "recursive",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "AgentVideoDirectory",
+      "package": "video",
+      "type_name_plural": "AgentVideoDirectories"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": 255,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "base_url",
+            "max_length": 512,
+            "name": "base_url",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "status",
+            "max_length": null,
+            "name": "status",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "last_heartbeat",
+            "max_length": null,
+            "name": "last_heartbeat",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "version",
+            "max_length": 255,
+            "name": "version",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "Agent",
+      "package": "video",
+      "type_name_plural": "Agents"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": 255,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "hostname",
+            "max_length": 255,
+            "name": "hostname",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "platform",
+            "max_length": 50,
+            "name": "platform",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "Host",
+      "package": "video",
+      "type_name_plural": "Hosts"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "batch_id",
+            "max_length": null,
+            "name": "batch_id",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "version",
+            "max_length": null,
+            "name": "version",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "source",
+            "max_length": null,
+            "name": "source",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "raw_json",
+            "max_length": null,
+            "name": "raw_json",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "EmbBatch",
+      "package": "video",
+      "type_name_plural": "EmbBatches"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "model_id",
+            "max_length": null,
+            "name": "model_id",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "dim",
+            "max_length": null,
+            "name": "dim",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "vector",
+            "max_length": null,
+            "name": "vector",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "EmbClip",
+      "package": "video",
+      "type_name_plural": "EmbClip"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "cluster_id",
+            "max_length": null,
+            "name": "cluster_id",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "model_name",
+            "max_length": null,
+            "name": "model_name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "representative_type",
+            "max_length": null,
+            "name": "representative_type",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "vector",
+            "max_length": null,
+            "name": "vector",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "cluster_size",
+            "max_length": null,
+            "name": "cluster_size",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "EmbClusterCentroid",
+      "package": "video",
+      "type_name_plural": "EmbClusterCentroids"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "cluster_id",
+            "max_length": null,
+            "name": "cluster_id",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Boolean",
+            "immutable": false,
+            "label": "is_noise",
+            "max_length": null,
+            "name": "is_noise",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Double",
+            "immutable": false,
+            "label": "distance_to_centroid",
+            "max_length": null,
+            "name": "distance_to_centroid",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "EmbClusterResult",
+      "package": "video",
+      "type_name_plural": "EmbClusterResults"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "model_name",
+            "max_length": null,
+            "name": "model_name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "algorithm",
+            "max_length": null,
+            "name": "algorithm",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "parameters",
+            "max_length": null,
+            "name": "parameters",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "status",
+            "max_length": null,
+            "name": "status",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "n_samples",
+            "max_length": null,
+            "name": "n_samples",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "n_clusters",
+            "max_length": null,
+            "name": "n_clusters",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "n_noise",
+            "max_length": null,
+            "name": "n_noise",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "started_at",
+            "max_length": null,
+            "name": "started_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "completed_at",
+            "max_length": null,
+            "name": "completed_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "EmbClusterRun",
+      "package": "video",
+      "type_name_plural": "EmbClusterRuns"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "model_id",
+            "max_length": null,
+            "name": "model_id",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "dim",
+            "max_length": null,
+            "name": "dim",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "vector",
+            "max_length": null,
+            "name": "vector",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "EmbDinov2",
+      "package": "video",
+      "type_name_plural": "EmbDinov2"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "path",
+            "max_length": null,
+            "name": "path",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "source",
+            "max_length": null,
+            "name": "source",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "extra",
+            "max_length": null,
+            "name": "extra",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "thumbnail_index",
+            "max_length": null,
+            "name": "thumbnail_index",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Double",
+            "immutable": false,
+            "label": "timestamp_seconds",
+            "max_length": null,
+            "name": "timestamp_seconds",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "EmbImage",
+      "package": "video",
+      "type_name_plural": "EmbImages"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "value",
+            "max_length": null,
+            "name": "value",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Double",
+            "immutable": false,
+            "label": "confidence",
+            "max_length": null,
+            "name": "confidence",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "source",
+            "max_length": null,
+            "name": "source",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "dimension",
+            "max_length": null,
+            "name": "dimension",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "EmbLabel",
+      "package": "video",
+      "type_name_plural": "EmbLabels"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": true,
+            "label": "legacy_id",
+            "max_length": null,
+            "name": "legacy_id",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": 200,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "embedding",
+            "max_length": null,
+            "name": "embedding",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Binary",
+            "immutable": false,
+            "label": "image_data",
+            "max_length": null,
+            "name": "image_data",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "image_filename",
+            "max_length": 500,
+            "name": "image_filename",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "source_image",
+            "max_length": 500,
+            "name": "source_image",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Double",
+            "immutable": false,
+            "label": "confidence",
+            "max_length": null,
+            "name": "confidence",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "Face",
+      "package": "video",
+      "type_name_plural": "Faces"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "position_index",
+            "max_length": null,
+            "name": "position_index",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "position_type",
+            "max_length": 20,
+            "name": "position_type",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Double",
+            "immutable": false,
+            "label": "value",
+            "max_length": null,
+            "name": "value",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "GlobalSnapshotPosition",
+      "package": "video",
+      "type_name_plural": "GlobalSnapshotPositions"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": true,
+            "label": "legacy_id",
+            "max_length": null,
+            "name": "legacy_id",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "updated_at",
+            "max_length": null,
+            "name": "updated_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "GlobalThumbnailSetting",
+      "package": "video",
+      "type_name_plural": "GlobalThumbnailSettings"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": true,
+            "label": "legacy_id",
+            "max_length": null,
+            "name": "legacy_id",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": 100,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "sort_order",
+            "max_length": null,
+            "name": "sort_order",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "LabelCategory",
+      "package": "video",
+      "type_name_plural": "LabelCategories"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "value",
+            "max_length": 100,
+            "name": "value",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "sort_order",
+            "max_length": null,
+            "name": "sort_order",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "LabelCategoryOption",
+      "package": "video",
+      "type_name_plural": "LabelCategoryOptions"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": true,
+            "label": "legacy_id",
+            "max_length": null,
+            "name": "legacy_id",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Boolean",
+            "immutable": false,
+            "label": "ignore",
+            "max_length": null,
+            "name": "ignore",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "PathSceneMap",
+      "package": "video",
+      "type_name_plural": "PathSceneMap"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": true,
+            "label": "legacy_id",
+            "max_length": null,
+            "name": "legacy_id",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int64",
+            "immutable": false,
+            "label": "size",
+            "max_length": null,
+            "name": "size",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "SceneFile",
+      "package": "video",
+      "type_name_plural": "SceneFiles"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": true,
+            "label": "legacy_id",
+            "max_length": null,
+            "name": "legacy_id",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "ScenePath",
+      "package": "video",
+      "type_name_plural": "ScenePaths"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "list_views": [
+        {
+          "columns": [
+            "tag"
+          ],
+          "name": "default"
+        }
+      ],
+      "name": "SceneTagMap",
+      "package": "video",
+      "type_name_plural": "SceneTagMap"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": true,
+            "label": "legacy_id",
+            "max_length": null,
+            "name": "legacy_id",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "description",
+            "max_length": null,
+            "name": "description",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "video_length",
+            "max_length": null,
+            "name": "video_length",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "video_1080p_size_bytes",
+            "max_length": null,
+            "name": "video_1080p_size_bytes",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "video_1080p_download",
+            "max_length": null,
+            "name": "video_1080p_download",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "video_1080p_view",
+            "max_length": null,
+            "name": "video_1080p_view",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "video_1080p_format",
+            "max_length": null,
+            "name": "video_1080p_format",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "brand",
+            "max_length": null,
+            "name": "brand",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "date_released",
+            "max_length": null,
+            "name": "date_released",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "video_format",
+            "max_length": null,
+            "name": "video_format",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "video_view",
+            "max_length": null,
+            "name": "video_view",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "video_download",
+            "max_length": null,
+            "name": "video_download",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "video_size_bytes",
+            "max_length": null,
+            "name": "video_size_bytes",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Boolean",
+            "immutable": false,
+            "label": "downloaded",
+            "max_length": null,
+            "name": "downloaded",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "Scene",
+      "package": "video",
+      "type_name_plural": "Scenes"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": 100,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "normalized_name",
+            "max_length": 100,
+            "name": "normalized_name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Boolean",
+            "immutable": false,
+            "label": "visible",
+            "max_length": null,
+            "name": "visible",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "Tag",
+      "package": "video",
+      "type_name_plural": "Tags"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "classification",
+            "max_length": 20,
+            "name": "classification",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "phash",
+            "max_length": 16,
+            "name": "phash",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "file_path",
+            "max_length": null,
+            "name": "file_path",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "original_thumbnail_url",
+            "max_length": null,
+            "name": "original_thumbnail_url",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "width",
+            "max_length": null,
+            "name": "width",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "height",
+            "max_length": null,
+            "name": "height",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "labels",
+            "max_length": null,
+            "name": "labels",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Boolean",
+            "immutable": false,
+            "label": "in_training_set",
+            "max_length": null,
+            "name": "in_training_set",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "TrainingImage",
+      "package": "video",
+      "type_name_plural": "TrainingImages"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "job_type",
+            "max_length": null,
+            "name": "job_type",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "status",
+            "max_length": null,
+            "name": "status",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "priority",
+            "max_length": null,
+            "name": "priority",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "parameters",
+            "max_length": null,
+            "name": "parameters",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "requested_at",
+            "max_length": null,
+            "name": "requested_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "started_at",
+            "max_length": null,
+            "name": "started_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "completed_at",
+            "max_length": null,
+            "name": "completed_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "result",
+            "max_length": null,
+            "name": "result",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "schema_version",
+            "max_length": null,
+            "name": "schema_version",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "VideoJob",
+      "package": "video",
+      "type_name_plural": "VideoJobs"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "rating",
+            "max_length": null,
+            "name": "rating",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "updated_at",
+            "max_length": null,
+            "name": "updated_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "VideoRating",
+      "package": "video",
+      "type_name_plural": "VideoRatings"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "source",
+            "max_length": null,
+            "name": "source",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "external_source",
+            "max_length": 100,
+            "name": "external_source",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Double",
+            "immutable": false,
+            "label": "confidence",
+            "max_length": null,
+            "name": "confidence",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "created_by",
+            "max_length": 100,
+            "name": "created_by",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "list_views": [
+        {
+          "columns": [
+            "tag",
+            "source"
+          ],
+          "name": "default"
+        }
+      ],
+      "name": "VideoTag",
+      "package": "video",
+      "type_name_plural": "VideoTags"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "thumbnail_index",
+            "max_length": null,
+            "name": "thumbnail_index",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Double",
+            "immutable": false,
+            "label": "timestamp_seconds",
+            "max_length": null,
+            "name": "timestamp_seconds",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "VideoThumbnail",
+      "package": "video",
+      "type_name_plural": "VideoThumbnails"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": null,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "watched_at",
+            "max_length": null,
+            "name": "watched_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Double",
+            "immutable": false,
+            "label": "watch_duration_seconds",
+            "max_length": null,
+            "name": "watch_duration_seconds",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Boolean",
+            "immutable": false,
+            "label": "completed",
+            "max_length": null,
+            "name": "completed",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "VideoView",
+      "package": "video",
+      "type_name_plural": "VideoViews"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": 512,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Double",
+            "immutable": false,
+            "label": "duration_seconds",
+            "max_length": null,
+            "name": "duration_seconds",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "width",
+            "max_length": null,
+            "name": "width",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "height",
+            "max_length": null,
+            "name": "height",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "codec",
+            "max_length": 50,
+            "name": "codec",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int64",
+            "immutable": false,
+            "label": "bitrate",
+            "max_length": null,
+            "name": "bitrate",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Boolean",
+            "immutable": false,
+            "label": "is_streamable",
+            "max_length": null,
+            "name": "is_streamable",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "thumbnail_path",
+            "max_length": null,
+            "name": "thumbnail_path",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "created_at",
+            "max_length": null,
+            "name": "created_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "updated_at",
+            "max_length": null,
+            "name": "updated_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "last_seen",
+            "max_length": null,
+            "name": "last_seen",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int32",
+            "immutable": false,
+            "label": "thumbnail_count",
+            "max_length": null,
+            "name": "thumbnail_count",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.DateTimeOffset",
+            "immutable": false,
+            "label": "deleted_at",
+            "max_length": null,
+            "name": "deleted_at",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Boolean",
+            "immutable": false,
+            "label": "pending_physical_delete",
+            "max_length": null,
+            "name": "pending_physical_delete",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "title",
+            "max_length": 512,
+            "name": "title",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Boolean",
+            "immutable": false,
+            "label": "is_reviewed",
+            "max_length": null,
+            "name": "is_reviewed",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "list_views": [
+        {
+          "columns": [
+            "name",
+            "scene",
+            "agent"
+          ],
+          "name": "default"
+        }
+      ],
+      "name": "Video",
+      "package": "video",
+      "selection_fields": [
+        "name",
+        "is_reviewed",
+        "is_streamable",
+        "agent"
+      ],
+      "type_name_plural": "Videos"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": 512,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Boolean",
+            "immutable": false,
+            "label": "is online",
+            "max_length": null,
+            "name": "is_online",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "mount_path",
+            "max_length": 512,
+            "name": "mount_path",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "list_views": [
+        {
+          "columns": [
+            "name",
+            "is_online",
+            "mount_path"
+          ],
+          "name": "default"
+        }
+      ],
+      "name": "Volume",
+      "package": "video",
+      "type_name_plural": "Volumes"
+    },
+    {
+      "fields": [
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "name",
+            "max_length": 512,
+            "name": "name",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "relative_path",
+            "max_length": 1024,
+            "name": "relative_path",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.Int64",
+            "immutable": false,
+            "label": "size",
+            "max_length": null,
+            "name": "size",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "computed": false,
+            "edm_type": "Edm.String",
+            "immutable": false,
+            "label": "sha256_checksum",
+            "max_length": 64,
+            "name": "sha256_checksum",
+            "package": null,
+            "precision": null,
+            "scale": null,
+            "value_list": null
+          }
+        }
+      ],
+      "name": "File",
+      "package": "video",
+      "type_name_plural": "Files"
+    }
+  ],
+  "packages": [
+    {
+      "name": "video"
+    }
+  ],
+  "relationships": [
+    {
+      "many": "Video",
+      "many_property": "agent",
+      "name": "videos_agent_id",
+      "one": "Agent",
+      "one_field": "_Videos",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "VideoTag",
+      "many_property": "video",
+      "name": "video_tags_video_id",
+      "one": "Video",
+      "one_field": "_VideoTags",
+      "owned": true,
+      "package": "video"
+    },
+    {
+      "many": "VideoTag",
+      "many_property": "tag",
+      "name": "video_tags_tag_id",
+      "one": "Tag",
+      "one_field": "_VideoTags",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "VideoRating",
+      "many_property": "video",
+      "name": "video_ratings_video_id",
+      "one": "Video",
+      "one_field": "_VideoRatings",
+      "owned": true,
+      "package": "video"
+    },
+    {
+      "many": "VideoView",
+      "many_property": "video",
+      "name": "video_views_video_id",
+      "one": "Video",
+      "one_field": "_VideoViews",
+      "owned": true,
+      "package": "video"
+    },
+    {
+      "many": "VideoThumbnail",
+      "many_property": "video",
+      "name": "video_thumbnails_video_id",
+      "one": "Video",
+      "one_field": "_VideoThumbnails",
+      "owned": true,
+      "package": "video"
+    },
+    {
+      "many": "VideoJob",
+      "many_property": "video",
+      "name": "video_jobs_video_id",
+      "one": "Video",
+      "one_field": "_VideoJobs",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "VideoJob",
+      "many_property": "agent",
+      "name": "video_jobs_agent_id",
+      "one": "Agent",
+      "one_field": "_VideoJobs",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "AgentSetting",
+      "many_property": "agent",
+      "name": "agent_settings_agent_id",
+      "one": "Agent",
+      "one_field": "_AgentSettings",
+      "owned": true,
+      "package": "video"
+    },
+    {
+      "many": "AgentVideoDirectory",
+      "many_property": "agent",
+      "name": "agent_video_directories_agent_id",
+      "one": "Agent",
+      "one_field": "_AgentVideoDirectories",
+      "owned": true,
+      "package": "video"
+    },
+    {
+      "many": "EmbDinov2",
+      "many_property": "image",
+      "name": "emb_dinov2_image_id",
+      "one": "EmbImage",
+      "one_field": "_EmbDinov2",
+      "owned": true,
+      "package": "video"
+    },
+    {
+      "many": "EmbDinov2",
+      "many_property": "batch",
+      "name": "emb_dinov2_batch_id",
+      "one": "EmbBatch",
+      "one_field": "_EmbDinov2",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "AgentCapability",
+      "many_property": "agent",
+      "name": "agent_capabilities_agent_id",
+      "one": "Agent",
+      "one_field": "_AgentCapabilities",
+      "owned": true,
+      "package": "video"
+    },
+    {
+      "many": "EmbClip",
+      "many_property": "image",
+      "name": "emb_clip_image_id",
+      "one": "EmbImage",
+      "one_field": "_EmbClip",
+      "owned": true,
+      "package": "video"
+    },
+    {
+      "many": "EmbClip",
+      "many_property": "batch",
+      "name": "emb_clip_batch_id",
+      "one": "EmbBatch",
+      "one_field": "_EmbClip",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "EmbLabel",
+      "many_property": "image",
+      "name": "emb_labels_image_id",
+      "one": "EmbImage",
+      "one_field": "_EmbLabels",
+      "owned": true,
+      "package": "video"
+    },
+    {
+      "many": "LabelCategoryOption",
+      "many_property": "category",
+      "name": "label_category_options_category_key",
+      "one": "LabelCategory",
+      "one_field": "_LabelCategoryOptions",
+      "owned": true,
+      "package": "video"
+    },
+    {
+      "many": "EmbClusterCentroid",
+      "many_property": "run",
+      "name": "emb_cluster_centroids_run_id",
+      "one": "EmbClusterRun",
+      "one_field": "_EmbClusterCentroids",
+      "owned": true,
+      "package": "video"
+    },
+    {
+      "many": "EmbClusterResult",
+      "many_property": "run",
+      "name": "emb_cluster_results_run_id",
+      "one": "EmbClusterRun",
+      "one_field": "_EmbClusterResults",
+      "owned": true,
+      "package": "video"
+    },
+    {
+      "many": "EmbClusterResult",
+      "many_property": "image",
+      "name": "emb_cluster_results_image_id",
+      "one": "EmbImage",
+      "one_field": "_EmbClusterResults",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "Video",
+      "many_property": "scene",
+      "name": "videos_scene_id",
+      "one": "Scene",
+      "one_field": "_Videos",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "SceneFile",
+      "many_property": "path",
+      "name": "scene_files_path_id",
+      "one": "ScenePath",
+      "one_field": "_SceneFiles",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "ActorSceneMap",
+      "many_property": "actor",
+      "name": "actor_scene_map_actor_id",
+      "one": "Actor",
+      "one_field": "_ActorSceneMap",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "ActorSceneMap",
+      "many_property": "scene",
+      "name": "actor_scene_map_scene_id",
+      "one": "Scene",
+      "one_field": "_ActorSceneMap",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "ActorTagMap",
+      "many_property": "actor",
+      "name": "actor_tag_map_actor_id",
+      "one": "Actor",
+      "one_field": "_ActorTagMap",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "ActorTagMap",
+      "many_property": "tag",
+      "name": "actor_tag_map_tag_id",
+      "one": "ActorTag",
+      "one_field": "_ActorTagMap",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "SceneTagMap",
+      "many_property": "scene",
+      "name": "scene_tag_map_scene_id",
+      "one": "Scene",
+      "one_field": "_SceneTagMap",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "SceneTagMap",
+      "many_property": "tag",
+      "name": "scene_tag_map_tag_id",
+      "one": "ActorTag",
+      "one_field": "_SceneTagMap",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "PathSceneMap",
+      "many_property": "path",
+      "name": "path_scene_map_path_id",
+      "one": "ScenePath",
+      "one_field": "_PathSceneMap",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "PathSceneMap",
+      "many_property": "scene",
+      "name": "path_scene_map_scene_id",
+      "one": "Scene",
+      "one_field": "_PathSceneMap",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "EmbImage",
+      "many_property": "video",
+      "name": "emb_images_video_id",
+      "one": "Video",
+      "one_field": "_EmbImages",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "EmbImage",
+      "many_property": "training_image",
+      "name": "emb_images_training_image_id",
+      "one": "TrainingImage",
+      "one_field": "_EmbImages",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "TrainingImage",
+      "many_property": "video",
+      "name": "training_images_video_id",
+      "one": "Video",
+      "one_field": "_TrainingImages",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "Agent",
+      "many_property": "host",
+      "name": "agents_host_id",
+      "one": "Host",
+      "one_field": "_Agents",
+      "owned": false,
+      "package": "video"
+    },
+    {
+      "many": "Volume",
+      "many_property": "host",
+      "name": "volumes_host_id",
+      "one": "Host",
+      "one_field": "_Volumes",
+      "owned": true,
+      "package": "video"
+    },
+    {
+      "many": "File",
+      "many_property": "volume",
+      "name": "files_volume_id",
+      "one": "Volume",
+      "one_field": "_Files",
+      "owned": true,
+      "package": "video"
+    },
+    {
+      "many": "File",
+      "many_property": "video",
+      "name": "files_video_id",
+      "one": "Video",
+      "one_field": "_Files",
+      "owned": false,
+      "package": "video"
+    }
+  ]
+}

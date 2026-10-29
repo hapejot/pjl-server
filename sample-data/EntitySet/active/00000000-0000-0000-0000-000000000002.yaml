@@ -1,9 +1,0 @@
-ID: 00000000-0000-0000-0000-000000000002
-IsActiveEntity: true
-HasActiveEntity: false
-HasDraftEntity: false
-DraftAdministrativeData: null
-DraftMessages: []
-name: OrderItem
-package_ID: 00000000-0000-0000-0000-0000000000a1
-plural: OrderItems

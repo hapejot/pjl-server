@@ -95,6 +95,41 @@ pub mod query {
         )
     }
 
+    /// Zerlegt ein UND-Konjunktion in seine Teile (rekursiv).
+    fn conjuncts(expr: &Expr) -> Vec<&Expr> {
+        match expr {
+            Expr::BinaryOp {
+                op: BinOp::And,
+                left,
+                right,
+            } => {
+                let mut v = conjuncts(left);
+                v.extend(conjuncts(right));
+                v
+            }
+            other => vec![other],
+        }
+    }
+
+    /// Wahr, wenn das Prädikat nur Pfade auf die Lambda-Variable `var` nutzt.
+    /// Bare Identifier beziehen sich in einem Lambda auf die Wurzelzeile und
+    /// gelten daher als nicht rein.
+    fn only_var(expr: &Expr, var: &str) -> bool {
+        match expr {
+            Expr::Path(parts) => parts.first().is_some_and(|h| h == var),
+            Expr::String(_)
+            | Expr::Number(_)
+            | Expr::DateTime(_)
+            | Expr::Bool(_)
+            | Expr::Guid(_)
+            | Expr::Null => true,
+            Expr::FunctionCall { args, .. } => args.iter().all(|a| only_var(a, var)),
+            Expr::UnaryNot(e) => only_var(e, var),
+            Expr::BinaryOp { left, right, .. } => only_var(left, var) && only_var(right, var),
+            Expr::Identifier(_) | Expr::Lambda { .. } => false,
+        }
+    }
+
     #[derive(Debug)]
     pub struct Translator<'a> {
         set: &'a EntitySet,
@@ -107,6 +142,9 @@ pub mod query {
         select: Vec<String>,
         /// Innerhalb eines Lambda-Ausdrucks gesetzt.
         scope: Option<LambdaScope<'a>>,
+        /// Gesetzt, solange ein `any` als Join-Teilmenge uebersetzt wird: to-one-
+        /// Navigationen werden dann als LEFT JOIN gesammelt statt als Subselect.
+        lambda_joins: Option<Vec<String>>,
         aliases: usize,
         root_referenced: bool,
     }
@@ -122,6 +160,7 @@ pub mod query {
                 raw_filters: vec![],
                 select: vec![],
                 scope: None,
+                lambda_joins: None,
                 aliases: 0,
                 root_referenced: false,
             }
@@ -133,18 +172,40 @@ pub mod query {
             self
         }
 
-        pub fn build(mut self) -> Result<Sql, StoreError> {
+        pub fn build(self) -> Result<Sql, StoreError> {
+            self.assemble(false)
+        }
+
+        /// Wie [`build`], liefert aber `SELECT COUNT(*)` mit denselben
+        /// Bedingungen. Es werden keine Zeilen uebertragen.
+        pub fn build_count(self) -> Result<Sql, StoreError> {
+            self.assemble(true)
+        }
+
+        fn assemble(mut self, count: bool) -> Result<Sql, StoreError> {
             // Reihenfolge: erst die Ausdrucksfilter (sie binden Parameter),
             // dann die bereits umnummerierten Rohfilter.
             let exprs = std::mem::take(&mut self.filter);
             let mut conditions: Vec<String> = Vec::with_capacity(exprs.len());
+            let mut joins: Vec<String> = Vec::new();
             for expr in &exprs {
-                conditions.push(self.predicate(expr)?);
+                for conjunct in conjuncts(expr) {
+                    match self.join_any(conjunct)? {
+                        Some(join) => joins.push(join),
+                        None => conditions.push(self.predicate(conjunct)?),
+                    }
+                }
             }
             conditions.extend(self.raw_filters.iter().cloned());
             let condition_sql = conditions.join(" AND ");
+            if !joins.is_empty() {
+                self.root_referenced = true;
+            }
+            let joins_sql: String = joins.iter().map(|j| format!(" {j}")).collect();
 
-            let fields_sql = if self.select.is_empty() {
+            let fields_sql = if count {
+                "COUNT(*)".to_string()
+            } else if self.select.is_empty() {
                 "*".to_string()
             } else {
                 self.select
@@ -161,11 +222,14 @@ pub mod query {
                 String::new()
             };
             let stmt_sql = if condition_sql.is_empty() {
-                format!("SELECT {} FROM ({}){}", fields_sql, inner_sql, root_alias)
+                format!(
+                    "SELECT {} FROM ({}){}{}",
+                    fields_sql, inner_sql, root_alias, joins_sql
+                )
             } else {
                 format!(
-                    "SELECT {} FROM ({}){} WHERE {}",
-                    fields_sql, inner_sql, root_alias, condition_sql
+                    "SELECT {} FROM ({}){}{} WHERE {}",
+                    fields_sql, inner_sql, root_alias, joins_sql, condition_sql
                 )
             }
             .split_whitespace()
@@ -175,6 +239,92 @@ pub mod query {
                 text: stmt_sql,
                 params: self.params,
             })
+        }
+
+        /// `any(...)` als Top-Level-Konjunkt wird zu einem Join gegen die
+        /// deduplizierten Schluessel der Kinder. Ein Join ist hier
+        /// gleichwertig zum Semi-Join, weil das Konjunkt nur TRUE-Zeilen
+        /// durchlaesst. Bedingung: das Prädikat nutzt ausschliesslich die
+        /// Lambda-Variable (keine Felder der Wurzelzeile). Sonst liefert die
+        /// Funktion `None` und der bisherige EXISTS-Pfad greift.
+        fn join_any(&mut self, expr: &Expr) -> Result<Option<String>, StoreError> {
+            let Expr::Lambda {
+                kind: LambdaKind::Any,
+                collection,
+                var,
+                predicate,
+            } = expr
+            else {
+                return Ok(None);
+            };
+            if self.scope.is_some() || !only_var(predicate, var) {
+                return Ok(None);
+            }
+            let [nav] = collection.as_slice() else {
+                return Ok(None);
+            };
+            let set = self.set;
+            let Ok(assoc) = set.get_association(nav) else {
+                return Ok(None);
+            };
+            let ForeignKeySide::There { column } = &assoc.foreign_key else {
+                return Ok(None);
+            };
+            if assoc.cardinality != Cardinality::ToMany {
+                return Ok(None);
+            }
+            let Ok(schema) = self.require_schema() else {
+                return Ok(None);
+            };
+            let Ok(child) = schema.set(&assoc.target_set) else {
+                return Ok(None);
+            };
+            let use_active = child.draft_enabled && set.draft_enabled;
+
+            let alias = self.fresh_alias();
+            self.scope = Some(LambdaScope {
+                var: var.to_string(),
+                alias: alias.clone(),
+                set: child,
+            });
+            self.lambda_joins = Some(Vec::new());
+            let body = self.predicate(predicate);
+            let target_joins = self.lambda_joins.take().unwrap_or_default();
+            self.scope = None;
+            let body = body?;
+
+            // Ausgabespalten bewusst anders benannt als die Originalspalten:
+            // sonst waeren unqualifizierte Verweise im aeusseren WHERE mehrdeutig.
+            let fk = quote(column);
+            let is = quote(IS_ACTIVE_COLUMN);
+            let key_out = quote(&format!("_ref_{column}"));
+            let active_out = quote("_ref_IsActiveEntity");
+            let join_alias = quote(&self.fresh_alias());
+            let (sub_cols, on) = if use_active {
+                (
+                    format!(
+                        "{a}.{fk} AS {key_out}, {a}.{is} AS {active_out}",
+                        a = quote(&alias)
+                    ),
+                    format!(
+                        " AND {join_alias}.{active_out} = {}.{is}",
+                        quote(ROOT_ALIAS)
+                    ),
+                )
+            } else {
+                (format!("{}.{fk} AS {key_out}", quote(&alias)), String::new())
+            };
+            let joins_sql: String = target_joins.iter().map(|j| format!(" {j}")).collect();
+            let sub = format!(
+                "SELECT DISTINCT {sub_cols} FROM {table} AS {a}{joins_sql} WHERE {body}",
+                table = quote(&child.name),
+                a = quote(&alias),
+            );
+            Ok(Some(format!(
+                "JOIN ({sub}) AS {join_alias} ON {join_alias}.{key_out} = {}.{}{on}",
+                quote(ROOT_ALIAS),
+                quote(ID_COLUMN),
+            )))
         }
 
         /// Nimmt einen Filterausdruck auf. Uebersetzt wird erst in [`build`],
@@ -210,6 +360,11 @@ pub mod query {
         }
 
         fn column(&self, name: &str) -> Result<String, StoreError> {
+            // Berechnete Draft-Flags stehen nicht im Schema, sondern werden in
+            // `build_inner` aus dem Sibling-Join erzeugt und sind dort verfuegbar.
+            if self.set.draft_enabled && is_computed_draft_flag(name) {
+                return Ok(quote(name));
+            }
             // Existenz gegen das Schema pruefen: ein Tippfehler soll auffallen,
             // nicht als "kein Treffer" durchgehen.
             self.set
@@ -283,7 +438,6 @@ pub mod query {
                 .map_err(|e| StoreError::Metadata(e.to_string()))?;
 
             let target_alias = self.fresh_alias();
-            let value = self.element_value(&target_alias, target, rest)?;
             let mut join = format!(
                 "{}.{} = {}.{}",
                 quote(&target_alias),
@@ -300,6 +454,16 @@ pub mod query {
                     quote(IS_ACTIVE_COLUMN)
                 ));
             }
+            if let Some(joins) = self.lambda_joins.as_mut() {
+                // Join-Modus: der Join steht vor den Joins der Pfadtiefe darunter.
+                joins.push(format!(
+                    "LEFT JOIN {} AS {} ON {join}",
+                    quote(&target.name),
+                    quote(&target_alias)
+                ));
+                return self.element_value(&target_alias, target, rest);
+            }
+            let value = self.element_value(&target_alias, target, rest)?;
             Ok(format!(
                 "(SELECT {value} FROM {} AS {} WHERE {join})",
                 quote(&target.name),
@@ -401,7 +565,7 @@ pub mod query {
                 Expr::Identifier(name) => self.field(std::slice::from_ref(name))?,
                 Expr::Path(parts) => self.field(parts)?,
                 Expr::String(s) => self.push(SqlParam::Text(s.clone())),
-                Expr::Guid(g) => self.push(SqlParam::Text(g.clone())),
+                Expr::Guid(g) | Expr::DateTime(g) => self.push(SqlParam::Text(g.clone())),
                 Expr::Number(n) => {
                     if n.fract() == 0.0 && n.abs() < i64::MAX as f64 {
                         self.push(SqlParam::Int(*n as i64))
@@ -563,6 +727,29 @@ pub mod query {
             self
         }
 
+        /// Ergaenzt bei gesetztem `$select` die Schluesselspalten.
+        ///
+        /// Fehlt `IsActiveEntity` in der Projektion, setzt `DataRecord::from_json`
+        /// den Satz stillschweigend auf den Draft-Zustand. Fiori fragt dann einen
+        /// nicht existierenden Draft ab.
+        pub fn select_record_keys(mut self) -> Self {
+            if self.select.is_empty() {
+                return self;
+            }
+            // Nur physische Spalten: HasActiveEntity/HasDraftEntity sind berechnet
+            // und werden vom Translator als Schema-Spalten abgelehnt.
+            let mut keys = vec!["ID"];
+            if self.set.draft_enabled {
+                keys.push("IsActiveEntity");
+            }
+            for key in keys {
+                if !self.select.iter().any(|s| s == key) {
+                    self.select.push(key.to_string());
+                }
+            }
+            self
+        }
+
         pub fn select_is_empty(&self) -> bool {
             self.select.is_empty()
         }
@@ -665,6 +852,11 @@ pub mod query {
     /// Die Spalten werden ohne Tabellenalias referenziert. Das bleibt auch
     /// richtig, wenn das aeussere `SELECT ... FROM (...)` einen Alias traegt
     /// (bei Lambda-Ausdruecken): die Klausel hat nur diese eine Quelle.
+    /// Berechnete Draft-Flags, die nur ueber den Sibling-Join existieren.
+    pub fn is_computed_draft_flag(name: &str) -> bool {
+        matches!(name, "HasActiveEntity" | "HasDraftEntity")
+    }
+
     pub fn order_by_clause(
         set: &EntitySet,
         dialect: &dyn Dialect,
@@ -678,8 +870,10 @@ pub mod query {
             if item.property.contains('/') {
                 return Err(unsupported(format!("$orderby {}", item.property)));
             }
-            set.get_column(&item.property)
-                .map_err(|e| StoreError::Metadata(e.to_string()))?;
+            if !(set.draft_enabled && is_computed_draft_flag(&item.property)) {
+                set.get_column(&item.property)
+                    .map_err(|e| StoreError::Metadata(e.to_string()))?;
+            }
             // Die NULL-Ordnung gehoert zur Richtung: sie muss zu
             // `data_store::query::compare_json` passen, und die Datenbanken
             // sind sich darin nicht einig.

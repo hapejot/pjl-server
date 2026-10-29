@@ -1,7 +1,7 @@
 [package]
 name = "fiori-server"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
@@ -13,6 +13,7 @@ futures-util = "0.3.32"
 handlebars = "6.3"
 multer = "3.1.0"
 odata = { version = "0.1.0", path = "../odata" }
+script-hooks = { version = "0.1.0", path = "../script-hooks" }
 odata_yaml_store = { version = "0.1.0", path = "../odata-yaml-store" }
 postgres-relational-store = { version = "0.1.0", path = "../postgres-relational-store" }
 quick-xml = { version = "0.41.0", features = ["serde", "serialize"] }
@@ -20,6 +21,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 spec = { version = "0.1.0", path = "../spec" }
 spec-schema = { version = "0.1.0", path = "../spec-schema" }
+srv-3270 = { git = "https://github.com/hapejot/srv-3270", rev = "7631b6323ecfaaf6cc9042e00ef767196f70ac98" }
 sqlite-relational-store = { version = "0.1.0", path = "../sqlite-relational-store" }
 thiserror = "2.0.20"
 tokio = { version = "1.52.3", features = ["full"] }
@@ -27,7 +29,8 @@ tower = "0.5.3"
 tower-http = { version = "0.7.0", features = ["fs", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-uuid = { version = "1.24.0", features = ["v4"] }
+uuid = { version = "1.24.0", features = ["v4", "v5"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [dev-dependencies]
 tempfile = "=3.10.1"

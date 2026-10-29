@@ -77,11 +77,20 @@ impl DataRecord {
         let fields = fields
             .as_object_mut()
             .ok_or_else(|| StoreError::Serialize("as object".into()))?;
-        let id = fields
-            .remove("ID")
-            .and_then(|x| x.as_str().map(|s| s.to_string()))
-            .and_then(|x| Uuid::parse_str(&x).ok())
-            .unwrap_or_else(|| Uuid::new_v4());
+        // Fehlt die ID (Neuanlage), wird eine UUID vergeben. Eine vorhandene,
+        // aber ungueltige ID ist ein Fehler: frueher wurde sie stillschweigend
+        // durch eine zufaellige UUID ersetzt, bei jedem Lesen eine andere.
+        let id = match fields.remove("ID") {
+            None | Some(Value::Null) => Uuid::new_v4(),
+            Some(Value::String(s)) => Uuid::parse_str(&s).map_err(|_| {
+                StoreError::Serialize(format!("ID '{s}' ist keine gueltige UUID"))
+            })?,
+            Some(other) => {
+                return Err(StoreError::Serialize(format!(
+                    "ID muss eine UUID-Zeichenkette sein, erhalten: {other}"
+                )))
+            }
+        };
         let is_active_entity = fields
             .remove("IsActiveEntity")
             .and_then(|x| x.as_bool())
@@ -303,6 +312,14 @@ impl Navigation {
     }
 }
 
+/// Eine Schreiboperation fuer [`DataStore::write_entities`].
+#[derive(Debug, Clone)]
+pub enum WriteOp {
+    Create(Value),
+    Patch(EntityKey, Value),
+    Delete(EntityKey),
+}
+
 #[async_trait::async_trait]
 pub trait DataStore: Send + Sync {
     fn component_info(&self) -> String;
@@ -314,6 +331,24 @@ pub trait DataStore: Send + Sync {
     ) -> Result<Vec<DataRecord>, StoreError>;
 
     async fn count(&self, set_name: &str, query: &ODataQuery) -> usize;
+
+    /// Liste und optional Gesamtzahl in einem Aufruf. Standard: getrennt ueber
+    /// `get_collection` und `count`. Erweiterungen (Hooks) koennen die Zahl
+    /// an ihre eigenen Aenderungen anpassen.
+    async fn read_collection(
+        &self,
+        set_name: &str,
+        query: &ODataQuery,
+        with_count: bool,
+    ) -> Result<(Vec<DataRecord>, Option<usize>), StoreError> {
+        let records = self.get_collection(set_name, query).await?;
+        let count = if with_count {
+            Some(self.count(set_name, query).await)
+        } else {
+            None
+        };
+        Ok((records, count))
+    }
 
     // -- Single Entity CRUD --
     async fn read_entity(
@@ -365,6 +400,39 @@ pub trait DataStore: Send + Sync {
     // -- Persistence --
     async fn commit(&self);
 
+    // -- Batch-Schreiben (Default: Schleife ueber die Einzelmethoden) --
+
+    /// Fuehrt eine Liste von Schreiboperationen aus. Jede Operation liefert ihr
+    /// eigenes Ergebnis, ein Fehler bricht die Liste nicht ab. Create und Patch
+    /// liefern den vollstaendigen Satz (inklusive Hook-Aenderungen), Delete
+    /// liefert `None`.
+    async fn write_entities(
+        &self,
+        set_name: &str,
+        ops: Vec<WriteOp>,
+    ) -> Vec<Result<Option<DataRecord>, StoreError>> {
+        let mut results = Vec::with_capacity(ops.len());
+        for op in ops {
+            let result = match op {
+                WriteOp::Create(data) => self
+                    .create_entity(set_name, &data)
+                    .await
+                    .map(Some),
+                WriteOp::Patch(key, patch) => match self.patch_entity(set_name, &key, &patch).await
+                {
+                    Ok(_) => self
+                        .read_entity(set_name, &key, &ODataQuery::new())
+                        .await
+                        .map(Some),
+                    Err(e) => Err(e),
+                },
+                WriteOp::Delete(key) => self.delete_entity(set_name, &key).await.map(|()| None),
+            };
+            results.push(result);
+        }
+        results
+    }
+
     // -- Default-Methoden (kein Implementierungszwang) --
     async fn update_entities(
         &self,
@@ -396,4 +464,32 @@ pub trait DataStore: Send + Sync {
 #[async_trait::async_trait]
 pub trait DataStoreDebugExt: DataStore {
     async fn get_records(&self, set_name: &str) -> Vec<Value>;
+}
+
+#[cfg(test)]
+mod from_json_id_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn valid_uuid_id_is_kept() {
+        let r = DataRecord::from_json(&json!({
+            "ID": "00000000-0000-0000-0000-000000000042",
+            "IsActiveEntity": true
+        }))
+        .unwrap();
+        assert_eq!(r.id.to_string(), "00000000-0000-0000-0000-000000000042");
+    }
+
+    #[test]
+    fn invalid_id_is_rejected_not_replaced() {
+        let err = DataRecord::from_json(&json!({ "ID": "3963451", "IsActiveEntity": true }));
+        assert!(matches!(err, Err(StoreError::Serialize(_))));
+    }
+
+    #[test]
+    fn missing_id_gets_new_uuid() {
+        let r = DataRecord::from_json(&json!({ "IsActiveEntity": false })).unwrap();
+        assert!(!r.is_active_entity);
+    }
 }

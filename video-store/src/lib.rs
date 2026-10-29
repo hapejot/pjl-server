@@ -48,6 +48,6 @@ pub mod import;
 pub mod introspect;
 pub mod map;
 pub mod player;
-pub mod tag_index;
+pub mod status;
 pub mod tags;
 pub mod thumbnails;

@@ -22,7 +22,7 @@ use spec::{
 };
 use tracing::*;
 
-use crate::{export::export_dictionary, AppState};
+use crate::AppState;
 mod sample;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -58,6 +58,7 @@ impl EntityType {
                     entity,
                     collection,
                     owned: _,
+                    ..
                 } => {
                     let p = if *collection {
                         NavigationProperty::new(
@@ -313,6 +314,7 @@ impl EntitySet {
                 entity,
                 collection,
                 owned,
+                ..
             } = field
             {
                 if !collection && *owned {
@@ -403,7 +405,9 @@ pub struct Annotations {
     pub annotations: Vec<Annotation>,
 }
 impl Annotations {
-    fn from_entity(x: &EntitySpec, hidden: &[String]) -> Vec<Annotations> {
+    /// `app_entities`: Namen der Hauptentitaeten aller Apps. Ein Verweis auf eine
+    /// dieser Entitaeten wird als semantische Verlinkung (Intent) ausgegeben.
+    fn from_entity(x: &EntitySpec, hidden: &[String], app_entities: &[String]) -> Vec<Annotations> {
         let mut annotations = Vec::new();
         let mut main_annotations = Annotations {
             target: format!("Service.{}", x.name()),
@@ -413,8 +417,8 @@ impl Annotations {
         main_annotations.annotations.push(
             Annotation::new("UI.HeaderInfo").record(
                 Record::new("UI.HeaderInfoType")
-                    .add(PropertyValue::new("TypeName").string(x.name()))
-                    .add(PropertyValue::new("TypeNamePlural").string(x.setname()))
+                    .add(PropertyValue::new("TypeName").string(x.type_name()))
+                    .add(PropertyValue::new("TypeNamePlural").string(&x.type_name_plural))
                     .add(PropertyValue::new("Title").record(
                         Record::new("UI.DataField").add(PropertyValue::new("Value").path("name")),
                     )),
@@ -426,38 +430,34 @@ impl Annotations {
             Annotation::new("Common.SemanticKey")
                 .collection(Collection::new().add_property_path("ID")),
         );
+        if !x.selection_fields().is_empty() {
+            let mut paths = Collection::new();
+            for field in x.selection_fields() {
+                // Einwertige Navigation filtert ueber den Fremdschluessel.
+                let is_to_one = x.fields().any(|f| {
+                    matches!(f, FieldSpec::Lookup { name, collection: false, .. } if name == field)
+                });
+                let path = if is_to_one { format!("{field}_ID") } else { field.clone() };
+                paths = paths.add_property_path(path);
+            }
+            main_annotations
+                .annotations
+                .push(Annotation::new("UI.SelectionFields").collection(paths));
+        }
         // Kein Common.Messages: DraftMessages ist im $metadata keine Navigation
         // (nur eine JSON-Spalte im Store). Der Verweis wuerde FE-Fehler
         // "does not point to a property" ausloesen.
 
-        // Default Object Page section pointing to a main field group, plus one
-        // list section per to-many navigation.
-        let mut facets = Collection::new().add_record(
-            Record::new("UI.CollectionFacet")
-                .add(PropertyValue::new("Label").string("General"))
-                .add(PropertyValue::new("ID").string("GeneralSection"))
-                .add(
-                    PropertyValue::new("Facets").collection(
-                        Collection::new().add_record(
-                            Record::new("UI.ReferenceFacet")
-                                .add(PropertyValue::new("Label").string("General"))
-                                .add(
-                                    PropertyValue::new("Target")
-                                        .annotation_path("@UI.FieldGroup#Main"),
-                                ),
-                        ),
-                    ),
-                ),
-        );
-        for record in list_facet_records(x) {
+        // Object-Page-Abschnitte: Feldgruppen und Listen, siehe `object_page_sections`.
+        let (sections, groups) = object_page_sections(x, hidden, app_entities);
+        let mut facets = Collection::new();
+        for record in sections {
             facets = facets.add_record(record);
         }
         main_annotations
             .annotations
             .push(Annotation::new("UI.Facets").collection(facets));
-
-        let main_field_group = prepare_field_group(x, hidden);
-        main_annotations.annotations.push(main_field_group);
+        main_annotations.annotations.extend(groups);
 
         annotations.push(main_annotations);
 
@@ -474,10 +474,22 @@ impl Annotations {
                 computed: false,
                 immutable: false,
                 value_list: None,
+                link: false,
+                multiline: false,
             },
         ));
         for f in x.fields() {
             annotations.push(Self::from_field(x.name(), f));
+        }
+        for (field, value) in x.filter_defaults() {
+            let annotation = match value {
+                spec::FilterDefault::Text(t) => Annotation::new("Common.FilterDefaultValue").string(t),
+                spec::FilterDefault::Flag(b) => Annotation::new("Common.FilterDefaultValue").boolean(*b),
+            };
+            annotations.push(Annotations {
+                target: format!("Service.{}/{}", x.name(), field),
+                annotations: vec![annotation],
+            });
         }
         annotations
     }
@@ -485,6 +497,9 @@ impl Annotations {
     fn from_field(service_name: &str, f: &spec::FieldSpec) -> Annotations {
         let mut target = format!("Service.{}/{}", service_name, f.name());
         let mut annotations = vec![Annotation::new("Common.Label").string(f.label())];
+        if matches!(f, FieldSpec::Atom { multiline: true, .. }) {
+            annotations.push(Annotation::new("UI.MultiLineText"));
+        }
 
         match f {
             FieldSpec::Lookup {
@@ -492,6 +507,7 @@ impl Annotations {
                 entity,
                 collection,
                 owned: _,
+                ..
             } => {
                 if !collection {
                     let name = format!("{}_ID", name);
@@ -607,13 +623,28 @@ fn line_item(qualifier: Option<&str>, columns: &[String], x: &EntitySpec) -> Ann
             matches!(f, spec::FieldSpec::Lookup { name, collection: false, .. } if name == col)
         });
         let path = if is_nav { format!("{col}/name") } else { col.clone() };
-        coll = coll.add_record(
-            Record::new("UI.DataField").add(PropertyValue::new("Value").path(path)),
-        );
+        let link = !is_nav && is_link_atom(x, col);
+        coll = coll.add_record(data_field(&path, link));
     }
     let mut ann = Annotation::new("UI.LineItem").collection(coll);
     ann.qualifier = qualifier.map(str::to_string);
     ann
+}
+
+/// Ist `name` ein Atom mit `link: true` (Wert ist eine URL)?
+fn is_link_atom(x: &EntitySpec, name: &str) -> bool {
+    x.fields().any(|f| matches!(f, FieldSpec::Atom { name: n, link: true, .. } if n == name))
+}
+
+/// `UI.DataField` bzw. bei `link` ein `UI.DataFieldWithUrl`, dessen Ziel der Wert selbst ist.
+fn data_field(path: &str, link: bool) -> Record {
+    if link {
+        Record::new("UI.DataFieldWithUrl")
+            .add(PropertyValue::new("Value").path(path))
+            .add(PropertyValue::new("Url").path(path))
+    } else {
+        Record::new("UI.DataField").add(PropertyValue::new("Value").path(path))
+    }
 }
 
 /// `UI.PresentationVariant` fuer eine Listenansicht. Die Ansicht `default`
@@ -637,67 +668,241 @@ fn presentation_variant(view_name: &str) -> Annotation {
     ann
 }
 
-/// One top-level `UI.ReferenceFacet` section per to-many navigation, pointing at
-/// the target entity's default `UI.LineItem` for its table columns.
-fn list_facet_records(x: &EntitySpec) -> Vec<Record> {
-    x.fields()
-        .filter_map(|f| match f {
-            FieldSpec::Lookup {
-                name,
-                collection: true,
-                ..
-            } => Some(
-                Record::new("UI.ReferenceFacet")
-                    .add(PropertyValue::new("Label").string(name))
-                    .add(PropertyValue::new("ID").string(format!("{name}Section")))
-                    .add(
-                        PropertyValue::new("Target")
-                            .annotation_path(format!("{name}/@UI.LineItem")),
-                    ),
-            ),
-            _ => None,
-        })
-        .collect()
+/// Identifikator der Allgemein-Facette (Feldabschnitt `Main`).
+pub const GENERAL_FACET: &str = "General";
+/// Identifikator der Sammel-Facette fuer alle nicht genannten Felder.
+pub const DEFAULT_FACET: &str = "Default";
+
+/// Pfad des LineItems fuer eine Navigations-Facette. Ohne Facetten-Einstellung
+/// (oder mit Ansicht `default`) das unqualifizierte LineItem, sonst `#<ansicht>`.
+fn facet_target_path(x: &EntitySpec, nav: &str) -> String {
+    match x.facet(nav).and_then(|f| f.view.as_deref()) {
+        Some(view) if view != spec::ListView::DEFAULT => format!("{nav}/@UI.LineItem#{view}"),
+        _ => format!("{nav}/@UI.LineItem"),
+    }
 }
 
-/// `hidden`: Felder, die aus der Standard-FieldGroup fehlen (z. B. wenn eine Erweiterung sie als eigenen Abschnitt zeigt).
-fn prepare_field_group(x: &EntitySpec, hidden: &[String]) -> Annotation {
-    let mut main_data = Collection::new();
-    // main_data = main_data
-    //     .add_record(Record::new("UI.DataField")
-    //     .add(PropertyValue::new("Value")
-    //     .path("ID")));
-    for f in x.fields() {
-        match f {
-            FieldSpec::Lookup {
-                name, collection, ..
-            } => {
-                if *collection {
-                } else {
-                    let name = format!("{name}_ID");
-                    main_data = main_data.add_record(
-                        Record::new("UI.DataField").add(PropertyValue::new("Value").path(name)),
-                    )
-                }
+/// Titel einer Facette: der konfigurierte Titel, sonst der Modelltitel der Navigation,
+/// sonst der Schluessel.
+fn facet_title(x: &EntitySpec, key: &str) -> String {
+    if let Some(title) = x.facet(key).and_then(|f| f.title.clone()) {
+        return title;
+    }
+    x.fields()
+        .find_map(|f| match f {
+            FieldSpec::Lookup { name, label, .. } if name == key => {
+                Some(label.clone().unwrap_or_else(|| name.clone()))
             }
-            FieldSpec::Atom { name, .. } => {
-                if hidden.iter().any(|h| h == name) {
-                    continue;
-                }
-                main_data = main_data.add_record(
+            _ => None,
+        })
+        .unwrap_or_else(|| key.to_string())
+}
 
-                    Record::new("UI.DataField").add(PropertyValue::new("Value").path(name)),
-                )
+/// Object-Page-Abschnitte einer Entitaet in der Reihenfolge von `EntitySpec.facets`.
+///
+/// * Ohne Konfiguration: `General` (alle Felder), danach je to-many Navigation ein Listenabschnitt.
+/// * `General` ist immer vorhanden. Steht es nicht in `facets`, wird es vorangestellt.
+/// * Navigationen, die nicht konfiguriert sind, folgen am Ende.
+/// * Eigene Schluessel mit `fields` erzeugen eine eigene `UI.FieldGroup#<schluessel>`.
+/// * `Default` sammelt alle Felder, die in keiner Facette genannt sind.
+///
+/// Liefert die Facetten-Records und die zugehoerigen FieldGroups.
+fn object_page_sections(
+    x: &EntitySpec,
+    hidden: &[String],
+    app_entities: &[String],
+) -> (Vec<Record>, Vec<Annotation>) {
+    let navs: Vec<String> = x
+        .fields()
+        .filter_map(|f| match f {
+            FieldSpec::Lookup { name, collection: true, .. } => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
+    let mentioned: Vec<&str> = x
+        .facets()
+        .iter()
+        .flat_map(|f| f.fields.iter().map(String::as_str))
+        .collect();
+    // Langtexte bekommen je einen eigenen Abschnitt (volle Breite), sofern keine
+    // Facette sie ausdruecklich nennt.
+    let long_texts: Vec<String> = x
+        .fields()
+        .filter_map(|f| match f {
+            FieldSpec::Atom { name, multiline: true, .. } if !mentioned.contains(&name.as_str()) => {
+                Some(name.clone())
             }
-            FieldSpec::Measure { .. } => todo!(),
+            _ => None,
+        })
+        .collect();
+    let remainder: Vec<String> = x
+        .fields()
+        .filter(|f| !matches!(f, FieldSpec::Lookup { collection: true, .. }))
+        .filter(|f| !mentioned.contains(&f.name()))
+        .filter(|f| !long_texts.iter().any(|l| l == f.name()))
+        .map(|f| f.name().to_string())
+        .collect();
+    let general_fields: Vec<String> = x
+        .fields()
+        .filter(|f| !matches!(f, FieldSpec::Lookup { collection: true, .. }))
+        .filter(|f| !long_texts.iter().any(|l| l == f.name()))
+        .map(|f| f.name().to_string())
+        .collect();
+
+    let configured: Vec<&str> = x.facets().iter().map(|f| f.facet.as_str()).collect();
+    let mut keys: Vec<String> = Vec::new();
+    if !configured.contains(&GENERAL_FACET) {
+        keys.push(GENERAL_FACET.to_string());
+    }
+    keys.extend(configured.iter().map(|k| k.to_string()));
+    for nav in &navs {
+        if !keys.contains(nav) {
+            keys.push(nav.clone());
         }
     }
-    let mut main_field_group = Annotation::new("UI.FieldGroup");
-    main_field_group.qualifier = Some("Main".to_string());
-    main_field_group = main_field_group.record(
-        Record::new("UI.FieldGroupType").add(PropertyValue::new("Data").collection(main_data)),
-    );
-    main_field_group
+    for long in &long_texts {
+        keys.push(format!("{long}{LONG_TEXT_SUFFIX}"));
+    }
+
+    let mut records = Vec::new();
+    let mut groups = Vec::new();
+    for key in &keys {
+        if navs.contains(key) {
+            records.push(list_facet_record(x, key));
+            continue;
+        }
+        if let Some(long) = key.strip_suffix(LONG_TEXT_SUFFIX) {
+            groups.push(field_group(key, x, Some(&[long.to_string()]), hidden, app_entities));
+            records.push(
+                Record::new("UI.ReferenceFacet")
+                    .add(PropertyValue::new("Label").string(facet_title(x, long)))
+                    .add(PropertyValue::new("ID").string(format!("{long}Section")))
+                    .add(PropertyValue::new("Target").annotation_path(format!("@UI.FieldGroup#{key}"))),
+            );
+            continue;
+        }
+        let (selected, qualifier): (Option<Vec<String>>, &str) = if key == GENERAL_FACET {
+            let fields = x
+                .facet(key)
+                .map(|f| f.fields.clone())
+                .filter(|f| !f.is_empty())
+                .or_else(|| Some(general_fields.clone()));
+            (fields, "Main")
+        } else if key == DEFAULT_FACET {
+            if remainder.is_empty() {
+                continue;
+            }
+            (Some(remainder.clone()), DEFAULT_FACET)
+        } else {
+            (x.facet(key).map(|f| f.fields.clone()), key.as_str())
+        };
+        groups.push(field_group(qualifier, x, selected.as_deref(), hidden, app_entities));
+
+        if key == GENERAL_FACET {
+            records.push(
+                Record::new("UI.CollectionFacet")
+                    .add(PropertyValue::new("Label").string(facet_title(x, key)))
+                    .add(PropertyValue::new("ID").string("GeneralSection"))
+                    .add(PropertyValue::new("Facets").collection(Collection::new().add_record(
+                        Record::new("UI.ReferenceFacet")
+                            .add(PropertyValue::new("Label").string(facet_title(x, key)))
+                            .add(PropertyValue::new("Target").annotation_path("@UI.FieldGroup#Main")),
+                    ))),
+            );
+        } else {
+            records.push(
+                Record::new("UI.ReferenceFacet")
+                    .add(PropertyValue::new("Label").string(facet_title(x, key)))
+                    .add(PropertyValue::new("ID").string(format!("{key}Section")))
+                    .add(
+                        PropertyValue::new("Target")
+                            .annotation_path(format!("@UI.FieldGroup#{qualifier}")),
+                    ),
+            );
+        }
+    }
+    (records, groups)
+}
+
+/// Qualifier-Suffix fuer den eigenen Abschnitt eines Langtextfelds.
+const LONG_TEXT_SUFFIX: &str = "_LongText";
+
+/// Listenabschnitt (`UI.ReferenceFacet`) fuer eine to-many Navigation.
+fn list_facet_record(x: &EntitySpec, nav: &str) -> Record {
+    Record::new("UI.ReferenceFacet")
+        .add(PropertyValue::new("Label").string(facet_title(x, nav)))
+        .add(PropertyValue::new("ID").string(format!("{nav}Section")))
+        .add(PropertyValue::new("Target").annotation_path(facet_target_path(x, nav)))
+}
+
+/// Einzel-Verweis auf eine App-Entitaet als semantische Verlinkung:
+/// `UI.DataFieldWithIntentBasedNavigation` mit Intent `<Entitaet>-display`,
+/// Parameter `ID` aus dem Fremdschluessel.
+fn lookup_intent_field(name: &str, entity: &str) -> Record {
+    let fk = format!("{name}_ID");
+    Record::new("UI.DataFieldWithIntentBasedNavigation")
+        .add(PropertyValue::new("Value").path(&fk))
+        .add(PropertyValue::new("SemanticObject").string(entity))
+        .add(PropertyValue::new("Action").string("display"))
+        .add(PropertyValue::new("Mapping").collection(Collection::new().add_record(
+            Record::new("Common.SemanticObjectMappingType")
+                .add(PropertyValue::new("LocalProperty").property_path(&fk))
+                .add(PropertyValue::new("SemanticObjectProperty").string("ID")),
+        )))
+}
+
+/// FieldGroup mit dem Qualifier `qualifier`. `selected`: Felder in Anzeigereihenfolge,
+/// `None` = alle Felder der Entitaet.
+fn field_group(
+    qualifier: &str,
+    x: &EntitySpec,
+    selected: Option<&[String]>,
+    hidden: &[String],
+    app_entities: &[String],
+) -> Annotation {
+    let fields: Vec<&FieldSpec> = match selected {
+        Some(names) => names
+            .iter()
+            .filter_map(|name| x.fields().find(|f| f.name() == name))
+            .collect(),
+        None => x.fields().collect(),
+    };
+    let mut data = Collection::new();
+    for record in fields
+        .into_iter()
+        .filter_map(|f| field_record(f, hidden, app_entities))
+    {
+        data = data.add_record(record);
+    }
+    let mut ann = Annotation::new("UI.FieldGroup");
+    ann.qualifier = Some(qualifier.to_string());
+    ann.record(Record::new("UI.FieldGroupType").add(PropertyValue::new("Data").collection(data)))
+}
+
+/// Ein `UI.DataField` fuer ein Feld. `None` fuer Felder ohne Zeile in der FieldGroup.
+fn field_record(f: &FieldSpec, hidden: &[String], app_entities: &[String]) -> Option<Record> {
+    match f {
+        FieldSpec::Lookup { name, entity, collection, .. } => {
+            if *collection {
+                None
+            } else if app_entities.iter().any(|a| a == entity) {
+                Some(lookup_intent_field(name, entity))
+            } else {
+                Some(
+                    Record::new("UI.DataField")
+                        .add(PropertyValue::new("Value").path(format!("{name}_ID"))),
+                )
+            }
+        }
+        FieldSpec::Atom { name, link, .. } => {
+            if hidden.iter().any(|h| h == name) {
+                None
+            } else {
+                Some(data_field(name, *link))
+            }
+        }
+        FieldSpec::Measure { .. } => todo!(),
+    }
 }
 
 fn annotations_for_atom_value_list(name: &str, value_list: &AtomValueList) -> Vec<Annotation> {
@@ -706,7 +911,7 @@ fn annotations_for_atom_value_list(name: &str, value_list: &AtomValueList) -> Ve
             list_id,
             prefer_dialog,
         } => value_list_annotations(
-            "FieldValueListItems",
+            "FieldValueListItemsSet",
             *prefer_dialog,
             Collection::new()
                 .add_record(
@@ -721,7 +926,7 @@ fn annotations_for_atom_value_list(name: &str, value_list: &AtomValueList) -> Ve
                 .add_record(
                     Record::new("Common.ValueListParameterConstant")
                         .add(PropertyValue::new("ValueListProperty").string("ListID"))
-                        .add(PropertyValue::new("Constant").constant(list_id)),
+                        .add(PropertyValue::new("Constant").string(list_id)),
                 ),
         ),
         AtomValueList::EntityRef {
@@ -1057,6 +1262,7 @@ fn render_info_page(state: &AppState) -> String {
                         entity: target_entity,
                         collection,
                         owned: _,
+                        ..
                     } => {
                         let target_set = ddic
                             .active_entity(target_entity)
@@ -1143,7 +1349,6 @@ pub fn router() -> Router<AppState> {
         .route("/$metadata", get(metadata))
         .route("/info", get(info))
         .route("/reload", post(reload))
-        .route("/export", post(export))
         .route(
             "/{*path}",
             get(get_handler)
@@ -1163,41 +1368,6 @@ async fn reload(State(state): State<AppState>) -> impl IntoResponse {
         "relationships": ddic.relationships().count(),
         "apps": ddic.apps().count(),
     }))
-}
-
-/// Aufruf der ungebundenen Aktion `export` (Action Import).
-///
-/// OData v4 ruft einen Action Import per `POST <service>/<name>` auf - daher
-/// die Route `/export`. Deklariert wird sie in [`export_action`] und
-/// [`export_action_import`]; ohne beides waere dies ein privater Endpunkt,
-/// den kein OData-Client finden kann.
-///
-/// Schreibt das modellierte Dictionary als Dateipaar in das Exportverzeichnis
-/// und liefert `Service.ExportResult` zurueck.
-async fn export(State(state): State<AppState>) -> Response {
-    if !state.mode().is_designer() {
-        return ODataError::not_found(format!(
-            "Unknown action '{EXPORT_ACTION}' - the runtime server has nothing to export"
-        ))
-        .into_response();
-    }
-    match export_dictionary(&state).await {
-        Ok(report) => {
-            info!("dictionary exported to {}", report.ddic_path);
-            let mut body = json!(report);
-            // Kontext auf den ComplexType, nicht auf ein Entity Set: das
-            // Ergebnis ist ein einzelner Wert, keine Entitaet.
-            body.as_object_mut().expect("report object").insert(
-                "@odata.context".to_string(),
-                json!("/Service/$metadata#Service.ExportResult"),
-            );
-            to_json_response(body).into_response()
-        }
-        Err(e) => {
-            error!("export failed: {e:#}");
-            ODataError::internal(format!("export failed: {e}")).into_response()
-        }
-    }
 }
 
 fn build_query(params: &HashMap<String, String>) -> Result<ODataQuery, ODataError> {
@@ -1413,17 +1583,20 @@ impl ODataError {
         }
     }
 
-    fn internal(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "InternalError",
-            message: message.into(),
-        }
-    }
-
     fn from_store(e: StoreError) -> Self {
         match e {
             StoreError::NotFound { .. } => Self::not_found(e.to_string()),
+            StoreError::Conflict(msg) => Self {
+                status: StatusCode::CONFLICT,
+                code: "Conflict",
+                message: msg,
+            },
+            StoreError::PropertyNotFound(_) => Self::bad_request(e.to_string()),
+            StoreError::Forbidden(msg) => Self {
+                status: StatusCode::FORBIDDEN,
+                code: "Forbidden",
+                message: msg,
+            },
             _ => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 code: "InternalError",
@@ -1873,16 +2046,12 @@ async fn read_collection(
     set: &str,
     query: &ODataQuery,
 ) -> Result<Cursor, ODataError> {
-    let records = state
+    // Ein Aufruf: Hooks laufen einmal pro Request, Count beruecksichtigt Entfernungen.
+    let (records, count) = state
         .store
-        .get_collection(set, query)
+        .read_collection(set, query, query.count)
         .await
         .map_err(ODataError::from_store)?;
-    let count = if query.count {
-        Some(state.store.count(set, query).await)
-    } else {
-        None
-    };
     Ok(Cursor::Collection { records, count })
 }
 
@@ -2095,24 +2264,34 @@ async fn children_of(
 
 async fn patch_handler(
     path: Path<String>,
-    _state: State<AppState>,
+    state: State<AppState>,
     params: Query<HashMap<String, String>>,
     payload: Option<Json<Value>>,
-) -> impl IntoResponse {
+) -> Response {
     let _p = build_query(&params);
-    let _path_struct = parse_odata_path(&path).unwrap();
-    let _body = payload.map(|Json(v)| v).unwrap_or_else(|| json!({}));
-    let key = _path_struct.segments.first().unwrap();
-    let ekey = EntityKey::new(key.id().unwrap(), key.is_active_entity());
-    _state
-        .store
-        .patch_entity(&key.name, &ekey, &_body)
-        .await
-        .unwrap();
-    (
-        [content_type_json(), odata_version()],
-        json!([]).to_string(),
-    )
+    let path_struct = match parse_odata_path(&path) {
+        Ok(p) => p,
+        Err(e) => {
+            return ODataError::bad_request(format!("Invalid path '{}': {}", e.segment, e.message))
+                .into_response();
+        }
+    };
+    let body = payload.map(|Json(v)| v).unwrap_or_else(|| json!({}));
+    let Some(key) = path_struct.segments.first() else {
+        return ODataError::bad_request("Missing entity segment in path").into_response();
+    };
+    let Some(id) = key.id() else {
+        return ODataError::bad_request(format!("Invalid key for '{}'", key.name)).into_response();
+    };
+    let ekey = EntityKey::new(id, key.is_active_entity());
+    match state.store.patch_entity(&key.name, &ekey, &body).await {
+        Ok(_) => (
+            [content_type_json(), odata_version()],
+            json!([]).to_string(),
+        )
+            .into_response(),
+        Err(e) => ODataError::from_store(e).into_response(),
+    }
 }
 
 async fn delete_handler(path: Path<String>, state: State<AppState>) -> Response {
@@ -2243,6 +2422,13 @@ async fn index(State(state): State<AppState>) -> Json<Value> {
       "value": value
     }))
 }
+/// Namen der Hauptentitaeten aller Apps (Ziele der semantischen Verlinkung).
+fn app_entity_names(ddic: &DataDictionary) -> Vec<String> {
+    ddic.apps()
+        .map(|app| app.main_entity(ddic).name().to_string())
+        .collect()
+}
+
 async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
     let ddic = state.ddic();
     let entity_lst: Vec<EntityType> = ddic
@@ -2253,9 +2439,10 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
         .active_entities()
         .map(|x| EntitySet::from_entity(&ddic, x))
         .collect();
+    let app_entities = app_entity_names(&ddic);
     let annotation_lst: Vec<Annotations> = ddic
         .active_entities()
-        .map(|x| Annotations::from_entity(x, &crate::extension::hidden_fields(&state.extensions, x.name())))
+        .map(|x| Annotations::from_entity(x, &crate::extension::hidden_fields(&state.extensions, x.name()), &app_entities))
         .flatten()
         .collect();
     // let _sample_entity = sample::sample_entity();
@@ -2394,12 +2581,9 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
     let xml = meta
         .replace("%TYPE-DEFINITIONS%", &type_defs.concat())
         .replace("%ENTITY-SETS%", &entity_sets.concat())
-        .replace("%ACTION-IMPORTS%", &export_action_import(&state))
+        .replace("%ACTION-IMPORTS%", "")
         .replace("%ANNOTATIONS%", &annotations.concat())
-        .replace(
-            "%ACTIONS%",
-            &[actions.concat(), export_action(&state)].concat(),
-        )
+        .replace("%ACTIONS%", &actions.concat())
         .to_string();
     (
         [
@@ -2408,64 +2592,6 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
         ],
         xml,
     )
-}
-
-/// Name der ungebundenen Aktion und ihres Action Imports.
-///
-/// Der Import traegt denselben Namen, damit die Aufruf-URL
-/// `POST /Service/export` lautet - genau der Pfad, den OData v4 fuer einen
-/// Action Import vorsieht.
-pub const EXPORT_ACTION: &str = "export";
-
-/// Ergebnistyp der Export-Aktion, als `ComplexType` deklariert.
-///
-/// Muss mit [`crate::export::ExportReport`] uebereinstimmen - ein OData-Client
-/// liest die Felder ueber diese Deklaration.
-fn export_result_type() -> String {
-    r##"<ComplexType Name="ExportResult">
-        <Property Name="ddic_path"         Type="Edm.String" Nullable="false"/>
-        <Property Name="schema_path"       Type="Edm.String" Nullable="false"/>
-        <Property Name="packages"          Type="Edm.Int32"  Nullable="false"/>
-        <Property Name="entities"          Type="Edm.Int32"  Nullable="false"/>
-        <Property Name="relationships"     Type="Edm.Int32"  Nullable="false"/>
-        <Property Name="apps"              Type="Edm.Int32"  Nullable="false"/>
-        <Property Name="entity_sets"       Type="Edm.Int32"  Nullable="false"/>
-        <Property Name="skipped_metamodel" Type="Edm.Int32"  Nullable="false"/>
-    </ComplexType>"##
-        .to_string()
-}
-
-/// Die ungebundene Aktion selbst.
-///
-/// Ungebunden, weil das Veroeffentlichen den Service als Ganzes betrifft und
-/// nicht einen einzelnen Datensatz - eine gebundene Aktion braeuchte einen
-/// Kontext, den es hier nicht gibt.
-///
-/// Nur der Designer deklariert sie; im Laufzeitserver gibt es nichts zu
-/// exportieren, und eine Aktion im `$metadata`, die der Server anschliessend
-/// ablehnt, waere eine Luege gegenueber dem Client.
-fn export_action(state: &AppState) -> String {
-    if !state.mode().is_designer() {
-        return String::new();
-    }
-    [
-        export_result_type(),
-        format!(
-            r##"<Action Name="{EXPORT_ACTION}" IsBound="false">
-                    <ReturnType Type="Service.ExportResult" Nullable="false"/>
-                </Action>"##
-        ),
-    ]
-    .concat()
-}
-
-/// Der Action Import - erst er macht die Aktion ueber den EntityContainer
-/// aufrufbar und damit fuer einen OData-Client sichtbar.
-fn export_action_import(state: &AppState) -> String {
-    if !state.mode().is_designer() {
-        return String::new();
-    }
-    format!(r##"<ActionImport Name="{EXPORT_ACTION}" Action="Service.{EXPORT_ACTION}"/>"##)
 }
 
 fn edmx_template() -> String {
@@ -2536,13 +2662,80 @@ mod tests {
     }
 
     #[test]
+    fn lookup_to_app_entity_gets_intent_based_navigation() {
+        let mut ddic = DataDictionary::new();
+        ddic.activate();
+        let (entity, target, name) = ddic
+            .active_entities()
+            .find_map(|e| {
+                e.fields().find_map(|f| match f {
+                    FieldSpec::Lookup {
+                        name,
+                        entity,
+                        collection: false,
+                        ..
+                    } => Some((e.clone(), entity.clone(), name.clone())),
+                    _ => None,
+                })
+            })
+            .expect("ein Einzel-Lookup im Standard-Dictionary");
+        let fk = format!("{name}_ID");
+
+        let linked = Annotations::from_entity(&entity, &[], std::slice::from_ref(&target));
+        let xml = format!("{linked:?}");
+        assert!(xml.contains("UI.DataFieldWithIntentBasedNavigation"));
+        assert!(xml.contains(&target));
+
+        let plain = Annotations::from_entity(&entity, &[], &[]);
+        let xml = format!("{plain:?}");
+        assert!(!xml.contains("UI.DataFieldWithIntentBasedNavigation"));
+        assert!(xml.contains(&fk));
+    }
+
+    #[test]
+    fn facet_target_uses_the_configured_view() {
+        let mut x = EntitySpec::new("Actor", "core", "Actors");
+        assert_eq!(facet_target_path(&x, "_ActorSceneMap"), "_ActorSceneMap/@UI.LineItem");
+        x.facets.push(spec::FacetSpec { facet: "_ActorSceneMap".into(), view: Some("reverse".into()), title: None, fields: vec![] });
+        assert_eq!(
+            facet_target_path(&x, "_ActorSceneMap"),
+            "_ActorSceneMap/@UI.LineItem#reverse"
+        );
+        x.facets[0].view = Some("default".into());
+        assert_eq!(facet_target_path(&x, "_ActorSceneMap"), "_ActorSceneMap/@UI.LineItem");
+    }
+
+    #[test]
+    fn facet_title_prefers_the_model_label_of_the_navigation() {
+        let mut x = EntitySpec::new("Actor", "core", "Actors");
+        x.fields.push(FieldSpec::Lookup {
+            name: "_ActorSceneMap".into(),
+            entity: "ActorSceneMap".into(),
+            collection: true,
+            owned: false,
+            label: Some("Scene assignments".into()),
+        });
+        assert_eq!(facet_title(&x, "_ActorSceneMap"), "Scene assignments");
+        x.facets.push(spec::FacetSpec { facet: "_ActorSceneMap".into(), view: None, title: Some("Szenen".into()), fields: vec![] });
+        assert_eq!(facet_title(&x, "_ActorSceneMap"), "Szenen");
+    }
+
+    #[test]
+    fn facet_title_defaults_to_the_navigation_name() {
+        let mut x = EntitySpec::new("Actor", "core", "Actors");
+        assert_eq!(facet_title(&x, "_ActorSceneMap"), "_ActorSceneMap");
+        x.facets.push(spec::FacetSpec { facet: "_ActorSceneMap".into(), view: None, title: Some("Szenen".into()), fields: vec![] });
+        assert_eq!(facet_title(&x, "_ActorSceneMap"), "Szenen");
+    }
+
+    #[test]
     fn facets_include_a_list_section_per_to_many_navigation() {
         let mut ddic = DataDictionary::new();
         ddic.activate();
         // "Entity" has to-many lookups _Fields, _Many, _One after activation.
         let entity = ddic.active_entity("Entity").unwrap();
 
-        let annotations = Annotations::from_entity(entity, &[]);
+        let annotations = Annotations::from_entity(entity, &[], &[]);
         let main = annotations
             .iter()
             .find(|a| a.target == "Service.Entity")
@@ -2705,38 +2898,6 @@ mod tests {
             SortDirection::Desc
         );
     }
-
-    /// Der `ComplexType` ist von Hand geschrieben, das Ergebnis kommt aus
-    /// `serde`. Laufen die beiden auseinander, liest ein OData-Client
-    /// Felder, die es nicht gibt - oder uebersieht welche.
-    #[test]
-    fn export_result_type_matches_the_actual_payload() {
-        let declared: Vec<String> = export_result_type()
-            .lines()
-            .filter_map(|line| line.split_once(r#"<Property Name=""#))
-            .filter_map(|(_, rest)| rest.split_once('"'))
-            .map(|(name, _)| name.to_string())
-            .collect();
-
-        let report = crate::export::ExportReport {
-            ddic_path: String::new(),
-            schema_path: String::new(),
-            packages: 0,
-            entities: 0,
-            relationships: 0,
-            apps: 0,
-            entity_sets: 0,
-            skipped_metamodel: 0,
-        };
-        let Value::Object(payload) = json!(report) else {
-            panic!("report is not an object");
-        };
-        let mut actual: Vec<String> = payload.keys().cloned().collect();
-        let mut declared = declared;
-        declared.sort();
-        actual.sort();
-        assert_eq!(declared, actual);
-    }
 }
 
 #[cfg(test)]
@@ -2756,7 +2917,42 @@ mod list_view_annotation_tests {
             computed: false,
             immutable: false,
             value_list: None,
+            link: false,
+            multiline: false,
         }
+    }
+
+    #[test]
+    fn link_atoms_become_clickable_fields() {
+        let mut e = active_video(vec![ListView::new("default", &["title"])]);
+        for f in e.fields.iter_mut() {
+            if let FieldSpec::Atom { name, link, .. } = f {
+                if name == "title" {
+                    *link = true;
+                }
+            }
+        }
+        let fg = serde_json::to_string(&field_group("Main", &e, None, &[], &[])).unwrap();
+        assert!(fg.contains("UI.DataFieldWithUrl"), "link-Atom wird DataFieldWithUrl");
+        let anns = line_item_annotations(&e);
+        let li = serde_json::to_string(&anns[0]).unwrap();
+        assert!(li.contains("UI.DataFieldWithUrl"));
+        assert!(!serde_json::to_string(&field_group("Main", &active_video(vec![]), None, &[], &[])).unwrap().contains("DataFieldWithUrl"));
+    }
+
+    #[test]
+    fn header_type_names_are_display_texts_not_technical_names() {
+        let mut e = active_video(vec![]);
+        let header = |e: &spec::EntitySpec| {
+            let anns = Annotations::from_entity(e, &[], &[]);
+            let main = anns.iter().find(|a| a.target == "Service.Video").unwrap();
+            serde_json::to_string(main.annotations.iter().find(|a| a.term == "UI.HeaderInfo").unwrap()).unwrap()
+        };
+        let h = header(&e);
+        assert!(h.contains("\"Videos\""), "Plural aus type_name_plural");
+        assert!(!h.contains("VideoSet"));
+        e.type_name = Some("Film".into());
+        assert!(header(&e).contains("\"Film\""), "TypeName aus type_name");
     }
 
     fn active_video(views: Vec<ListView>) -> spec::EntitySpec {
@@ -2800,6 +2996,77 @@ mod list_view_annotation_tests {
                     .unwrap()
             })
             .collect()
+    }
+
+    #[test]
+    fn selection_fields_become_ui_selection_fields() {
+        let mut e = active_video(vec![]);
+        e.selection_fields = vec!["title".into(), "name".into()];
+        let anns = Annotations::from_entity(&e, &[], &[]);
+        let main = anns.iter().find(|a| a.target == "Service.Video").unwrap();
+        let sel = main
+            .annotations
+            .iter()
+            .find(|a| a.term == "UI.SelectionFields")
+            .expect("UI.SelectionFields fehlt");
+        assert_eq!(datafield_paths_of_property_paths(sel), vec!["title", "name"]);
+    }
+
+    fn datafield_paths_of_property_paths(a: &Annotation) -> Vec<String> {
+        a.collection.as_ref().unwrap().property_paths.clone()
+    }
+
+    #[test]
+    fn filter_defaults_become_property_annotations() {
+        let mut e = active_video(vec![]);
+        e.filter_defaults.insert("name".into(), spec::FilterDefault::Text("Demo".into()));
+        e.filter_defaults.insert("title".into(), spec::FilterDefault::Flag(true));
+        let anns = Annotations::from_entity(&e, &[], &[]);
+        let on = |target: &str| {
+            anns.iter()
+                .filter(|a| a.target == target)
+                .flat_map(|a| a.annotations.iter())
+                .find(|a| a.term == "Common.FilterDefaultValue")
+                .expect("FilterDefaultValue fehlt")
+        };
+        assert_eq!(on("Service.Video/name").string.as_deref(), Some("Demo"));
+        assert_eq!(on("Service.Video/title").bool_, Some(true));
+    }
+
+    #[test]
+    fn general_facet_with_fields_restricts_the_main_group() {
+        let mut e = active_video(vec![]);
+        e.facets.push(spec::FacetSpec { facet: "General".into(), view: None, title: None, fields: vec!["name".into()] });
+        let (_, groups) = object_page_sections(&e, &[], &[]);
+        let main = serde_json::to_string(&groups[0]).unwrap();
+        assert!(main.contains("\"name\""));
+        assert!(!main.contains("\"title\""));
+    }
+
+    #[test]
+    fn default_facet_collects_unmentioned_fields() {
+        let mut e = active_video(vec![]);
+        e.facets.push(spec::FacetSpec { facet: "General".into(), view: None, title: None, fields: vec!["name".into()] });
+        e.facets.push(spec::FacetSpec { facet: "Default".into(), view: None, title: Some("Weitere".into()), fields: vec![] });
+        let (records, groups) = object_page_sections(&e, &[], &[]);
+        let rest = groups.iter().find(|g| g.qualifier.as_deref() == Some("Default")).unwrap();
+        let rest = serde_json::to_string(rest).unwrap();
+        assert!(rest.contains("\"title\""));
+        assert!(!rest.contains("\"name\""), "genannte Felder stehen nicht in Default");
+        let default_ref = serde_json::to_string(&records).unwrap();
+        assert!(default_ref.contains("Weitere"));
+    }
+
+    #[test]
+    fn custom_facet_gets_its_own_field_group() {
+        let mut e = active_video(vec![]);
+        e.facets.push(spec::FacetSpec { facet: "Meta".into(), view: None, title: Some("Meta".into()), fields: vec!["title".into()] });
+        let (_, groups) = object_page_sections(&e, &[], &[]);
+        let meta = groups.iter().find(|g| g.qualifier.as_deref() == Some("Meta")).unwrap();
+        assert!(serde_json::to_string(meta).unwrap().contains("\"title\""));
+        // Ohne General-Konfiguration bleibt der Hauptabschnitt mit allen Feldern erhalten.
+        let main = groups.iter().find(|g| g.qualifier.as_deref() == Some("Main")).unwrap();
+        assert!(serde_json::to_string(main).unwrap().contains("\"name\""));
     }
 
     #[test]
@@ -2870,5 +3137,23 @@ mod list_view_annotation_tests {
             paths[1]["annotationPath"],
             "com.sap.vocabularies.UI.v1.PresentationVariant#review"
         );
+    }
+}
+
+#[cfg(test)]
+mod value_list_annotation_tests {
+    use super::*;
+
+    /// Konstante Werte muessen als `String="..."` ausgegeben werden; `Constant="..."`
+    /// ist kein gueltiges CSDL und laesst die Oberflaeche die Wertehilfe verwerfen.
+    #[test]
+    fn list_id_constant_is_emitted_as_string() {
+        let vl = AtomValueList::FieldValueList {
+            list_id: "abc".into(),
+            prefer_dialog: false,
+        };
+        let json = serde_json::to_string(&annotations_for_atom_value_list("status", &vl)).unwrap();
+        assert!(!json.contains("@Constant"), "{json}");
+        assert!(json.contains("\"@String\":\"abc\""), "{json}");
     }
 }

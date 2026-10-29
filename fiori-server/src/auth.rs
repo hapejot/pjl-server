@@ -46,7 +46,14 @@ pub async fn identity(
         req.extensions_mut().insert(CurrentUser(name.clone()));
     }
     // Der Benutzer gilt fuer die ganze Anfrage (Hooks lesen ihn ueber CURRENT_USER).
-    Ok(crate::system_user::CURRENT_USER.scope(user, next.run(req)).await)
+    // Entwurfsverwaltung (`InProcessByUser`) liest denselben Benutzer ueber den Store.
+    let principal = user.clone();
+    Ok(data_store::datastore::CURRENT_PRINCIPAL
+        .scope(
+            principal,
+            crate::system_user::CURRENT_USER.scope(user, next.run(req)),
+        )
+        .await)
 }
 
 #[cfg(test)]

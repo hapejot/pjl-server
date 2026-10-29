@@ -7,6 +7,32 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
+tokio::task_local! {
+    /// Benutzer der laufenden Anfrage, unter dem Entwuerfe angelegt und bearbeitet
+    /// werden (`InProcessByUser`, `LastChangedByUser`). `None` ausserhalb einer Anfrage.
+    pub static CURRENT_PRINCIPAL: Option<String>;
+}
+
+/// Ersatz, wenn keine Anfrage mit Benutzer laeuft (Seeds, Start). Entspricht dem
+/// Default User der Benutzerverwaltung.
+pub const FALLBACK_PRINCIPAL: &str = "none@localhost";
+
+/// Benutzer fuer Entwurfsverwaltung: der Benutzer der Anfrage oder [`FALLBACK_PRINCIPAL`].
+pub fn current_principal() -> String {
+    CURRENT_PRINCIPAL
+        .try_with(|u| u.clone())
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| FALLBACK_PRINCIPAL.to_string())
+}
+
+/// `DraftIsCreatedByMe` aus Sicht der laufenden Anfrage: der Entwurf liegt beim
+/// Benutzer der Anfrage (`InProcessByUser`). Wird beim Lesen berechnet, nicht
+/// gespeichert, weil der Wert je Anfrage verschieden ist.
+pub fn draft_created_by_current_user(in_process_by_user: &str) -> bool {
+    in_process_by_user == current_principal()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DraftAction {
     Edit,
@@ -191,8 +217,8 @@ impl DataRecord {
         self.draft_admin_data = Some(DraftAdministrativeData {
             draft_uuid: Uuid::new_v4(),
             draft_is_created_by_me: true,
-            in_process_by_user: "user".into(),
-            last_changed_by_user: "user".into(),
+            in_process_by_user: current_principal(),
+            last_changed_by_user: current_principal(),
         });
     }
 
@@ -239,8 +265,8 @@ impl DataRecord {
             self.draft_admin_data = Some(DraftAdministrativeData {
                 draft_uuid: draft_uid,
                 draft_is_created_by_me: true,
-                in_process_by_user: "user".into(),
-                last_changed_by_user: "user".into(),
+                in_process_by_user: current_principal(),
+                last_changed_by_user: current_principal(),
             });
         }
     }
@@ -491,5 +517,40 @@ mod from_json_id_tests {
     fn missing_id_gets_new_uuid() {
         let r = DataRecord::from_json(&json!({ "IsActiveEntity": false })).unwrap();
         assert!(!r.is_active_entity);
+    }
+}
+
+#[cfg(test)]
+mod principal_tests {
+    use super::*;
+
+    #[test]
+    fn created_by_me_compares_with_the_request_user() {
+        assert!(!draft_created_by_current_user("someone@example.org"));
+        assert!(draft_created_by_current_user(FALLBACK_PRINCIPAL));
+    }
+
+    fn record() -> DataRecord {
+        DataRecord::from_json(&json!({"name": "x"})).unwrap()
+    }
+
+    #[tokio::test]
+    async fn draft_is_owned_by_the_request_user() {
+        CURRENT_PRINCIPAL
+            .scope(Some("peter@example.org".into()), async {
+                let mut r = record();
+                r.edit();
+                let admin = r.draft_admin_data().unwrap();
+                assert_eq!(admin.in_process_by_user, "peter@example.org");
+                assert_eq!(admin.last_changed_by_user, "peter@example.org");
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn draft_without_request_user_falls_back() {
+        let mut r = record();
+        r.edit();
+        assert_eq!(r.draft_admin_data().unwrap().in_process_by_user, FALLBACK_PRINCIPAL);
     }
 }

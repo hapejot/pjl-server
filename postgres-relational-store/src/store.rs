@@ -260,10 +260,11 @@ impl PostgresStore {
         let Some(row) = rows.first() else {
             return Ok(None);
         };
+        let in_process: String = row.get::<_, Option<String>>(2).unwrap_or_default();
         Ok(Some(json!({
             "DraftUUID": row.get::<_, String>(0),
-            "DraftIsCreatedByMe": row.get::<_, bool>(1),
-            "InProcessByUser": row.get::<_, Option<String>>(2).unwrap_or_default(),
+            "DraftIsCreatedByMe": data_store::datastore::draft_created_by_current_user(&in_process),
+            "InProcessByUser": in_process,
             "LastChangedByUser": row.get::<_, Option<String>>(3).unwrap_or_default(),
         })))
     }

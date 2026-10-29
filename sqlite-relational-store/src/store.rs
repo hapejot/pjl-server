@@ -275,10 +275,14 @@ impl RelationalStore {
         let Some(row) = rows.next().map_err(|e| sql_err!(Metadata, e))? else {
             return Ok(None);
         };
+        let in_process: String = row
+            .get::<_, Option<String>>("InProcessByUser")
+            .map_err(|e| sql_err!(Metadata, e))?
+            .unwrap_or_default();
         Ok(Some(json!({
             "DraftUUID": row.get::<_, String>("DraftUUID").map_err(|e| sql_err!(Metadata,e))?,
-            "DraftIsCreatedByMe": row.get::<_, i64>("DraftIsCreatedByMe").map_err(|e| sql_err!(Metadata,e))? != 0,
-            "InProcessByUser": row.get::<_, Option<String>>("InProcessByUser").map_err(|e| sql_err!(Metadata,e))?.unwrap_or_default(),
+            "DraftIsCreatedByMe": data_store::datastore::draft_created_by_current_user(&in_process),
+            "InProcessByUser": in_process,
             "LastChangedByUser": row.get::<_, Option<String>>("LastChangedByUser").map_err(|e| sql_err!(Metadata,e))?.unwrap_or_default(),
         })))
     }

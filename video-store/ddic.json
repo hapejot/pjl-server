@@ -2869,7 +2869,7 @@
         {
           "Atom": {
             "name": "duration_seconds",
-            "label": "Duration seconds",
+            "label": "Dauer",
             "edm_type": "Edm.Double",
             "package": null,
             "max_length": null,
@@ -2877,7 +2877,10 @@
             "scale": null,
             "computed": false,
             "immutable": false,
-            "value_list": null
+            "value_list": null,
+            "ui": {
+              "format": "duration"
+            }
           }
         },
         {
@@ -2933,7 +2936,10 @@
             "scale": null,
             "computed": false,
             "immutable": false,
-            "value_list": null
+            "value_list": null,
+            "ui": {
+              "format": "bitrate"
+            }
           }
         },
         {
@@ -3076,16 +3082,93 @@
             "value_list": null
           }
         }
-      ]
+      ],
+      "ui": {
+        "sections": [
+          {
+            "key": "VideoPlayer",
+            "title": "Video",
+            "fragment": "Player",
+            "anchor": "GeneralSection",
+            "placement": "After"
+          },
+          {
+            "key": "VideoThumbnails",
+            "title": "{{thumbnailsTitle}}",
+            "fragment": "Thumbnails",
+            "anchor": "GeneralSection",
+            "placement": "After"
+          }
+        ],
+        "hide_facets": [
+          "_VideoThumbnailsSection"
+        ],
+        "list_columns": [
+          {
+            "key": "VideoPreview",
+            "header": "{{previewColumnTitle}}",
+            "fragment": "PreviewColumn",
+            "anchor": "name",
+            "placement": "Before",
+            "width": "120px"
+          }
+        ],
+        "list_templates": [
+          {
+            "key": "TagSearch",
+            "label": "Tag-Suche",
+            "fragment": "TagSearch"
+          }
+        ]
+      }
     },
     {
       "name": "Volume",
       "package": "video",
       "type_name_plural": "Volumes",
       "fields": [
-        { "Atom": { "name": "name", "label": "Name", "edm_type": "Edm.String", "package": null, "max_length": 512, "precision": null, "scale": null, "computed": false, "immutable": false, "value_list": null } },
-        { "Atom": { "name": "is_online", "label": "is online", "edm_type": "Edm.Boolean", "package": null, "max_length": null, "precision": null, "scale": null, "computed": false, "immutable": false, "value_list": null } },
-        { "Atom": { "name": "mount_path", "label": "Mount path", "edm_type": "Edm.String", "package": null, "max_length": 512, "precision": null, "scale": null, "computed": false, "immutable": false, "value_list": null } }
+        {
+          "Atom": {
+            "name": "name",
+            "label": "Name",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": 512,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "name": "is_online",
+            "label": "is online",
+            "edm_type": "Edm.Boolean",
+            "package": null,
+            "max_length": null,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        },
+        {
+          "Atom": {
+            "name": "mount_path",
+            "label": "Mount path",
+            "edm_type": "Edm.String",
+            "package": null,
+            "max_length": 512,
+            "precision": null,
+            "scale": null,
+            "computed": false,
+            "immutable": false,
+            "value_list": null
+          }
+        }
       ]
     },
     {
@@ -3562,9 +3645,52 @@
     }
   ],
   "apps": [
-    { "name": "hosts", "title": "Hosts", "main_entity": "Host", "subtitle": "Alle Hosts", "icon": null, "package": {"name":"video"} },
-    { "name": "volumes", "title": "Volumes", "main_entity": "Volume", "subtitle": "Alle Volumes", "icon": null, "package": {"name":"video"} },
-    { "name": "videos", "title": "Videos", "main_entity": "Video", "subtitle": "List Videos", "icon": null, "package": { "name": "video" } },
+    {
+      "name": "hosts",
+      "title": "Hosts",
+      "main_entity": "Host",
+      "subtitle": "Alle Hosts",
+      "icon": null,
+      "package": {
+        "name": "video"
+      }
+    },
+    {
+      "name": "volumes",
+      "title": "Volumes",
+      "main_entity": "Volume",
+      "subtitle": "Alle Volumes",
+      "icon": null,
+      "package": {
+        "name": "video"
+      }
+    },
+    {
+      "name": "videos",
+      "title": "Videos",
+      "main_entity": "Video",
+      "subtitle": "List Videos",
+      "icon": null,
+      "package": {
+        "name": "video"
+      },
+      "ui": {
+        "modules": [
+          "Player",
+          "TagSearch"
+        ],
+        "controller_extensions": [
+          {
+            "target": "sap.fe.templates.ObjectPage.ObjectPageController",
+            "controller": "ObjectPageController"
+          },
+          {
+            "target": "sap.fe.templates.ListReport.ListReportController",
+            "controller": "TagSearchController"
+          }
+        ]
+      }
+    },
     {
       "name": "tags",
       "title": "Tags",

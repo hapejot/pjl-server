@@ -107,7 +107,10 @@
             "edm_type": "Edm.String",
             "label": "Branche",
             "max_length": 100,
-            "name": "industry"
+            "name": "industry",
+            "side_effects": [
+              "industry"
+            ]
           }
         },
         {

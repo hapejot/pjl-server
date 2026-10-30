@@ -548,6 +548,8 @@ fn atom_field(atom: &AtomMap) -> FieldSpec {
         value_list: None,
         link: false,
         multiline: false,
+        ui: None,
+        side_effects: vec![],
     }
 }
 

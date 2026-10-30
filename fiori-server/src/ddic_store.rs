@@ -338,6 +338,14 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
             } else {
                 atom.remove("multiline");
             }
+            match fr.get("side_effects").and_then(Value::as_array) {
+                Some(list) if !list.is_empty() => {
+                    atom.insert("side_effects".into(), json!(list));
+                }
+                _ => {
+                    atom.remove("side_effects");
+                }
+            }
             // Festwertliste: Zuordnung im Designer, `prefer_dialog` bleibt wie im Original.
             match text(fr, "value_list_ID") {
                 Some(list_id) => {

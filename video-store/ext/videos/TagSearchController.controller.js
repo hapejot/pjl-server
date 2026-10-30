@@ -1,4 +1,4 @@
-sap.ui.define(["video/ext/TagSearch", "sap/m/MessageToast"], function (TagSearch, MessageToast) {
+sap.ui.define(["videos/ext/TagSearch", "sap/m/MessageToast"], function (TagSearch, MessageToast) {
     "use strict";
 
     // Controller-Erweiterung der ListReport-Seite (Manifest: sap.ui5/extends).

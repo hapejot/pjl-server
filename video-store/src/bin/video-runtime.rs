@@ -6,7 +6,6 @@ use fiori_server::server;
 use tracing::{error, info};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use video_store::convert::VideoConvert;
-use video_store::formatting::VideoFormatting;
 use video_store::player::VideoPlayer;
 use video_store::tags::VideoTagFacets;
 use video_store::thumbnails::VideoThumbnails;
@@ -26,7 +25,6 @@ async fn main() -> std::process::ExitCode {
             std::sync::Arc::new(VideoTagFacets::new()),
             std::sync::Arc::new(VideoConvert),
             std::sync::Arc::new(VideoPlayer::from_env()),
-            std::sync::Arc::new(VideoFormatting),
         ];
     match server::run_with(config, extensions).await {
         Ok(()) => {

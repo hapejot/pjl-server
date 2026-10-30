@@ -4,8 +4,8 @@
 //!   `file_path` des Videos aus dem Store und holt die Datei vom Upstream:
 //!   `{VIDEO_STREAM_BASE_URL}/{agent}/stream/{base64(file_path)}`. `Range`-Anfragen
 //!   werden durchgereicht, damit der Browser spulen kann.
-//! * `GET /ext/video/fragment/Player.fragment.xml`: Custom Section der Object Page
-//!   mit einem HTML5-`<video>`-Element, das auf den Proxy zeigt.
+//! Fragment, Controller und Modul des Players liegen als Assets unter
+//! `ext/videos/` und werden ueber `ddic.json` (`ui`-Block) eingebunden.
 //!
 //! Der fiori-server kennt diese Datei nicht; sie haengt sich ueber
 //! [`fiori_server::extension::Extension`] ein.
@@ -24,7 +24,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use data_store::EntityKey;
 use fiori_server::{extension::Extension, AppState};
 use odata::query::ODataQuery;
-use serde_json::{json, Value};
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::thumbnails::DEFAULT_UPSTREAM;
@@ -32,9 +32,6 @@ use crate::thumbnails::DEFAULT_UPSTREAM;
 const VIDEO_SET: &str = "VideoSet";
 const FILE_SET: &str = "FileSet";
 const VOLUME_SET: &str = "VolumeSet";
-const FRAGMENT: &str = include_str!("../fragments/Player.fragment.xml");
-const PLAYER_JS: &str = include_str!("../ui5/Player.js");
-const CONTROLLER_JS: &str = include_str!("../ui5/ObjectPageController.js");
 
 pub struct VideoPlayer {
     upstream: String,
@@ -76,48 +73,10 @@ impl Extension for VideoPlayer {
         });
         Router::new()
             .route("/ext/video/stream/{video_id}", get(stream))
-            .route("/ext/video/fragment/Player.fragment.xml", get(fragment))
-            .route("/ext/video/Player.js", get(player_js))
-            .route("/ext/video/ObjectPageController.controller.js", get(controller_js))
             .with_state(state)
     }
-
-    fn ui5_modules(&self) -> Vec<String> {
-        vec!["video/ext/Player".into()]
-    }
-
-    fn controller_extensions(&self) -> Vec<(String, String)> {
-        vec![(
-            "sap.fe.templates.ObjectPage.ObjectPageController".into(),
-            "video.ext.ObjectPageController".into(),
-        )]
-    }
-
-    fn object_page_content(&self, entity: &str) -> Option<Value> {
-        if entity != "Video" {
-            return None;
-        }
-        Some(json!({ "body": { "sections": {
-            "VideoPlayer": {
-                "title": "Video",
-                "template": "video.ext.fragment.Player",
-                "position": { "placement": "After", "anchor": "GeneralSection" }
-            }
-        }}}))
-    }
 }
 
-async fn fragment() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "application/xml; charset=utf-8")], FRAGMENT)
-}
-
-async fn player_js() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8")], PLAYER_JS)
-}
-
-async fn controller_js() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8")], CONTROLLER_JS)
-}
 
 async fn stream(
     state: State<Arc<PlayerState>>,

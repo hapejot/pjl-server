@@ -73,27 +73,8 @@ impl Extension for VideoTagFacets {
         Some(("video.tags".into(), crate::status::tags_json()))
     }
 
-    fn ui5_modules(&self) -> Vec<String> {
-        vec!["video/ext/TagSearch".into()]
-    }
 
-    fn controller_extensions(&self) -> Vec<(String, String)> {
-        vec![(
-            "sap.fe.templates.ListReport.ListReportController".into(),
-            "video.ext.TagSearchController".into(),
-        )]
-    }
 
-    fn list_views(&self, entity: &str) -> Vec<Value> {
-        if entity != "Video" {
-            return Vec::new();
-        }
-        vec![json!({
-            "key": "TagSearch",
-            "label": "Tag-Suche",
-            "template": "video.ext.fragment.TagSearch"
-        })]
-    }
 
     fn routes(&self, app: AppState) -> Router {
         let pool = match app.config.store_pg_url.as_deref().map(build_pool) {
@@ -111,12 +92,6 @@ impl Extension for VideoTagFacets {
             .route("/ext/video/tagsearch/", get(search_page))
             .route("/ext/video/tagsearch/index.html", get(search_page))
             .route("/ext/video/tagsearch/App.js", get(search_app))
-            .route("/ext/video/fragment/TagSearch.fragment.xml", get(list_fragment))
-            .route("/ext/video/TagSearch.js", get(list_module))
-            .route(
-                "/ext/video/TagSearchController.controller.js",
-                get(list_controller),
-            )
             .with_state(Arc::new(FacetState {
                 pool,
                 ranking: Mutex::new(None),
@@ -143,39 +118,9 @@ struct FacetState {
 
 const SEARCH_PAGE: &str = include_str!("../tagsearch/index.html");
 const SEARCH_APP: &str = include_str!("../tagsearch/App.js");
-const LIST_FRAGMENT: &str = include_str!("../fragments/TagSearch.fragment.xml");
-const LIST_MODULE: &str = include_str!("../ui5/TagSearch.js");
-const LIST_CONTROLLER: &str = include_str!("../ui5/TagSearchController.js");
 
-async fn list_controller() -> Response {
-    (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
-        LIST_CONTROLLER,
-    )
-        .into_response()
-}
 
-async fn list_fragment() -> Response {
-    (
-        [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
-        LIST_FRAGMENT,
-    )
-        .into_response()
-}
 
-async fn list_module() -> Response {
-    (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
-        LIST_MODULE,
-    )
-        .into_response()
-}
 
 async fn search_page() -> Response {
     (

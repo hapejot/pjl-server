@@ -22,13 +22,11 @@ use axum::{
 use data_store::EntityKey;
 use fiori_server::{extension::Extension, AppState};
 use odata::query::ODataQuery;
-use serde_json::{json, Value};
+use serde_json::Value;
 use uuid::Uuid;
 
 /// Standard-Upstream, ueberschreibbar ueber `THUMBNAIL_BASE_URL`.
 pub const DEFAULT_UPSTREAM: &str = "http://nuc:9000/proxy";
-const FRAGMENT: &str = include_str!("../fragments/Thumbnails.fragment.xml");
-const PREVIEW_FRAGMENT: &str = include_str!("../fragments/PreviewColumn.fragment.xml");
 const VIDEO_SET: &str = "VideoSet";
 
 pub struct VideoThumbnails {
@@ -77,50 +75,12 @@ impl Extension for VideoThumbnails {
         });
         Router::new()
             .route("/ext/video/thumbnail/{video_id}/{n}", get(thumbnail))
-            .route("/ext/video/fragment/Thumbnails.fragment.xml", get(fragment))
-            .route(
-                "/ext/video/fragment/PreviewColumn.fragment.xml",
-                get(preview_fragment),
-            )
             .route("/apps/Video/i18n/i18n.properties", get(i18n_default))
             .route("/apps/Video/i18n/i18n_de.properties", get(i18n_de))
             .route("/apps/Video/i18n/i18n_en.properties", get(i18n_en))
             .with_state(state)
     }
 
-    fn ui5_paths(&self) -> Vec<(String, String)> {
-        vec![("video.ext".into(), "/ext/video".into())]
-    }
-
-    fn list_columns(&self, entity: &str) -> Option<Value> {
-        if entity != "Video" {
-            return None;
-        }
-        Some(json!({
-            "VideoPreview": {
-                "header": "{{previewColumnTitle}}",
-                "width": "120px",
-                "horizontalAlign": "Begin",
-                "position": { "placement": "Before", "anchor": "name" },
-                "template": "video.ext.fragment.PreviewColumn"
-            }
-        }))
-    }
-
-    fn object_page_content(&self, entity: &str) -> Option<Value> {
-        if entity != "Video" {
-            return None;
-        }
-        Some(json!({ "body": { "sections": {
-            // Standard-Facet der Navigation _VideoThumbnails (ID = <nav>Section) ausblenden.
-            "_VideoThumbnailsSection": { "visible": false },
-            "VideoThumbnails": {
-                "template": "video.ext.fragment.Thumbnails",
-                "title": "{{thumbnailsTitle}}",
-                "position": { "placement": "After", "anchor": "GeneralSection" }
-            }
-        }}}))
-    }
 }
 
 const I18N_DEFAULT: &str = include_str!("../i18n/i18n.properties");
@@ -143,19 +103,7 @@ async fn i18n_en() -> Response {
     properties(I18N_EN)
 }
 
-async fn fragment() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
-        FRAGMENT,
-    )
-}
 
-async fn preview_fragment() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
-        PREVIEW_FRAGMENT,
-    )
-}
 
 /// Fehlerantwort mit Begruendung im Body und Log-Eintrag mit allen Details.
 fn fail(status: StatusCode, video: &str, n: u32, reason: impl std::fmt::Display) -> Response {

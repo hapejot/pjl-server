@@ -792,6 +792,8 @@ mod list_view_tests {
             value_list: None,
             link: false,
             multiline: false,
+            side_effects: Vec::new(),
+            ui: None,
         }
     }
 

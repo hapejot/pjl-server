@@ -17,6 +17,7 @@ pub mod overlay;
 pub mod script;
 pub mod server;
 pub mod srv;
+pub mod ui_ext;
 pub mod status;
 pub mod term3270;
 

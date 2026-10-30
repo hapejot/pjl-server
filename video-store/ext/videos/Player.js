@@ -11,7 +11,7 @@ sap.ui.define(["sap/base/util/ObjectPath"], function (ObjectPath) {
             oVideo.play();
         }
     };
-    // Globaler Name fuer den String-Handler im Thumbnail-Fragment (video.ext.Player.seek).
-    ObjectPath.set("video.ext.Player", PLAYER);
+    // Globaler Name fuer den String-Handler im Thumbnail-Fragment (videos.ext.Player.seek).
+    ObjectPath.set("videos.ext.Player", PLAYER);
     return PLAYER;
 });

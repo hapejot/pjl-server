@@ -53,17 +53,19 @@ services:
       DDIC: /app/model/ddic.json
       # Optionales Overlay (Listenansichten, ausgeblendete ObjectPage-Felder).
       DDIC_OVERLAY: /app/overlay/ddic.overlay.json
+      # App-Assets (Fragmente, Module, Controller): <EXT_DIR>/<app>/ unter /ext/<app>/.
+      EXT_DIR: /app/ext
       STORE_PG_URL: postgres://video:video@db:5432/video
       EXPORT_DIR: /app/export
       PORT: "8080"
       RUST_LOG: info
     ports:
       - "3035:8080"
-      # 3270-Statusansichten nur lokal erreichbar. Fuer Netzzugriff hier anpassen.
-      - "3270:3270"
+      - "3271:3270"
     volumes:
       - ./ddic.json:/app/model/ddic.json:ro
       - ./overlay/ddic.overlay.json:/app/overlay/ddic.overlay.json:ro
+      - ./ext:/app/ext:ro
       - ./dump:/app/dump
     entrypoint: ["/app/video-runtime"]
     restart: unless-stopped

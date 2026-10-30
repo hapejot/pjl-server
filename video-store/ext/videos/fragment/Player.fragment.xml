@@ -3,7 +3,7 @@
 	xmlns:core="sap.ui.core">
 	<!--
 		Video-Player der Object Page (Custom Section der Erweiterung video-store,
-		siehe src/player.rs). Ein HTML5-video-Element zeigt auf den same-origin Proxy
+		siehe ext/videos/Player.js). Ein HTML5-video-Element zeigt auf den same-origin Proxy
 		/ext/video/stream/<ID>; die ID ist eine UUID und daher ohne Escaping sicher.
 	-->
 	<VBox class="sapUiSmallMargin">

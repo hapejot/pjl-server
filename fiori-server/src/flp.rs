@@ -9,6 +9,7 @@ use axum::{
 };
 use serde_json::{json, Value};
 use spec::app::App;
+use spec::data_dictionary::DataDictionary;
 use spec::EntitySpec;
 use tracing::{debug, info};
 
@@ -54,6 +55,36 @@ fn icon_of(app: &App) -> &str {
     app.icon().map(String::as_str).unwrap_or(DEFAULT_APP_ICON)
 }
 
+/// Inbound einer App. `detail = false`: `<Entitaet>-List` (Kachel, Listeneinstieg).
+/// `detail = true`: `<Entitaet>-Detail` (Sprungziel der Links, `ID` Pflicht, keine Kachel).
+/// Unbekannte Parameter werden verworfen, damit keine Kontextdaten als Filter ankommen.
+fn inbounds(app: &App, ddic: &DataDictionary, detail: bool) -> Value {
+    let entity = app.main_entity(ddic).name().to_string();
+    let (action, parameters) = if detail {
+        (app.detail_action(), json!({"ID": {"required": true}}))
+    } else {
+        (app.action(), json!({}))
+    };
+    json!({
+        format!("{}-{}", entity, action): {
+            "action": action,
+            "semanticObject": entity,
+            "signature": {
+                "additionalParameters": "ignored",
+                "parameters": parameters
+            }
+        }
+    })
+}
+
+/// Pfadsegment `<Entitaet>Detail` -> (`<Entitaet>`, true). Sonst unveraendert, false.
+fn split_detail(app: &str) -> (&str, bool) {
+    match app.strip_suffix("Detail") {
+        Some(main) if !main.is_empty() => (main, true),
+        _ => (app, false),
+    }
+}
+
 async fn site(State(_state): State<AppState>) -> Json<Value> {
     info!("site");
     let ddic = _state.ddic();
@@ -62,13 +93,8 @@ async fn site(State(_state): State<AppState>) -> Json<Value> {
         let app_json = json!({
             "sap.app":{
                 "crossNavigation":{
-                    "inbounds":{
-                        format!("{}-{}", app.main_entity(&ddic).name(), app.action()):{
-                            "action":app.action(),
-                            "semanticObject":app.main_entity(&ddic).name(),
-                            "signature":{
-                                "additionalParameters":"allowed",
-                                "parameters":{}}}}},
+                    "inbounds": inbounds(app, &ddic, false)
+                },
                 "id":app.name(),
                 "subTitle":subtitle_of(app),
                 "title":app.title()},
@@ -76,7 +102,14 @@ async fn site(State(_state): State<AppState>) -> Json<Value> {
             "sap.platform.runtime":{ "componentProperties": {"url": format!("./apps/{}/", app.main_entity(&ddic).name())}},                                            
             "sap.ui":{"deviceTypes":{"desktop":true,"phone":true,"tablet":true}, "technology":"UI5"},
             "sap.ui5":{"componentName":app.name()}});
+        let mut detail_json = app_json.clone();
+        detail_json["sap.app"]["crossNavigation"]["inbounds"] = inbounds(app, &ddic, true);
+        detail_json["sap.app"]["id"] = json!(format!("{}.detail", app.name()));
+        detail_json["sap.platform.runtime"]["componentProperties"]["url"] =
+            json!(format!("./apps/{}Detail/", app.main_entity(&ddic).name()));
+        detail_json["sap.ui5"]["componentName"] = json!(format!("{}.detail", app.name()));
         apps.insert(app.name().to_string(), app_json);
+        apps.insert(format!("{}.detail", app.name()), detail_json);
     }
 
     let mut viz: HashMap<String, Value> = HashMap::new();
@@ -233,10 +266,16 @@ pub async fn app_component_handler(
     debug!("Component.js for {}", app);
 
     let ddic = _state.ddic();
+    let (main_key, detail) = split_detail(&app);
     let a = ddic
         .apps()
-        .find(|x| x.main_entity(&ddic).name() == app)
+        .find(|x| x.main_entity(&ddic).name() == main_key)
         .unwrap();
+    let cmp = if detail {
+        format!("{}.detail", a.name())
+    } else {
+        a.name().to_string()
+    };
 
     (
         [(
@@ -246,14 +285,14 @@ pub async fn app_component_handler(
         format!(
             r##"
 // Namespace der App auf ihr Verzeichnis abbilden, damit UI5 Modul- und Preload-Pfade findet.
-sap.ui.loader.config({{ paths: {{ "{cmp}": "/apps/{main}" }} }});
+sap.ui.loader.config({{ paths: {{ "{cmp}": "/apps/{app}" }} }});
 {ui5_paths}
 sap.ui.define(["sap/fe/core/AppComponent"{modules}], function (AppComponent) {{
     "use strict";
 	return AppComponent.extend("{cmp}.Component", {{ metadata: {{ manifest: "json" }} }});
 }}); "##,
-            cmp = a.name(),
-            main = a.main_entity(&ddic).name(),
+            cmp = cmp,
+            app = app,
             ui5_paths = ui5_path_config(&_state),
             modules = ui5_module_list(&_state)
         ),
@@ -296,9 +335,10 @@ pub async fn app_manifest_handler(
     debug!("manifest.json for {}", app);
 
     let ddic = _state.ddic();
+    let (main_key, detail) = split_detail(&app);
     let a = ddic
         .apps()
-        .find(|x| x.main_entity(&ddic).name() == app)
+        .find(|x| x.main_entity(&ddic).name() == main_key)
         .unwrap();
     let main_entity = a.main_entity(&ddic);
     let main_name = main_entity.name().to_string();
@@ -458,22 +498,31 @@ pub async fn app_manifest_handler(
     }
 
 
-    let sem = format!("{}-{}", a.main_entity(&ddic).name(), a.action());
+    // Detail-Einstieg: keine Liste, die Object Page ist die einzige Spalte.
+    if detail {
+        routes.retain(|r| r["name"] != json!(list_target));
+        for r in routes.iter_mut() {
+            if let Some(arr) = r.get_mut("target").and_then(Value::as_array_mut) {
+                arr.retain(|t| t != &json!(list_target));
+            }
+        }
+        targets.remove(&list_target);
+        if let Some(t) = targets.get_mut(&object_target) {
+            t["controlAggregation"] = json!("beginColumnPages");
+        }
+    }
+    let sem_app_id = if detail {
+        format!("{}.detail", a.name())
+    } else {
+        a.name().to_string()
+    };
+
     let sap_app = json!({
       "applicationVersion": {
         "version": "1.0.0"
       },
       "crossNavigation": {
-        "inbounds": {
-          sem: {
-            "action": a.action(),
-            "semanticObject": a.main_entity(&ddic).name(),
-            "signature": {
-              "additionalParameters": "allowed",
-              "parameters": {}
-            }
-          }
-        }
+        "inbounds": inbounds(a, &ddic, detail)
       },
       "dataSources": {
         "mainService": {
@@ -486,7 +535,7 @@ pub async fn app_manifest_handler(
       },
       "description": "Fiori Elements List Report + Object Page",
       "i18n": "i18n/i18n.properties",
-      "id": a.name(),
+      "id": sem_app_id,
       "subTitle": subtitle_of(a),
       "title": a.title(),
       "type": "application"

@@ -110,6 +110,11 @@ pub struct Cli {
     /// Ohne Angabe keine Skripte. Wird im Container als Volume eingebunden.
     #[arg(long, env = "SCRIPTS_DIR")]
     pub scripts_dir: Option<PathBuf>,
+
+    /// Verzeichnis mit Assets je App: `<ext-dir>/<app>/` wird unter `/ext/<app>/` ausgeliefert.
+    /// Ohne Angabe keine App-Assets.
+    #[arg(long, env = "EXT_DIR")]
+    pub ext_dir: Option<PathBuf>,
 }
 
 impl Cli {
@@ -138,6 +143,7 @@ impl Cli {
             term3270_port: self.term3270_port,
             term3270_bind: self.term3270_bind,
             scripts_dir: self.scripts_dir,
+            ext_dir: self.ext_dir,
         }
     }
 }
@@ -167,6 +173,8 @@ pub struct ServerConfig {
     pub term3270_bind: IpAddr,
     /// Skriptverzeichnis; `None` schaltet die Skript-Hooks aus.
     pub scripts_dir: Option<PathBuf>,
+    /// Asset-Verzeichnis je App (`<ext_dir>/<app>/`); `None` schaltet sie aus.
+    pub ext_dir: Option<PathBuf>,
 }
 
 impl ServerConfig {
@@ -198,6 +206,7 @@ impl ServerConfig {
             term3270_port: None,
             term3270_bind: IpAddr::from([127, 0, 0, 1]),
             scripts_dir: None,
+            ext_dir: None,
         }
     }
 }

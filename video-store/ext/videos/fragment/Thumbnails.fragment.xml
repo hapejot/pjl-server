@@ -26,7 +26,7 @@
 			alt="{= 'Thumbnail ' + ${thumbnail_index} }"
 			width="200px"
 			densityAware="false"
-			press="video.ext.Player.seek"
+			press="videos.ext.Player.seek"
 			tooltip="{= 'Abspielen ab ' + ${timestamp_seconds} + ' s' }"
 			class="sapUiTinyMargin">
 			<customData>

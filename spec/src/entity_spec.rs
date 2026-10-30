@@ -107,6 +107,97 @@ pub(crate) fn is_false(value: &bool) -> bool {
     !*value
 }
 
+/// Eingebaute Anzeigeformate fuer Atom-Felder. Die Formatierung uebernimmt das
+/// Format-Modul des Servers (`fiori-server/src/ui_ext.rs`), nicht die Annotation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DisplayFormat {
+    /// Sekunden als `h:mm:ss` bzw. `m:ss`.
+    Duration,
+    /// Bytes als `KB`, `MB`, ... (1024er Schritte).
+    Bytes,
+    /// Bitrate: `kbit/s` bzw. `Mbit/s`.
+    Bitrate,
+    /// Datum nach Benutzer-Locale.
+    Date,
+    /// Datum und Uhrzeit nach Benutzer-Locale.
+    Datetime,
+}
+
+/// `ui`-Block eines Atom-Feldes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct FieldUi {
+    /// Eingebautes Format. Fehlt es, wird der Rohwert angezeigt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<DisplayFormat>,
+}
+
+/// `ui`-Block einer Entitaet. Fragmente liegen als `<app>.ext.fragment.<fragment>`
+/// im Asset-Verzeichnis der App (`<ext_dir>/<app>/fragment/<fragment>.fragment.xml`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct EntityUi {
+    /// Felder, die im Standard ausgeblendet werden (Listen- und Formularspalten).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden_fields: Vec<String>,
+    /// Zusaetzliche Abschnitte der Object Page (Custom Sections).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sections: Vec<UiSection>,
+    /// Object-Page-Facetten (Ids wie `_VideoThumbnailsSection`), die ausgeblendet werden.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hide_facets: Vec<String>,
+    /// Zusaetzliche Listenspalten (Custom Columns).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub list_columns: Vec<UiListColumn>,
+    /// Zusaetzliche Listenansichten mit eigenem Fragment (z. B. eine Suchseite als Tab).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub list_templates: Vec<UiListTemplate>,
+}
+
+/// Custom Section der Object Page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UiSection {
+    /// Schluessel des Abschnitts (wird als Id verwendet).
+    pub key: String,
+    /// Titel; kann ein i18n-Verweis `{{key}}` sein.
+    pub title: String,
+    /// Fragmentname ohne `.fragment.xml`.
+    pub fragment: String,
+    /// Anker (Abschnitts-Id), Standard `GeneralSection`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<String>,
+    /// `After` (Standard) oder `Before`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<String>,
+}
+
+/// Custom Column der Liste.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UiListColumn {
+    pub key: String,
+    pub header: String,
+    pub fragment: String,
+    /// Anker-Spalte (Feldname), vor oder nach der sie erscheint.
+    pub anchor: String,
+    /// `After` (Standard) oder `Before`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<String>,
+}
+
+/// Listenansicht mit eigenem Fragment (Tab der ListReport-Seite).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UiListTemplate {
+    pub key: String,
+    pub label: String,
+    pub fragment: String,
+}
+
 /// A field specification — describes the entity's own data (leaves on the relationship tree).
 ///
 /// Only two variants: Atom (simple values) and Measure (value + unit/currency dependency).
@@ -150,6 +241,12 @@ pub enum FieldSpec {
         /// Langtext: mehrzeilige Eingabe (`UI.MultiLineText`). `max_length` begrenzt die Laenge.
         #[serde(default, skip_serializing_if = "is_false")]
         multiline: bool,
+        /// Zielfelder, die nach einer Aenderung dieses Feldes nachgeladen werden (`Common.SideEffects`).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        side_effects: Vec<String>,
+        /// Anzeige-Einstellungen (eingebaute Formate). Unbekannte Schluessel sind ein Fehler.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ui: Option<FieldUi>,
     },
     /// Amount/quantity with a unit/currency companion field.
     /// Generates `Org.OData.Measures.V1.ISOCurrency` or `.Unit` annotation.
@@ -203,6 +300,8 @@ impl FieldSpec {
             value_list: None,
             link: false,
             multiline: false,
+            side_effects: Vec::new(),
+            ui: None,
         }
     }
 
@@ -220,6 +319,8 @@ impl FieldSpec {
             value_list: None,
             link: false,
             multiline: false,
+            side_effects: Vec::new(),
+            ui: None,
         }
     }
 
@@ -245,6 +346,8 @@ impl FieldSpec {
             value_list: None,
             link: false,
             multiline: false,
+            side_effects: Vec::new(),
+            ui: None,
         }
     }
 
@@ -377,6 +480,10 @@ pub struct EntitySpec {
     /// `false` fuer Entitaeten wie Festwerte, die keinen Owner brauchen.
     #[serde(default = "default_audited", skip_serializing_if = "is_true")]
     pub audited: bool,
+
+    /// Anzeige-Einstellungen der Entitaet (`ui`-Block in `ddic.json`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui: Option<EntityUi>,
 }
 
 fn default_audited() -> bool {
@@ -482,6 +589,7 @@ impl EntitySpec {
             selection_fields: vec![],
             facets: vec![],
             audited: true,
+            ui: None,
         }
     }
 
@@ -541,5 +649,40 @@ impl EntitySpec {
 
     pub fn setname(&self) -> String {
         format!("{}Set", self.name)
+    }
+}
+
+#[cfg(test)]
+mod ui_block_tests {
+    use super::*;
+
+    #[test]
+    fn atom_accepts_known_format() {
+        let json = r#"{"Atom":{"name":"size","label":"Size","edm_type":"Edm.Int64","ui":{"format":"bytes"}}}"#;
+        let f: FieldSpec = serde_json::from_str(json).expect("gueltiger ui-Block");
+        match f {
+            FieldSpec::Atom { ui, .. } => assert_eq!(ui.unwrap().format, Some(DisplayFormat::Bytes)),
+            _ => panic!("Atom erwartet"),
+        }
+    }
+
+    #[test]
+    fn unknown_key_in_field_ui_is_an_error() {
+        let json = r#"{"Atom":{"name":"size","label":"Size","edm_type":"Edm.Int64","ui":{"formt":"bytes"}}}"#;
+        assert!(serde_json::from_str::<FieldSpec>(json).is_err());
+    }
+
+    #[test]
+    fn unknown_format_is_an_error() {
+        let json = r#"{"Atom":{"name":"size","label":"Size","edm_type":"Edm.Int64","ui":{"format":"furlongs"}}}"#;
+        assert!(serde_json::from_str::<FieldSpec>(json).is_err());
+    }
+
+    #[test]
+    fn unknown_key_in_entity_ui_is_an_error() {
+        let ui: Result<EntityUi, _> = serde_json::from_str(r#"{"hidden_field":["x"]}"#);
+        assert!(ui.is_err());
+        let ok: EntityUi = serde_json::from_str(r#"{"hidden_fields":["x"]}"#).unwrap();
+        assert_eq!(ok.hidden_fields, vec!["x".to_string()]);
     }
 }

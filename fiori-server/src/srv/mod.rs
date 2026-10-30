@@ -425,11 +425,15 @@ impl Annotations {
             ),
         );
 
-        main_annotations.annotations.extend(line_item_annotations(x));
-        main_annotations.annotations.push(
-            Annotation::new("Common.SemanticKey")
-                .collection(Collection::new().add_property_path("ID")),
-        );
+        main_annotations.annotations.extend(line_item_annotations(x, app_entities));
+        // Nur App-Hauptentitaeten sind Sprungziele. Bei Join-Entitaeten (M:N ohne eigenen
+        // Inhalt) wuerde der Schluessel-Fallback die ID der Zwischenzeile statt des Ziels senden.
+        if app_entities.iter().any(|a| a == x.name()) {
+            main_annotations.annotations.push(
+                Annotation::new("Common.SemanticKey")
+                    .collection(Collection::new().add_property_path("ID")),
+            );
+        }
         if !x.selection_fields().is_empty() {
             let mut paths = Collection::new();
             for field in x.selection_fields() {
@@ -459,6 +463,29 @@ impl Annotations {
             .push(Annotation::new("UI.Facets").collection(facets));
         main_annotations.annotations.extend(groups);
 
+        // Side Effects auf Entity-Ebene: je Quellfeld ein Eintrag mit seinen Zielfeldern.
+        for f in x.fields() {
+            if let FieldSpec::Atom { side_effects, .. } = f {
+                if side_effects.is_empty() {
+                    continue;
+                }
+                let mut targets = Collection::new();
+                for t in side_effects {
+                    targets = targets.add_property_path(t);
+                }
+                main_annotations.annotations.push(
+                    Annotation::new("Common.SideEffects").record(
+                        Record::new("Common.SideEffectsType")
+                            .add(
+                                PropertyValue::new("SourceProperties")
+                                    .collection(Collection::new().add_property_path(f.name())),
+                            )
+                            .add(PropertyValue::new("TargetProperties").collection(targets)),
+                    ),
+                );
+            }
+        }
+
         annotations.push(main_annotations);
 
         annotations.push(Self::from_field(
@@ -476,6 +503,8 @@ impl Annotations {
                 value_list: None,
                 link: false,
                 multiline: false,
+                side_effects: Vec::new(),
+                ui: None,
             },
         ));
         for f in x.fields() {
@@ -500,7 +529,6 @@ impl Annotations {
         if matches!(f, FieldSpec::Atom { multiline: true, .. }) {
             annotations.push(Annotation::new("UI.MultiLineText"));
         }
-
         match f {
             FieldSpec::Lookup {
                 name,
@@ -594,10 +622,10 @@ impl Annotations {
 ///   sind die Auswahlpunkte in der ListReport-Ansicht (siehe `flp.rs`).
 /// * Eine fehlende `default`-Ansicht wird durch `name` ersetzt, weil Fiori Elements
 ///   ein unqualifiziertes LineItem fuer die Standardtabelle braucht.
-fn line_item_annotations(x: &EntitySpec) -> Vec<Annotation> {
+fn line_item_annotations(x: &EntitySpec, app_entities: &[String]) -> Vec<Annotation> {
     let views = x.list_views();
     if views.is_empty() {
-        return vec![line_item(None, &["name".to_string()], x)];
+        return vec![line_item(None, &["name".to_string()], x, app_entities)];
     }
 
     let mut out = Vec::new();
@@ -606,11 +634,11 @@ fn line_item_annotations(x: &EntitySpec) -> Vec<Annotation> {
         .find(|v| v.is_default())
         .map(|v| v.columns.clone())
         .unwrap_or_else(|| vec!["name".to_string()]);
-    out.push(line_item(None, &default_cols, x));
+    out.push(line_item(None, &default_cols, x, app_entities));
 
     for view in views {
         if !view.is_default() {
-            out.push(line_item(Some(&view.name), &view.columns, x));
+            out.push(line_item(Some(&view.name), &view.columns, x, app_entities));
         }
         out.push(presentation_variant(&view.name));
     }
@@ -619,19 +647,57 @@ fn line_item_annotations(x: &EntitySpec) -> Vec<Annotation> {
 
 /// Ein `UI.LineItem`. Spalten sind Atome (`Value = name`) oder einwertige
 /// Navigationen (`Value = nav/name`, Anzeige des Zieltextes).
-fn line_item(qualifier: Option<&str>, columns: &[String], x: &EntitySpec) -> Annotation {
+fn line_item(
+    qualifier: Option<&str>,
+    columns: &[String],
+    x: &EntitySpec,
+    app_entities: &[String],
+) -> Annotation {
     let mut coll = Collection::new();
     for col in columns {
-        let is_nav = x.fields().any(|f| {
-            matches!(f, spec::FieldSpec::Lookup { name, collection: false, .. } if name == col)
+        let lookup = x.fields().find_map(|f| match f {
+            spec::FieldSpec::Lookup { name, entity, collection: false, .. } if name == col => {
+                Some(entity.as_str())
+            }
+            _ => None,
         });
-        let path = if is_nav { format!("{col}/name") } else { col.clone() };
-        let link = !is_nav && is_link_atom(x, col);
-        coll = coll.add_record(data_field(&path, link));
+        // Zusaetzlich zur normalen Anzeige: Sprung in die volle Objektansicht.
+        let record = match lookup {
+            Some(entity) if app_entities.iter().any(|a| a == entity) => {
+                // Der Fremdschluessel muss mitgeladen werden, sonst faellt das Mapping auf die
+                // ID der Zeile zurueck. Die Spalte ist ausgeblendet (UI.Hidden).
+                coll = coll.add_record(
+                    Record::new("UI.DataField")
+                        .add(PropertyValue::new("Value").path(format!("{col}_ID")))
+                        .annotation(Annotation::new("UI.Hidden")),
+                );
+                intent_link_record(&format!("{col}/name"), &format!("{col}_ID"), entity)
+            }
+            Some(_) => data_field(&format!("{col}/name"), false),
+            None if col == "name" && app_entities.iter().any(|a| a == x.name()) => {
+                intent_link_record("name", "ID", x.name())
+            }
+            None => data_field(col, is_link_atom(x, col)),
+        };
+        coll = coll.add_record(record);
     }
     let mut ann = Annotation::new("UI.LineItem").collection(coll);
     ann.qualifier = qualifier.map(str::to_string);
     ann
+}
+
+/// Semantischer Sprung (`DataFieldWithIntentBasedNavigation`) fuer den Wert `value`,
+/// Schluessel `local_key` der Zeile wird auf `ID` der Zielentitaet gemappt.
+fn intent_link_record(value: &str, local_key: &str, entity: &str) -> Record {
+    Record::new("UI.DataFieldWithIntentBasedNavigation")
+        .add(PropertyValue::new("Value").path(value))
+        .add(PropertyValue::new("SemanticObject").string(entity))
+        .add(PropertyValue::new("Action").string("Detail"))
+        .add(PropertyValue::new("Mapping").collection(Collection::new().add_record(
+            Record::new("Common.SemanticObjectMappingType")
+                .add(PropertyValue::new("LocalProperty").property_path(local_key))
+                .add(PropertyValue::new("SemanticObjectProperty").string("ID")),
+        )))
 }
 
 /// Ist `name` ein Atom mit `link: true` (Wert ist eine URL)?
@@ -846,7 +912,7 @@ fn lookup_intent_field(name: &str, entity: &str) -> Record {
     Record::new("UI.DataFieldWithIntentBasedNavigation")
         .add(PropertyValue::new("Value").path(&fk))
         .add(PropertyValue::new("SemanticObject").string(entity))
-        .add(PropertyValue::new("Action").string("display"))
+        .add(PropertyValue::new("Action").string("Detail"))
         .add(PropertyValue::new("Mapping").collection(Collection::new().add_record(
             Record::new("Common.SemanticObjectMappingType")
                 .add(PropertyValue::new("LocalProperty").property_path(&fk))
@@ -904,7 +970,15 @@ fn field_record(f: &FieldSpec, hidden: &[String], app_entities: &[String]) -> Op
                 Some(data_field(name, *link))
             }
         }
-        FieldSpec::Measure { .. } => todo!(),
+        // Betrag/Menge: FE zeigt Wert und Waehrung/Einheit ueber die Measure-Annotation
+        // (Begleitfeld). Das Begleitfeld selbst wird nicht separat angezeigt.
+        FieldSpec::Measure { name, .. } => {
+            if hidden.iter().any(|h| h == name) {
+                None
+            } else {
+                Some(data_field(name, false))
+            }
+        }
     }
 }
 
@@ -1128,6 +1202,10 @@ pub struct Record {
 
     #[serde(rename = "PropertyValue", default)]
     pub property_values: Vec<PropertyValue>,
+
+    /// Annotationen am Record selbst (z. B. `UI.Hidden` an einem `UI.DataField`).
+    #[serde(rename = "Annotation", default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<Annotation>,
 }
 
 impl Record {
@@ -1135,10 +1213,15 @@ impl Record {
         Self {
             type_: Some(type_.into()),
             property_values: Vec::new(),
+            annotations: Vec::new(),
         }
     }
     pub fn add(mut self, property_value: PropertyValue) -> Self {
         self.property_values.push(property_value);
+        self
+    }
+    pub fn annotation(mut self, annotation: Annotation) -> Self {
+        self.annotations.push(annotation);
         self
     }
 }
@@ -2288,11 +2371,7 @@ async fn patch_handler(
     };
     let ekey = EntityKey::new(id, key.is_active_entity());
     match state.store.patch_entity(&key.name, &ekey, &body).await {
-        Ok(_) => (
-            [content_type_json(), odata_version()],
-            json!([]).to_string(),
-        )
-            .into_response(),
+        Ok(_) => (StatusCode::NO_CONTENT, [odata_version()]).into_response(),
         Err(e) => ODataError::from_store(e).into_response(),
     }
 }
@@ -2821,6 +2900,26 @@ mod tests {
     }
 
     #[test]
+    fn measure_fields_render_as_data_field_and_unit_annotation() {
+        for kind in [MeasureKind::Currency, MeasureKind::Unit] {
+            let measure = FieldSpec::Measure {
+                name: "amount".into(),
+                label: "Amount".into(),
+                package: None,
+                precision: None,
+                scale: None,
+                unit_field: "unit".into(),
+                kind,
+            };
+            let rec = field_record(&measure, &[], &[]).expect("Measure ist sichtbar");
+            let json = serde_json::to_string(&rec).unwrap();
+            assert!(json.contains("UI.DataField"));
+            assert!(json.contains("amount"));
+            assert!(field_record(&measure, &["amount".to_string()], &[]).is_none());
+        }
+    }
+
+    #[test]
     fn parses_simple_expand_list() {
         let expand = parse_expand_items("DraftAdministrativeData,package").unwrap();
 
@@ -2922,6 +3021,8 @@ mod list_view_annotation_tests {
             value_list: None,
             link: false,
             multiline: false,
+            side_effects: Vec::new(),
+            ui: None,
         }
     }
 
@@ -2937,7 +3038,7 @@ mod list_view_annotation_tests {
         }
         let fg = serde_json::to_string(&field_group("Main", &e, None, &[], &[])).unwrap();
         assert!(fg.contains("UI.DataFieldWithUrl"), "link-Atom wird DataFieldWithUrl");
-        let anns = line_item_annotations(&e);
+        let anns = line_item_annotations(&e, &[]);
         let li = serde_json::to_string(&anns[0]).unwrap();
         assert!(li.contains("UI.DataFieldWithUrl"));
         assert!(!serde_json::to_string(&field_group("Main", &active_video(vec![]), None, &[], &[])).unwrap().contains("DataFieldWithUrl"));
@@ -3075,7 +3176,7 @@ mod list_view_annotation_tests {
     #[test]
     fn without_views_line_item_shows_name_only() {
         let e = active_video(vec![]);
-        let anns = line_item_annotations(&e);
+        let anns = line_item_annotations(&e, &[]);
         assert_eq!(anns.len(), 1);
         assert_eq!(anns[0].qualifier, None);
         assert_eq!(datafield_paths(&anns[0]), vec!["name"]);
@@ -3087,7 +3188,7 @@ mod list_view_annotation_tests {
             ListView::new("default", &["name", "agent", "title"]),
             ListView::new("review", &["title"]),
         ]);
-        let anns = line_item_annotations(&e);
+        let anns = line_item_annotations(&e, &[]);
 
         let default = find(&anns, "UI.LineItem", None);
         assert_eq!(datafield_paths(default), vec!["name", "agent/name", "title"]);

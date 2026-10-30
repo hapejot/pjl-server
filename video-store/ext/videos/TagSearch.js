@@ -1,5 +1,5 @@
 /*
- * Tag-Suche der Video-Listenseite (Tab, siehe fragments/TagSearch.fragment.xml).
+ * Tag-Suche der Video-Listenseite (Tab, siehe ext/videos/fragment/TagSearch.fragment.xml).
  *
  * - Suchfeld: Tags werden nach Teilstring gefiltert (serverseitig, ohne Gross-/Kleinschreibung).
  * - Tag-Buttons: mehrere Tags waehlen (UND), die Auswahl verengt die angebotenen Tags.
@@ -10,7 +10,7 @@
  *   GET /ext/video/tags/videos?selected=<ids>&skip&top=100
  *
  * Zustand im Modell "tagsearch", das die Controller-Erweiterung an die View haengt
- * (ui5/TagSearchController.js). Veraltete Antworten werden ueber eine Laufnummer verworfen.
+ * (ext/videos/TagSearchController.controller.js). Veraltete Antworten werden ueber eine Laufnummer verworfen.
  */
 sap.ui.define(["sap/base/util/ObjectPath", "sap/ui/model/json/JSONModel", "sap/m/MessageToast", "sap/ui/core/UIComponent"], function (ObjectPath, JSONModel, MessageToast, UIComponent) {
     "use strict";
@@ -21,7 +21,7 @@ sap.ui.define(["sap/base/util/ObjectPath", "sap/ui/model/json/JSONModel", "sap/m
     var VIDEOS_URL = "/ext/video/tags/videos";
     var OBJECT_ROUTE = "VideoObjectPage";
     var SEMANTIC_OBJECT = "Video";   // Inbound-Intent aus fiori-server/src/flp.rs
-    var SEMANTIC_ACTION = "display";
+    var SEMANTIC_ACTION = "Detail";   // Object-Page-Einstieg (ID-Pflichtparameter)
     var DEBOUNCE_MS = 250;
 
     var model = new JSONModel({
@@ -119,7 +119,7 @@ sap.ui.define(["sap/base/util/ObjectPath", "sap/ui/model/json/JSONModel", "sap/m
             });
     }
 
-    // Semantic Navigation (Intent Video-display) auf die Object Page eines Videos.
+    // Semantic Navigation (Intent Video-Detail) auf die Object Page eines Videos.
     // Ohne FLP faellt sie auf den Router der View zurueck.
     function navigateTo(id) {
         var key = "ID=" + id + ",IsActiveEntity=true";
@@ -128,6 +128,7 @@ sap.ui.define(["sap/base/util/ObjectPath", "sap/ui/model/json/JSONModel", "sap/m
                 var nav = sap.ushell.Container.getService("CrossApplicationNavigation");
                 nav.toExternal({
                     target: { semanticObject: SEMANTIC_OBJECT, action: SEMANTIC_ACTION },
+                    params: { ID: id },
                     appSpecificRoute: "&/VideoSet(" + key + ")"
                 });
                 return;
@@ -223,8 +224,8 @@ sap.ui.define(["sap/base/util/ObjectPath", "sap/ui/model/json/JSONModel", "sap/m
         init: refresh
     };
 
-    // Globaler Name fuer die String-Handler im Fragment (video.ext.TagSearch.toggle).
-    ObjectPath.set("video.ext.TagSearch", TAG_SEARCH);
+    // Globaler Name fuer die String-Handler im Fragment (videos.ext.TagSearch.toggle).
+    ObjectPath.set("videos.ext.TagSearch", TAG_SEARCH);
     TAG_SEARCH.init();
     return TAG_SEARCH;
 });

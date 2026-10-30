@@ -1,4 +1,4 @@
-sap.ui.define(["video/ext/TagSearch"], function (TagSearch) {
+sap.ui.define(["videos/ext/TagSearch"], function (TagSearch) {
     "use strict";
 
     // Setzt die Quelle des Players auf die Video-ID des Object-Page-Kontexts.

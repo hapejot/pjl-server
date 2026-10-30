@@ -1,5 +1,7 @@
-sap.ui.define(["sap/base/util/ObjectPath"], function (ObjectPath) {
+sap.ui.define(["sap/base/util/ObjectPath", "sap/ui/core/format/DateFormat"], function (ObjectPath, DateFormat) {
     "use strict";
+    // Eingebaute Anzeigeformate (`ui.format` in ddic.json). Datum und Uhrzeit folgen
+    // dem Locale des Benutzers ueber DateFormat; Zahlen bleiben bei FE-Standard.
     var UNITS = ["B", "KB", "MB", "GB", "TB"];
 
     function num(v) {
@@ -7,6 +9,9 @@ sap.ui.define(["sap/base/util/ObjectPath"], function (ObjectPath) {
     }
     function one(n) {
         return n < 10 ? n.toFixed(1) : Math.round(n).toString();
+    }
+    function pad(x) {
+        return (x < 10 ? "0" : "") + x;
     }
 
     var FORMATTER = {
@@ -29,11 +34,22 @@ sap.ui.define(["sap/base/util/ObjectPath"], function (ObjectPath) {
             var h = Math.floor(s / 3600);
             var m = Math.floor((s % 3600) / 60);
             var sec = s % 60;
-            var pad = function (x) { return (x < 10 ? "0" : "") + x; };
             return h > 0 ? h + ":" + pad(m) + ":" + pad(sec) : m + ":" + pad(sec);
+        },
+        date: function (v) {
+            if (!v) { return ""; }
+            var d = new Date(v);
+            if (isNaN(d.getTime())) { return ""; }
+            return DateFormat.getDateInstance().format(d);
+        },
+        datetime: function (v) {
+            if (!v) { return ""; }
+            var d = new Date(v);
+            if (isNaN(d.getTime())) { return ""; }
+            return DateFormat.getDateTimeInstance().format(d);
         }
     };
     // Globaler Name fuer die Formatter-Referenz in den Fragmenten (XML-Bindung).
-    ObjectPath.set("video.ext.Format", FORMATTER);
+    ObjectPath.set("fiori.ext.Format", FORMATTER);
     return FORMATTER;
 });

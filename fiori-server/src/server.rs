@@ -13,19 +13,19 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Context;
-use axum::{routing::get, Router};
+use axum::{Router, routing::get};
 use data_store::{DraftDataStore, Schema, SchemaSource, StaticSchema};
+use postgres_relational_store::PostgresStore;
 use spec::data_dictionary::DataDictionary;
 use spec_schema::DdicSchemaSource;
 use sqlite_relational_store::RelationalStore;
-use postgres_relational_store::PostgresStore;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::info;
 
 use crate::config::{ServerConfig, ServerMode};
 use crate::ddic_store::DdicStore;
 use crate::hook::Extender;
-use crate::{batch, flp, srv, AppState};
+use crate::{AppState, batch, flp, srv};
 
 /// Server ohne Erweiterungen starten.
 pub async fn run(config: ServerConfig) -> anyhow::Result<()> {
@@ -53,6 +53,9 @@ pub async fn run_with(
     }
 
     let base = load_dictionary(&config)?;
+    // Generische UI-Erweiterung aus den `ui`-Bloecken der ddic.json (Formate, ausgeblendete
+    // Felder, App-Assets). Wird nach den Skripten eingetragen, damit sie nicht ueberschrieben werden.
+    extensions.push(Arc::new(crate::ui_ext::UiExtension::new(&base, config.ext_dir.clone())));
     let (inner, sqlite) = if config.designer {
         // Designer: Metamodell als Basis, Daten aus `ddic.json`.
         let path = config.ddic.clone().context("designer needs --ddic")?;
@@ -143,20 +146,18 @@ async fn shutdown_signal() {
 /// Fremdschluesseln bleiben also ueber Neustarts gueltig. Vorhandene Eintraege
 /// werden aktualisiert statt geloescht; geloescht wird nur, was nicht mehr in der
 /// Liste steht.
-async fn seed_value_lists(
-    store: &dyn DraftDataStore,
-    ddic: &DataDictionary,
-) -> anyhow::Result<()> {
+async fn seed_value_lists(store: &dyn DraftDataStore, ddic: &DataDictionary) -> anyhow::Result<()> {
     use data_store::EntityKey;
     use odata::query::ODataQuery;
     use serde_json::json;
-    use spec::value_list::{entry_id, CODE_FIELD, LABEL_FIELD, SORT_FIELD};
+    use spec::value_list::{CODE_FIELD, LABEL_FIELD, SORT_FIELD, entry_id};
     use std::collections::{HashMap, HashSet};
 
     if ddic.value_lists().is_empty() {
         return Ok(());
     }
-    ddic.validate_value_lists().map_err(|e| anyhow::anyhow!("value lists: {e}"))?;
+    ddic.validate_value_lists()
+        .map_err(|e| anyhow::anyhow!("value lists: {e}"))?;
     let mut count = 0;
     for list in ddic.value_lists() {
         let set = format!("{}Set", list.name);
@@ -164,8 +165,11 @@ async fn seed_value_lists(
             .get_collection(&set, &ODataQuery::new())
             .await
             .map_err(|e| anyhow::anyhow!("cannot read {set}: {e}"))?;
-        let wanted: HashSet<uuid::Uuid> =
-            list.values.iter().map(|v| entry_id(&list.id, &v.code)).collect();
+        let wanted: HashSet<uuid::Uuid> = list
+            .values
+            .iter()
+            .map(|v| entry_id(&list.id, &v.code))
+            .collect();
         // Alle Saetze je ID (aktiv und Entwurf).
         let mut by_id: HashMap<uuid::Uuid, Vec<_>> = HashMap::new();
         for r in existing {
@@ -247,7 +251,9 @@ fn load_dictionary(config: &ServerConfig) -> anyhow::Result<DataDictionary> {
             })?;
             info!("loading ddic from {}", path.display());
             let mut ddic: DataDictionary = serde_json::from_reader(std::io::BufReader::new(file))
-                .with_context(|| format!("'{}' is not a valid data dictionary", path.display()))?;
+                .with_context(|| {
+                format!("'{}' is not a valid data dictionary", path.display())
+            })?;
             // Benutzerverwaltung direkt nach dem Einlesen (nur im Speicher).
             ddic.inject_system_user();
             let mut ddic = match &config.ddic_overlay {
@@ -330,7 +336,10 @@ async fn open_store(
     let store = RelationalStore::open(config.data_dir.clone(), schema)
         .await
         .with_context(|| format!("cannot open store '{}'", config.data_dir.display()))?;
-    info!("store at '{}' (in-memory, persisted on shutdown)", config.data_dir.display());
+    info!(
+        "store at '{}' (in-memory, persisted on shutdown)",
+        config.data_dir.display()
+    );
     let store = Arc::new(store);
     Ok((store.clone(), Some(store)))
 }

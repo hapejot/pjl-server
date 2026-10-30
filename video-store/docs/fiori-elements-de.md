@@ -205,7 +205,7 @@ Das Manifest ist eine Fiori-Elements-V4-App mit Flexible Column Layout:
 ### 6.3 Launchpad und Startseite (`flp.rs`, `static/flp/init.js`, `templates/info.hbs`)
 
 * `/` liefert die Startseite; `/flp/site.json` (`flp.rs:43`) beschreibt Kacheln und Inbounds.
-* Die Kachel für `videos` verweist auf den Intent `Video-display`.
+* Die Kachel für `videos` verweist auf den Intent `Video-List`.
 * `/apps/{app}/Component.js` liefert `sap.fe.core.AppComponent` mit `metadata.manifest: "json"`.
 * Statische Assets liegen unter `WEB_ROOT` (`web/`), Fallback über `ServeDir`.
 

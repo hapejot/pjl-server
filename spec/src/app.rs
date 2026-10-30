@@ -11,6 +11,30 @@ pub struct App {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     icon: Option<String>,
     package: Package,
+    /// Erweiterungen der App-Oberflaeche (`ui`-Block in `ddic.json`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ui: Option<AppUi>,
+}
+
+/// `ui`-Block einer App: Assets unter `<ext_dir>/<app>/` werden als UI5-Namespace
+/// `<app>.ext` eingebunden. `modules` und `controller_extensions` verweisen darauf.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppUi {
+    /// Module relativ zu `<app>.ext`, z. B. `TagSearch` (Datei `TagSearch.js`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modules: Vec<String>,
+    /// Controller-Erweiterungen: Ziel-Controller und Controller relativ zu `<app>.ext`
+    /// (Datei `<controller>.controller.js`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub controller_extensions: Vec<ControllerExtension>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ControllerExtension {
+    pub target: String,
+    pub controller: String,
 }
 
 impl App {
@@ -29,7 +53,18 @@ impl App {
             subtitle,
             icon,
             package,
+            ui: None,
         }
+    }
+
+    /// Setzt den `ui`-Block der App.
+    pub fn with_ui(mut self, ui: AppUi) -> Self {
+        self.ui = Some(ui);
+        self
+    }
+
+    pub fn ui(&self) -> Option<&AppUi> {
+        self.ui.as_ref()
     }
     // getters
     pub fn name(&self) -> &str {
@@ -44,8 +79,14 @@ impl App {
         format!("./apps/{}/", self.main_entity)
     }
 
+    /// Aktion der Kachel bzw. Listen-Einstieg.
     pub fn action(&self) -> &str {
-        "display"
+        "List"
+    }
+
+    /// Aktion des direkten Einstiegs auf die Object Page (kein Kachel, `ID` Parameter).
+    pub fn detail_action(&self) -> &str {
+        "Detail"
     }
 
     // resolvers

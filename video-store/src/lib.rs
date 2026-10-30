@@ -3,7 +3,8 @@
 //!
 //! # Ablauf
 //!
-//! 1. `video-ddic`   liest den Katalog und schreibt `ddic.json`.
+//! 1. `ddic.json`    ist das Datenmodell und wird von Hand gepflegt (`video-ddic` nur als Notfall,
+//!    siehe `src/bin/video-ddic.rs`).
 //! 2. `video-import` baut dasselbe Modell aus der Quelldatenbank und schreibt die
 //!    Zeilen in den `PostgresStore` der Zieldatenbank (Parent vor Kind).
 //! 3. `video-runtime` serviert das Ergebnis aus derselben Zieldatenbank

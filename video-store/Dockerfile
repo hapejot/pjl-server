@@ -13,10 +13,10 @@ COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/src/app/target \
-    cargo build --release -p video-store --bin video-ddic --bin video-import \
+    cargo build --release -p video-store --bin video-import \
  && cargo build --release -p video-store --bin video-runtime \
  && mkdir -p /out \
- && cp target/release/video-ddic target/release/video-import target/release/video-runtime /out/
+ && cp target/release/video-import target/release/video-runtime /out/
 
 ########################################
 # Stage 2: run

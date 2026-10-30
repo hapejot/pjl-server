@@ -203,7 +203,8 @@ Dinge, die nicht bei jeder Migration neu erzeugt werden sollen.
 5. Browser: bei geänderten JS-Dateien den Cache leeren, sonst läuft die alte Version weiter.
 6. Manifest prüfen: `GET /apps/<Entität>/manifest.json` (Modul-Liste, Abschnitte, Views).
 
-Migration der Formate mit `jq` (ohne Server-Neustart, Ergebnis als neue Datei):
+Änderungen an bestehenden Dateien erfolgen von Hand. Für Massenänderungen an den Formaten gibt
+es ein `jq`-Skript (Ergebnis als neue Datei, danach prüfen und übernehmen):
 
 ```
 jq --argjson formats '{"Video":{"duration_seconds":"duration","bitrate":"bitrate"}}' \
@@ -215,8 +216,9 @@ jq --argjson formats '{"Video":{"duration_seconds":"duration","bitrate":"bitrate
 * **Designer: `ui`-Blöcke sind nicht editierbar.** Beim Speichern im Designer werden die
   ursprünglichen Atom-Felder übernommen, damit bleiben vorhandene `ui`-Blöcke erhalten. Neue Werte
   lassen sich im Designer aber nicht setzen; das folgt mit der Designer-Überarbeitung.
-* **`video-ddic` erzeugt `ddic.json` neu.** Dabei gehen alle `ui`-Blöcke verloren. Das Werkzeug
-  muss angepasst werden, bevor es erneut läuft.
+* **`video-ddic` ist nur Notfall-Werkzeug.** Es erzeugt `ddic.json` neu und verwirft dabei alle
+  `ui`-Blöcke. Es ist nicht im Container-Image und nicht Teil des Migrationsablaufs. `ddic.json`
+  wird von Hand gepflegt.
 * **Module und Controller wirken global** (siehe Abschnitt 7).
 * **Intent-Links** für Object Pages verwenden die Aktion `Detail` mit Pflichtparameter `ID`.
   Ein Link ohne `ID` löst die App nicht auf.

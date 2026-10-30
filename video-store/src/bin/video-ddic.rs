@@ -1,4 +1,8 @@
-//! Erzeugt `ddic.json` aus dem Katalog der Quelldatenbank.
+//! NOTFALL-WERKZEUG. Erzeugt `ddic.json` aus dem Katalog der Quelldatenbank neu.
+//!
+//! Nicht Teil des Migrationsablaufs und nicht im Container-Image. `ddic.json` ist stabil und
+//! wird von Hand gepflegt. Ein Neulauf verwirft alle `ui`-Bloecke, daher nur im Notfall und mit
+//! anschliessender Nachpflege.
 //!
 //! video-ddic --pg postgres://user:pw@host:5432/db --out ddic.json
 

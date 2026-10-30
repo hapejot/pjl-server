@@ -14,9 +14,10 @@ Die Oberfläche entsteht vollständig aus Metadaten:
 
 ```
 Postgres-Katalog
-   │  video-ddic  (introspect + map::build_model)
+   │  video-ddic  (NOTFALL: introspect + map::build_model, nicht im Image)
    ▼
-ddic.json  ── Data Dictionary (Packages, Entities, Relationships, Apps)
+ddic.json  ── Data Dictionary (Packages, Entities, Relationships, Apps, ui-Bloecke)
+   │          wird von Hand gepflegt, Datenstruktur ist stabil
    │
    ├── video-import  (Zeilen -> RelationalStore / SQLite)
    │
@@ -29,12 +30,16 @@ pjl-runtime --ddic ddic.json --data-dir <dir>
    └── /flp/ , /              Launchpad (Shell-Start, Kachel "Videos")
 ```
 
-Die Kette ist in zwei Phasen aufgeteilt (`video-store/docker/migrate.sh`, `compose.yaml`):
+Im Betrieb sind nur noch Datentransfer-Werkzeuge im Einsatz. `video-ddic` ist kein Teil des
+Ablaufs mehr; `ddic.json` wird von Hand gepflegt.
 
-| Phase                | Dienst    | Aufgabe                                                                                                                       |
-| -------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Migration (one-shot) | `migrate` | `video-ddic` schreibt `ddic.json`, `video-import` schreibt die Daten in den SQLite-Store. Idempotent über `.migrated`-Marker. |
-| Laufzeit (dauerhaft) | `runtime` | `pjl-runtime` liest nur `ddic.json` und den Store, liefert OData und die Fiori-App.                                           |
+| Phase                | Dienst    | Aufgabe                                                                                                       |
+| -------------------- | --------- | ------------------------------------------------------------------------------------------------------------- |
+| Datentransfer        | `migrate` | `video-import` schreibt die Zeilen aus der Quelldatenbank in den Store. Idempotent über `.migrated`-Marker.  |
+| Laufzeit (dauerhaft) | `runtime` | `pjl-runtime` liest `ddic.json` und den Store, liefert OData und die Fiori-App.                               |
+
+Hinweis: `video-store/docker/migrate.sh` ist im Repository nicht vorhanden. Der Dienst `migrate`
+muss daher mit `video-import` direkt definiert werden, falls er nicht mehr in `compose.yaml` steht.
 
 Die Quelldatenbank wird nur lesend benutzt.
 
@@ -42,11 +47,11 @@ Die Quelldatenbank wird nur lesend benutzt.
 
 ## 2. Schritt 1: Katalog lesen (`video-store/src/introspect.rs`)
 
-`video-ddic` liest über `tokio-postgres` den Katalog: Tabellen, Spalten (`udt`, `nullable`,
+`video-ddic` (Notfall) liest über `tokio-postgres` den Katalog: Tabellen, Spalten (`udt`, `nullable`,
 Länge, Precision/Scale), Primärschlüssel, Fremdschlüssel inklusive `ON DELETE`-Regel.
-Ergebnis ist ein `PgCatalog`.
+Ergebnis ist ein `PgCatalog`. Ein Neulauf verwirft alle `ui`-Blöcke in `ddic.json`.
 
-Die Datei `video-store/ddic.json` (gitignored) ist das Ergebnis; sie enthält aktuell
+Die Datei `video-store/ddic.json` ist das Modell; sie enthält aktuell
 **34 Entitäten, 33 Relationships, 1 App** im Package `video`.
 
 ---
@@ -327,7 +332,8 @@ Diese Konstanten sind die direkten Stellschrauben:
 | `singular()`, `entity_name()` | Benennung der Entitäten und Sets |
 | `is_reserved()` | Feldnamen, die nicht verwendet werden dürfen |
 
-Änderungen wirken nach `video-ddic` + `video-import` (`migrate.sh --force`).
+Änderungen am Modell erfolgen direkt in `video-store/ddic.json`. Neue Tabellen im Store legt
+`pjl-runtime` beim Start an (Schema-Migration aus dem Dictionary).
 
 ### 8.2 Modell-Ebene (`spec`, DDIC)
 
@@ -408,9 +414,9 @@ Vollständiges Beispiel: Abschnitt 10.
 | `video-store/src/introspect.rs` | Postgres-Katalog lesen |
 | `video-store/src/map.rs` | Abbildung auf DDIC, Regeln, Konstanten |
 | `video-store/src/import.rs` | Zeilen in den Store schreiben |
-| `video-store/src/bin/video-ddic.rs` | Erzeugt `ddic.json` |
+| `video-store/src/bin/video-ddic.rs` | NOTFALL: erzeugt `ddic.json` neu (nicht im Image) |
 | `video-store/src/bin/video-import.rs` | Importiert die Daten |
-| `video-store/docker/migrate.sh` | Migrationsablauf, Marker |
+| `video-store/docker/migrate.sh` | Fehlt im Repository (siehe Hinweis in Abschnitt 1) |
 | `video-store/compose.yaml`, `Dockerfile` | Zwei Dienste: `migrate` und `runtime` |
 | `spec/src/entity_spec.rs` | Felder, Listenansichten, Wertehilfen |
 | `spec/src/relationship.rs` | Beziehungen, Komposition |

@@ -29,8 +29,9 @@ use std::time::{Duration, Instant};
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use odata::query::ODataQuery;
-use rhai::{AST, Dynamic, Engine, EvalAltResult, Scope};
-use serde_json::{Value, json};
+use rhai::{Dynamic, Engine, EvalAltResult, Scope, AST};
+use serde_json::{json, Value};
+use tracing::info;
 
 /// Wartezeit nach dem letzten Dateiereignis, bevor neu geladen wird.
 const RELOAD_DEBOUNCE: Duration = Duration::from_millis(300);
@@ -91,17 +92,18 @@ impl ScriptHooks {
                 watch_inner.reload();
             }
         });
-        let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            if let Ok(event) = res {
-                let relevant = event
-                    .paths
-                    .iter()
-                    .any(|p| p.extension().is_some_and(|e| e == "rhai"));
-                if relevant {
-                    let _ = tx.send(());
+        let mut watcher =
+            notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+                if let Ok(event) = res {
+                    let relevant = event
+                        .paths
+                        .iter()
+                        .any(|p| p.extension().is_some_and(|e| e == "rhai"));
+                    if relevant {
+                        let _ = tx.send(());
+                    }
                 }
-            }
-        })?;
+            })?;
         watcher.watch(&dir, RecursiveMode::NonRecursive)?;
         tracing::info!(dir = %dir.display(), "script hooks loaded");
         Ok(ScriptHooks {
@@ -135,9 +137,11 @@ impl ScriptHooks {
 
     /// Schreiboperation vor dem Store (`before_<op>`).
     pub fn before(&self, set: &str, op: &str, payload: &mut Value) -> Result<(), ScriptError> {
+        info!("{} before {}: {:?}", set, op, payload);
         let ctx = json!({"set": set, "op": op, "kind": "write", "key": null, "payload": payload});
         if let Some(res) = self.call(set, &format!("before_{op}"), ctx)? {
             take(&res, "payload", payload);
+            info!("-> result payload: {:?}", payload)
         }
         Ok(())
     }
@@ -212,12 +216,13 @@ impl ScriptHooks {
         let arg = rhai::serde::to_dynamic(&ctx)
             .map_err(|e| ScriptError::Script(format!("{set}.{fname}: {e}")))?;
         DEADLINE.with(|d| d.set(Some(Instant::now() + CALL_TIMEOUT)));
-        let result = self
-            .inner
-            .engine
-            .call_fn::<Dynamic>(&mut Scope::new(), &script.ast, fname, (arg,));
+        let result =
+            self.inner
+                .engine
+                .call_fn::<Dynamic>(&mut Scope::new(), &script.ast, fname, (arg,));
         DEADLINE.with(|d| d.set(None));
-        let dynamic = result.map_err(|e| ScriptError::Script(format!("{set}.{fname}: {}", describe(&e))))?;
+        let dynamic =
+            result.map_err(|e| ScriptError::Script(format!("{set}.{fname}: {}", describe(&e))))?;
         let value: Value = rhai::serde::from_dynamic(&dynamic)
             .map_err(|e| ScriptError::Script(format!("{set}.{fname}: {e}")))?;
         if !value.is_object() {
@@ -253,7 +258,10 @@ impl Inner {
                     if path.extension().is_none_or(|e| e != "rhai") {
                         continue;
                     }
-                    let Some(set) = path.file_stem().and_then(|s| s.to_str()).map(str::to_string)
+                    let Some(set) = path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .map(str::to_string)
                     else {
                         continue;
                     };

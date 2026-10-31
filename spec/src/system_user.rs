@@ -16,6 +16,30 @@ pub const USERNAME: &str = "name";
 pub const NAME: &str = "fullname";
 pub const ACTIVE: &str = "active";
 
+/// Profil- und Einstellungsfelder aus dem Benutzermenue (UI5 `sap/ushell/User`).
+/// Heute nur lesend (`/flp/me`); Bearbeitung folgt spaeter.
+/// Namen entsprechen den UI5-Schluesseln, damit die Zuordnung 1:1 ist.
+pub const EMAIL: &str = "email";
+pub const THEME: &str = "theme";
+pub const CONTENT_DENSITY: &str = "contentDensity";
+pub const ACCESSIBILITY: &str = "accessibility";
+pub const DETECT_DARK_MODE: &str = "detectDarkMode";
+pub const LANGUAGE: &str = "language";
+pub const TIME_ZONE: &str = "timeZone";
+pub const CALENDAR_WEEK_NUMBERING: &str = "calendarWeekNumbering";
+pub const TRACK_USER_ACTIVITIES: &str = "trackUserActivities";
+pub const SHOW_MY_HOME: &str = "showMyHome";
+pub const IMPORT_BOOKMARKS: &str = "importBookmarks";
+pub const IMAGE_CONSENT: &str = "imageConsent";
+pub const TRACK_USAGE_ANALYTICS: &str = "trackUsageAnalytics";
+
+/// Alle Profil- und Einstellungsfelder (ohne `name`, `fullname`, `active`).
+pub const PROFILE_FIELDS: &[&str] = &[
+    EMAIL, THEME, CONTENT_DENSITY, ACCESSIBILITY, DETECT_DARK_MODE, LANGUAGE, TIME_ZONE,
+    CALENDAR_WEEK_NUMBERING, TRACK_USER_ACTIVITIES, SHOW_MY_HOME, IMPORT_BOOKMARKS,
+    IMAGE_CONSENT, TRACK_USAGE_ANALYTICS,
+];
+
 pub const OWNER: &str = "Owner";
 pub const CREATED_BY: &str = "CreatedBy";
 pub const CHANGED_BY: &str = "ChangedBy";

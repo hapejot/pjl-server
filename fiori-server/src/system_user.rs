@@ -111,6 +111,26 @@ pub async fn ensure_default_user(raw: &dyn DraftDataStore) -> anyhow::Result<()>
     Ok(())
 }
 
+/// Datensatz des Akteurs der laufenden Anfrage als JSON (`ID`, `name`,
+/// `fullname`, `active`). Unbekannte Header-User werden dabei angelegt.
+pub async fn actor_info(raw: &dyn DraftDataStore) -> Result<Value, HookError> {
+    resolve_actor(raw).await?;
+    let username = current_user().unwrap_or_else(|| su::DEFAULT_USERNAME.to_string());
+    let record = find_user(raw, &username)
+        .await?
+        .ok_or_else(|| HookError::Hook(format!("Benutzer '{username}' nicht gefunden")))?;
+    let mut info = json!({
+        "ID": record.id().to_string(),
+        su::USERNAME: username,
+        su::NAME: record.get(su::NAME).unwrap_or(Value::Null),
+        su::ACTIVE: record.get(su::ACTIVE).unwrap_or(Value::Null),
+    });
+    for field in su::PROFILE_FIELDS {
+        info[*field] = record.get(field).unwrap_or(Value::Null);
+    }
+    Ok(info)
+}
+
 /// Hook: Zugriffspruefung, Benutzerregeln und Audit-Felder.
 ///
 /// Muss innerhalb aller anderen Hooks liegen, damit sein Store-Zugriff

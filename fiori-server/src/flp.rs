@@ -43,6 +43,23 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/init.js", get(init))
         .route("/site.json", get(site))
+        .route("/me", get(me))
+}
+
+/// Aktueller Benutzer aus dem Auth-Header (siehe `crate::auth`).
+async fn me(State(state): State<AppState>) -> Result<Json<Value>, (StatusCode, String)> {
+    crate::system_user::actor_info(state.store.as_ref())
+        .await
+        .map(Json)
+        .map_err(|e| {
+            let status = match &e {
+                crate::hook::HookError::Store(data_store::StoreError::Forbidden(_)) => {
+                    StatusCode::FORBIDDEN
+                }
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            (status, e.to_string())
+        })
 }
 
 const DEFAULT_APP_ICON: &str = "sap-icon://settings";
@@ -731,23 +748,12 @@ pub async fn index() -> impl IntoResponse {
                 UserInfo: {
                     adapter: {
                         module: "sap.ushell.adapters.local.UserInfoAdapter",
-                        config: {
-                            id: "DEMO_USER",
-                            firstName: "John",
-                            lastName: "Doe",
-                            fullName: "John Doe",
-                            email: "john.doe@example.com"
-                        }
+                        config: {}
                     }
                 },
                 Container: {
                     adapter: {
                         config: {
-                            id: "DEMO_USER",
-                            firstName: "John",
-                            lastName: "Doe",
-                            fullName: "John Doe",
-                            email: "john.doe@example.com",
                             storageResourceRoot: "/"
                         }
                     }
@@ -780,7 +786,7 @@ pub async fn index() -> impl IntoResponse {
 
     <script
         id="sap-ui-bootstrap"
-        src="https://ui5.sap.com/1.139.0/resources/sap-ui-core.js"
+        src="https://ui5.sap.com/1.153.0/resources/sap-ui-core.js"
         data-sap-ui-libs="sap.m, sap.ushell, sap.fe.templates, sap.f"
         data-sap-ui-async="true"
         data-sap-ui-preload="async"

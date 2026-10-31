@@ -318,6 +318,19 @@ impl DataDictionary {
             FieldSpec::string(su::USERNAME, "Name", 255),
             FieldSpec::string(su::NAME, "Full Name", 255),
             FieldSpec::bool_field(su::ACTIVE, "Active"),
+            FieldSpec::string(su::EMAIL, "E-Mail", 255),
+            FieldSpec::string(su::THEME, "Theme", 64),
+            FieldSpec::string(su::CONTENT_DENSITY, "Content Density", 16),
+            FieldSpec::bool_field(su::ACCESSIBILITY, "Accessibility Mode"),
+            FieldSpec::bool_field(su::DETECT_DARK_MODE, "Detect Dark Mode"),
+            FieldSpec::string(su::LANGUAGE, "Language", 16),
+            FieldSpec::string(su::TIME_ZONE, "Time Zone", 64),
+            FieldSpec::string(su::CALENDAR_WEEK_NUMBERING, "Calendar Week Numbering", 32),
+            FieldSpec::bool_field(su::TRACK_USER_ACTIVITIES, "Track User Activities"),
+            FieldSpec::bool_field(su::SHOW_MY_HOME, "Show My Home"),
+            FieldSpec::bool_field(su::IMPORT_BOOKMARKS, "Import Bookmarks"),
+            FieldSpec::bool_field(su::IMAGE_CONSENT, "Image Consent"),
+            FieldSpec::bool_field(su::TRACK_USAGE_ANALYTICS, "Track Usage Analytics"),
         ];
         match self.entities.iter_mut().find(|e| e.name == su::SYSTEM_USER) {
             Some(entity) => {

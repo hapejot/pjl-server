@@ -15,12 +15,6 @@
 
     // ── helpers ──────────────────────────────────────────────────────
 
-    function getNestedValue(obj, path) {
-        return path.split(".").reduce(function (cur, key) {
-            return cur && cur[key];
-        }, obj);
-    }
-
     // ── apply ushellProperties after Container.init ───────────────
 
     /**
@@ -44,29 +38,54 @@
         oBus.subscribeOnce("sap.ushell", "rendererLoaded", setLogo);
     }
 
+    // ── CDM bootstrap ───────────────────────────────────────────────
+
     /**
-     * Apply user profile data to the UShell Container.getUser() object.
-     * In CDM mode some setter methods may not exist — guard each call.
+     * Load the current user from the server (/flp/me, resolved from the
+     * auth header) and write it into the Container adapter config BEFORE
+     * Container.init. The CDM ContainerAdapter builds the shell user from
+     * services.Container.adapter.config.userProfile.defaults
+     * (sapui5 1.153, adapters/cdm/ContainerAdapter). Failures are logged;
+     * the boot continues without server user data.
      */
-    function applyUserProfile(oUshellConfig) {
-        var oCfg = getNestedValue(oUshellConfig, "services.Container.adapter.config");
-        if (!oCfg) { return; }
-
-        try {
-            var oUser = sap.ushell.Container.getUser();
-            if (!oUser) { return; }
-
-            if (oCfg.id        && typeof oUser.setId === "function")        { oUser.setId(oCfg.id); }
-            if (oCfg.firstName && typeof oUser.setFirstName === "function") { oUser.setFirstName(oCfg.firstName); }
-            if (oCfg.lastName  && typeof oUser.setLastName === "function")  { oUser.setLastName(oCfg.lastName); }
-            if (oCfg.fullName  && typeof oUser.setFullName === "function")  { oUser.setFullName(oCfg.fullName); }
-            if (oCfg.email     && typeof oUser.setEmail === "function")     { oUser.setEmail(oCfg.email); }
-
-            console.log("[flp-init] User profile applied:", oCfg.fullName || oCfg.id);
-        } catch (e) {
-            console.warn("[flp-init] Could not set user profile:", e);
-        }
+    function loadServerUser(oUshellConfig) {
+        return fetch("/flp/me", { headers: { "Accept": "application/json" } })
+            .then(function (res) {
+                if (!res.ok) { throw new Error("HTTP " + res.status); }
+                return res.json();
+            })
+            .then(function (oMe) {
+                var oServices = oUshellConfig.services = oUshellConfig.services || {};
+                var oContainer = oServices.Container = oServices.Container || {};
+                var oAdapter = oContainer.adapter = oContainer.adapter || {};
+                var oConfig = oAdapter.config = oAdapter.config || {};
+                var oProfile = oConfig.userProfile = oConfig.userProfile || {};
+                var oDefaults = Object.assign({}, oProfile.defaults, {
+                    id: oMe.name,
+                    fullName: oMe.fullname || oMe.name
+                });
+                // Settings from SystemUser. Only keys supported by sap.ushell.User
+                // are kept (ContainerAdapter removes the rest). Empty values are skipped.
+                var aSettingKeys = ["email", "language", "timeZone", "calendarWeekNumbering",
+                    "contentDensity", "accessibility", "detectDarkMode", "showMyHome",
+                    "importBookmarks", "imageConsent", "trackUsageAnalytics"];
+                aSettingKeys.forEach(function (sKey) {
+                    if (oMe[sKey] !== null && oMe[sKey] !== undefined && oMe[sKey] !== "") {
+                        oDefaults[sKey] = oMe[sKey];
+                    }
+                });
+                if (oMe.theme) {
+                    oDefaults.bootTheme = { theme: oMe.theme, root: "" };
+                }
+                oProfile.defaults = oDefaults;
+                console.log("[flp-init] Server user loaded:", oMe.name);
+            })
+            .catch(function (e) {
+                console.warn("[flp-init] Could not load /flp/me:", e);
+            });
     }
+
+    // ── CDM bootstrap ───────────────────────────────────────────────
 
     // ── CDM bootstrap ───────────────────────────────────────────────
 
@@ -104,58 +123,65 @@
                         // The CommonDataModelAdapter will fetch /cdm/site.json
                         // from the siteDataUrl configured in sap-ushell-config.
 
-                        // Pre-register missing CDM adapters.
-                        // NavTargetResolutionInternalAdapter and AppStateAdapter
-                        // do not exist in the CDM platform but are required at
-                        // runtime.  These shims delegate to the real services.
-                        sap.ui.define("sap/ushell/adapters/cdm/NavTargetResolutionInternalAdapter", [
-                                      "sap/ui/thirdparty/jquery",
-                                      "sap/ushell/Container"
-                        ], function (jQ, Ctnr) {
-                            function A() {
-                                function c() { return Ctnr.getServiceAsync("ClientSideTargetResolution"); }
-                                this.resolveHashFragment = function (h) {
-                                    var d = new jQ.Deferred();
-                                    c().then(function (o) { o.resolveHashFragment(h).then(d.resolve, d.reject); })["catch"](d.reject);
-                                    return d.promise();
-                                };
-                                this.isIntentSupported = function (a) {
-                                    var d = new jQ.Deferred();
-                                    c().then(function (o) { o.isIntentSupported(a).then(d.resolve, d.reject); })["catch"](d.reject);
-                                    return d.promise();
-                                };
-                                this.getSemanticObjectLinks = function (s, m) {
-                                    var d = new jQ.Deferred();
-                                    c().then(function (o) { o.getLinks({semanticObject: s, params: m}).then(d.resolve, d.reject); })["catch"](d.reject);
-                                    return d.promise();
-                                };
-                                this.getDistinctSemanticObjects = function () {
-                                    var d = new jQ.Deferred();
-                                    c().then(function (o) {
-                                        if (typeof o.getDistinctSemanticObjects === "function") {
-                                            o.getDistinctSemanticObjects().then(d.resolve, d.reject);
-                                        } else {
-                                            d.resolve([]);
-                                        }
-                                    })["catch"](d.reject);
-                                    return d.promise();
-                                };
-                            }
-                            return A;
-                        });
+                        loadServerUser(oUshellConfig)
+                            .then(function () {
+                                return ushellUtils.requireAsync(["sap/ushell/bootstrap/Config"]);
+                            })
+                            .then(function (aConfig) {
+                                // Must run before sap/ushell/Container is loaded,
+                                // otherwise ShellModel reads the config too early.
+                                aConfig[0].initialize(oUshellConfig);
 
-                        sap.ui.define("sap/ushell/adapters/cdm/AppStateAdapter", [
-                                      "sap/ushell/adapters/local/AppStateAdapter"
-                        ], function (LocalAdapter) {
-                            return LocalAdapter;
-                        });
+                                        // Pre-register missing CDM adapters.
+                                        // NavTargetResolutionInternalAdapter and AppStateAdapter
+                                        // do not exist in the CDM platform but are required at
+                                        // runtime.  These shims delegate to the real services.
+                                        sap.ui.define("sap/ushell/adapters/cdm/NavTargetResolutionInternalAdapter", [
+                                                      "sap/ui/thirdparty/jquery",
+                                                      "sap/ushell/Container"
+                                        ], function (jQ, Ctnr) {
+                                            function A() {
+                                                function c() { return Ctnr.getServiceAsync("ClientSideTargetResolution"); }
+                                                this.resolveHashFragment = function (h) {
+                                                    var d = new jQ.Deferred();
+                                                    c().then(function (o) { o.resolveHashFragment(h).then(d.resolve, d.reject); })["catch"](d.reject);
+                                                    return d.promise();
+                                                };
+                                                this.isIntentSupported = function (a) {
+                                                    var d = new jQ.Deferred();
+                                                    c().then(function (o) { o.isIntentSupported(a).then(d.resolve, d.reject); })["catch"](d.reject);
+                                                    return d.promise();
+                                                };
+                                                this.getSemanticObjectLinks = function (s, m) {
+                                                    var d = new jQ.Deferred();
+                                                    c().then(function (o) { o.getLinks({semanticObject: s, params: m}).then(d.resolve, d.reject); })["catch"](d.reject);
+                                                    return d.promise();
+                                                };
+                                                this.getDistinctSemanticObjects = function () {
+                                                    var d = new jQ.Deferred();
+                                                    c().then(function (o) {
+                                                        if (typeof o.getDistinctSemanticObjects === "function") {
+                                                            o.getDistinctSemanticObjects().then(d.resolve, d.reject);
+                                                        } else {
+                                                            d.resolve([]);
+                                                        }
+                                                    })["catch"](d.reject);
+                                                    return d.promise();
+                                                };
+                                            }
+                                            return A;
+                                        });
 
-                        ushellUtils
-                            .requireAsync(["sap/ushell/Container"])
+                                        sap.ui.define("sap/ushell/adapters/cdm/AppStateAdapter", [
+                                                      "sap/ushell/adapters/local/AppStateAdapter"
+                                        ], function (LocalAdapter) {
+                                            return LocalAdapter;
+                                        });
+                                return ushellUtils.requireAsync(["sap/ushell/Container"]);
+                            })
                             .then(function (aModules) {
                                 aModules[0].init("cdm").then(function () {
                                     applyUshellProperties(savedUshellProps);
-                                    applyUserProfile(oUshellConfig);
                                     console.log("[flp-init] CDM platform initialized.");
                                     fnCallback();
                                 });

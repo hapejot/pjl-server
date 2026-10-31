@@ -88,7 +88,15 @@
         "name": "workbench"
       },
       "subtitle": "Terminplanung",
-      "title": "Termine"
+      "title": "Termine",
+      "ui": {
+        "controller_extensions": [
+          {
+            "target": "sap.fe.templates.ObjectPage.ObjectPageController",
+            "controller": "TimeSectionController"
+          }
+        ]
+      }
     }
   ],
   "entities": [
@@ -499,14 +507,33 @@
           "Atom": {
             "edm_type": "Edm.DateTimeOffset",
             "label": "Beginn",
-            "name": "starts_at"
+            "name": "starts_at",
+            "side_effects": [
+              "ends_at",
+              "duration_minutes"
+            ]
           }
         },
         {
           "Atom": {
             "edm_type": "Edm.DateTimeOffset",
             "label": "Ende",
-            "name": "ends_at"
+            "name": "ends_at",
+            "side_effects": [
+              "starts_at",
+              "duration_minutes"
+            ]
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.Int32",
+            "label": "Dauer (Minuten)",
+            "name": "duration_minutes",
+            "side_effects": [
+              "starts_at",
+              "ends_at"
+            ]
           }
         },
         {
@@ -529,7 +556,19 @@
       "name": "Appointment",
       "package": "workbench",
       "type_name": "Termin",
-      "type_name_plural": "Termine"
+      "type_name_plural": "Termine",
+      "ui": {
+        "hidden_fields": ["starts_at", "ends_at", "duration_minutes"],
+        "sections": [
+          {
+            "key": "Zeitraum",
+            "title": "Zeitraum",
+            "fragment": "TimeSection",
+            "anchor": "GeneralSection",
+            "placement": "After"
+          }
+        ]
+      }
     },
     {
       "name": "ProjectMember",

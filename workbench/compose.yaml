@@ -58,6 +58,7 @@ services:
     environment:
       DDIC: /app/model/ddic.json
       SCRIPTS_DIR: /app/model/scripts
+      EXT_DIR: /app/model/ext
       STORE_PG_URL: postgres://workbench:${WB_DB_PASSWORD}@db:5432/workbench
       PORT: "8080"
       RUST_LOG: info
@@ -67,6 +68,7 @@ services:
     volumes:
       - ./ddic.json:/app/model/ddic.json:ro
       - ./scripts:/app/model/scripts:ro
+      - ./ext:/app/model/ext:ro
 
 volumes:
   workbench-db:

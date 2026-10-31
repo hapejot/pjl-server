@@ -1,0 +1,60 @@
+<core:FragmentDefinition
+	xmlns="sap.m"
+	xmlns:core="sap.ui.core"
+	xmlns:f="sap.ui.layout.form">
+	<!--
+		Zeitraum des Termins (Abschnitt "Zeitraum" der Object Page, siehe ddic.json).
+		Anzeige (aktiver Datensatz): reiner Text. Bearbeiten (Draft, IsActiveEntity=false):
+		Eingabefelder mit Minutenschritt 5, ohne Sekunden.
+		Dauer: Minuten. Die Berechnung (Ende <-> Dauer) steuert das Skript AppointmentSet.rhai
+		beim Patch. Das Nachladen der Werte uebernimmt TimeSectionController.controller.js.
+	-->
+	<f:Form editable="true">
+		<f:layout>
+			<f:ResponsiveGridLayout labelSpanL="3" labelSpanM="3" columnsL="1" columnsM="1" />
+		</f:layout>
+		<f:formContainers>
+			<f:FormContainer>
+				<f:formElements>
+					<f:FormElement label="Beginn">
+						<f:fields>
+								<Text
+									visible="{= ${IsActiveEntity} }"
+									text="{path: 'starts_at', type: 'sap.ui.model.odata.type.DateTimeOffset', constraints: {V4: true, precision: 7}, formatOptions: {pattern: 'dd.MM.yyyy HH:mm'}}" />
+								<DateTimePicker
+									visible="{= !${IsActiveEntity} }"
+									value="{path: 'starts_at', type: 'sap.ui.model.odata.type.DateTimeOffset', constraints: {V4: true, precision: 7}, formatOptions: {pattern: 'dd.MM.yyyy HH:mm'}}"
+									displayFormat="dd.MM.yyyy HH:mm"
+									minutesStep="5" />
+						</f:fields>
+					</f:FormElement>
+
+					<f:FormElement label="Ende">
+						<f:fields>
+								<Text
+									visible="{= ${IsActiveEntity} }"
+									text="{path: 'ends_at', type: 'sap.ui.model.odata.type.DateTimeOffset', constraints: {V4: true, precision: 7}, formatOptions: {pattern: 'dd.MM.yyyy HH:mm'}}" />
+								<DateTimePicker
+									visible="{= !${IsActiveEntity} }"
+									value="{path: 'ends_at', type: 'sap.ui.model.odata.type.DateTimeOffset', constraints: {V4: true, precision: 7}, formatOptions: {pattern: 'dd.MM.yyyy HH:mm'}}"
+									displayFormat="dd.MM.yyyy HH:mm"
+									minutesStep="5" />
+						</f:fields>
+					</f:FormElement>
+
+					<f:FormElement label="Dauer">
+						<f:fields>
+							<Text
+								visible="{= ${IsActiveEntity} }"
+								text="{path: 'duration_minutes', targetType: 'any', formatter: 'fiori.ext.Format.minutes'}" />
+							<Input
+								visible="{= !${IsActiveEntity} }"
+								placeholder="z. B. 2:30 oder 2h oder 30 min"
+								value="{path: 'duration_minutes', mode: 'OneWay', targetType: 'any', formatter: 'fiori.ext.Format.hm'}" />
+						</f:fields>
+					</f:FormElement>
+				</f:formElements>
+			</f:FormContainer>
+		</f:formContainers>
+	</f:Form>
+</core:FragmentDefinition>

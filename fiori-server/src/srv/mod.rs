@@ -473,16 +473,18 @@ impl Annotations {
                 for t in side_effects {
                     targets = targets.add_property_path(t);
                 }
-                main_annotations.annotations.push(
-                    Annotation::new("Common.SideEffects").record(
-                        Record::new("Common.SideEffectsType")
-                            .add(
-                                PropertyValue::new("SourceProperties")
-                                    .collection(Collection::new().add_property_path(f.name())),
-                            )
-                            .add(PropertyValue::new("TargetProperties").collection(targets)),
-                    ),
+                // Je Quellfeld ein eigener Qualifier: ohne ihn ueberschreiben sich die
+                // Eintraege gleichen Terms, und FE kennt nur den letzten.
+                let mut ann = Annotation::new("Common.SideEffects").record(
+                    Record::new("Common.SideEffectsType")
+                        .add(
+                            PropertyValue::new("SourceProperties")
+                                .collection(Collection::new().add_property_path(f.name())),
+                        )
+                        .add(PropertyValue::new("TargetProperties").collection(targets)),
                 );
+                ann.qualifier = Some(f.name().to_string());
+                main_annotations.annotations.push(ann);
             }
         }
 

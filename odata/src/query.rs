@@ -547,6 +547,9 @@ impl Parser {
                     Ok(Expr::Path(segments))
                 }
             }
+            // Leerer Wert am Ende (z. B. `ID eq `, von Clients bei fehlendem Schluessel gesendet):
+            // wie `null` behandeln statt mit 400 abzulehnen.
+            None => Ok(Expr::Null),
             other => Err(self.error(&format!("Unerwartetes Token: {other:?}"))),
         }
     }
@@ -649,5 +652,11 @@ mod datetime_literal_tests {
     fn plain_date_and_negative_numbers_still_work() {
         assert!(parse_filter("due eq 2026-03-21").is_ok());
         assert!(parse_filter("Amount gt -3").is_ok());
+    }
+
+    #[test]
+    fn empty_value_at_end_is_null() {
+        let expr = parse_filter("ID eq ").expect("leerer Wert parst");
+        assert!(format!("{expr:?}").contains("Null"), "{expr:?}");
     }
 }

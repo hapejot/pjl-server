@@ -20,6 +20,7 @@
 //! Filter schrittweise ergaenzen: `ctx.query.filter = and(ctx.query.filter, ...)`.
 //! Weitere Funktion: `now_iso()`.
 
+use chrono::TimeZone;
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -137,8 +138,21 @@ impl ScriptHooks {
 
     /// Schreiboperation vor dem Store (`before_<op>`).
     pub fn before(&self, set: &str, op: &str, payload: &mut Value) -> Result<(), ScriptError> {
+        self.before_write(set, op, payload, None)
+    }
+
+    /// Wie [`ScriptHooks::before`], zusaetzlich mit dem aktuellen Datensatz (`ctx.current`),
+    /// damit ein Patch fehlende Gegenwerte (z. B. den Startzeitpunkt) ergaenzen kann.
+    pub fn before_write(
+        &self,
+        set: &str,
+        op: &str,
+        payload: &mut Value,
+        current: Option<&Value>,
+    ) -> Result<(), ScriptError> {
         info!("{} before {}: {:?}", set, op, payload);
-        let ctx = json!({"set": set, "op": op, "kind": "write", "key": null, "payload": payload});
+        let ctx = json!({"set": set, "op": op, "kind": "write", "key": null,
+                         "payload": payload, "current": current.cloned().unwrap_or(Value::Null)});
         if let Some(res) = self.call(set, &format!("before_{op}"), ctx)? {
             take(&res, "payload", payload);
             info!("-> result payload: {:?}", payload)
@@ -403,6 +417,14 @@ fn to_dyn(v: Value) -> Dynamic {
     rhai::serde::to_dynamic(&v).unwrap_or(Dynamic::UNIT)
 }
 
+fn rhai_err(msg: &str) -> Box<rhai::EvalAltResult> {
+    msg.to_string().into()
+}
+
+fn parse_ts(ts: &str) -> Result<chrono::DateTime<chrono::FixedOffset>, Box<rhai::EvalAltResult>> {
+    chrono::DateTime::parse_from_rfc3339(ts).map_err(|e| rhai_err(&format!("Ungueltiger Zeitpunkt '{ts}': {e}")))
+}
+
 fn register_helpers(engine: &mut Engine) {
     engine.register_fn("prop", |name: &str| {
         let parts: Vec<&str> = name.split('/').collect();
@@ -431,6 +453,40 @@ fn register_helpers(engine: &mut Engine) {
     engine.register_fn("now_iso", || {
         chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
     });
+    // Datumsfunktionen fuer Skripte. Zeitpunkte sind ISO-8601-Texte mit Offset
+    // (z. B. `2026-10-31T09:00:00+01:00`); Ergebnisse behalten den Offset der Eingabe.
+    engine.register_fn("ts_add_minutes", |ts: &str, minutes: i64| -> Result<String, Box<rhai::EvalAltResult>> {
+        let t = parse_ts(ts)?;
+        let d = chrono::Duration::try_minutes(minutes).ok_or_else(|| rhai_err("ts_add_minutes: Dauer ungueltig"))?;
+        let r = t.checked_add_signed(d).ok_or_else(|| rhai_err("ts_add_minutes: Ueberlauf"))?;
+        Ok(r.to_rfc3339_opts(chrono::SecondsFormat::Secs, false))
+    });
+    // Differenz `b - a` in ganzen Minuten.
+    engine.register_fn("ts_diff_minutes", |a: &str, b: &str| -> Result<i64, Box<rhai::EvalAltResult>> {
+        let (a, b) = (parse_ts(a)?, parse_ts(b)?);
+        Ok((b - a).num_minutes())
+    });
+    // Rundet auf das naechste Vielfache von `step` Minuten (Sekunden werden auf 0 gesetzt).
+    engine.register_fn("ts_round_minutes", |ts: &str, step: i64| -> Result<String, Box<rhai::EvalAltResult>> {
+        if step <= 0 {
+            return Err(rhai_err("ts_round_minutes: Schrittweite muss > 0 sein"));
+        }
+        // Rundung auf der Wanduhrzeit (lokaler Zeitpunkt), Sekunden und Bruchteile werden verworfen.
+        let t = parse_ts(ts)?;
+        let local_secs = t.naive_local().and_utc().timestamp();
+        let step_s = step * 60;
+        let rounded = (local_secs + step_s / 2).div_euclid(step_s) * step_s;
+        let naive = chrono::DateTime::from_timestamp(rounded, 0)
+            .ok_or_else(|| rhai_err("ts_round_minutes: Ueberlauf"))?
+            .naive_utc();
+        let r = t
+            .offset()
+            .from_local_datetime(&naive)
+            .earliest()
+            .ok_or_else(|| rhai_err("ts_round_minutes: Zeitpunkt nicht eindeutig"))?;
+        Ok(r.to_rfc3339_opts(chrono::SecondsFormat::Secs, false))
+    });
+    engine.register_fn("ts_valid", |ts: &str| parse_ts(ts).is_ok());
 }
 
 #[cfg(test)]

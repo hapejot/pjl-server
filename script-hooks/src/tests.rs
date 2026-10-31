@@ -207,3 +207,92 @@ fn new_version_is_active_after_reload() {
     hooks.before("Item", "create", &mut p).unwrap();
     assert_eq!(p, json!({"v": 2}));
 }
+
+#[test]
+fn date_helpers_round_add_and_diff() {
+    let d = dir_with(&[(
+        "Appointment.rhai",
+        r#"
+        fn before_patch(ctx) {
+            ctx.payload.a = ts_round_minutes("2026-10-31T09:03:00+01:00", 5);
+            ctx.payload.b = ts_round_minutes("2026-10-31T09:02:59+01:00", 5);
+            ctx.payload.c = ts_add_minutes("2026-10-31T23:50:00+01:00", 135);
+            ctx.payload.d = ts_diff_minutes("2026-10-31T09:00:00+01:00", "2026-10-31T10:30:00+01:00");
+            ctx
+        }
+        "#,
+    )]);
+    let hooks = ScriptHooks::load(d.path()).unwrap();
+    let mut payload = json!({});
+    hooks.before_write("Appointment", "patch", &mut payload, None).unwrap();
+    assert_eq!(payload["a"], "2026-10-31T09:05:00+01:00");
+    assert_eq!(payload["b"], "2026-10-31T09:05:00+01:00");
+    assert_eq!(payload["c"], "2026-11-01T02:05:00+01:00");
+    assert_eq!(payload["d"], 90);
+}
+
+#[test]
+fn invalid_timestamp_is_script_error() {
+    let d = dir_with(&[(
+        "Appointment.rhai",
+        r#"fn before_patch(ctx) { ctx.payload.a = ts_add_minutes("gestern", 5); ctx }"#,
+    )]);
+    let hooks = ScriptHooks::load(d.path()).unwrap();
+    let mut payload = json!({});
+    assert!(hooks.before_write("Appointment", "patch", &mut payload, None).is_err());
+}
+
+#[test]
+fn appointment_rules_derive_end_duration_and_start() {
+    let script = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../workbench/scripts/AppointmentSet.rhai"),
+    )
+    .unwrap();
+    let d = dir_with(&[("AppointmentSet.rhai", &script)]);
+    let hooks = ScriptHooks::load(d.path()).unwrap();
+    let cur = json!({
+        "starts_at": "2026-10-31T09:00:00+01:00",
+        "ends_at": "2026-10-31T10:00:00+01:00",
+        "duration_minutes": 60
+    });
+
+    // Regel 1: Ende eingegeben (ungerundet), Dauer abgeleitet.
+    let mut p = json!({"ends_at": "2026-10-31T11:02:00+01:00"});
+    hooks.before_write("AppointmentSet", "patch", &mut p, Some(&cur)).unwrap();
+    assert_eq!(p, json!({"ends_at": "2026-10-31T11:00:00+01:00", "duration_minutes": 120}));
+
+    // Regel 2: Dauer eingegeben, Ende berechnet.
+    let mut p = json!({"duration_minutes": 97});
+    hooks.before_write("AppointmentSet", "patch", &mut p, Some(&cur)).unwrap();
+    assert_eq!(p, json!({"duration_minutes": 95, "ends_at": "2026-10-31T10:35:00+01:00"}));
+
+    // Regel 3: nur Beginn, Dauer aus dem Bestand.
+    let mut p = json!({"starts_at": "2026-10-31T14:03:00+01:00"});
+    hooks.before_write("AppointmentSet", "patch", &mut p, Some(&cur)).unwrap();
+    assert_eq!(
+        p,
+        json!({"starts_at": "2026-10-31T14:05:00+01:00", "duration_minutes": 60, "ends_at": "2026-10-31T15:05:00+01:00"})
+    );
+
+    // Ende vor Beginn wird abgelehnt.
+    let mut p = json!({"ends_at": "2026-10-31T08:00:00+01:00"});
+    assert!(hooks.before_write("AppointmentSet", "patch", &mut p, Some(&cur)).is_err());
+}
+
+#[test]
+fn fe_style_utc_millis_end_change() {
+    let script = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../workbench/scripts/AppointmentSet.rhai"),
+    )
+    .unwrap();
+    let d = dir_with(&[("AppointmentSet.rhai", &script)]);
+    let hooks = ScriptHooks::load(d.path()).unwrap();
+    let cur = json!({
+        "starts_at": "2026-10-31T08:00:00.000Z",
+        "ends_at": "2026-10-31T09:00:00.000Z",
+        "duration_minutes": 60
+    });
+    let mut p = json!({"ends_at": "2026-10-31T10:30:00.000Z"});
+    hooks.before_write("AppointmentSet", "patch", &mut p, Some(&cur)).unwrap();
+    assert_eq!(p, json!({"ends_at": "2026-10-31T10:30:00+00:00", "duration_minutes": 150}));
+}

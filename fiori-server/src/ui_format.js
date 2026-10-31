@@ -36,6 +36,22 @@ sap.ui.define(["sap/base/util/ObjectPath", "sap/ui/core/format/DateFormat"], fun
             var sec = s % 60;
             return h > 0 ? h + ":" + pad(m) + ":" + pad(sec) : m + ":" + pad(sec);
         },
+        // Minuten als h:mm, fuer das Eingabefeld der Dauer (leer, wenn keine Dauer).
+        hm: function (v) {
+            var n = num(v);
+            if (n === null || isNaN(n)) { return ""; }
+            var m = Math.round(n);
+            return Math.floor(m / 60) + ":" + pad(m % 60);
+        },
+        minutes: function (v) {
+            var n = num(v);
+            if (n === null || isNaN(n)) { return ""; }
+            var m = Math.round(n);
+            var h = Math.floor(m / 60);
+            var r = m % 60;
+            if (h === 0) { return r + " min"; }
+            return h + " h" + (r > 0 ? " " + r + " min" : "");
+        },
         date: function (v) {
             if (!v) { return ""; }
             var d = new Date(v);

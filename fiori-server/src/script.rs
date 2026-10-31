@@ -56,6 +56,19 @@ impl Hook for ScriptHook {
         self.0.before(set_name, op_name(op), value).map_err(script_err)
     }
 
+    async fn before_patch(
+        &self,
+        store: &Extender,
+        set_name: &str,
+        key: &EntityKey,
+        patch: &mut Value,
+    ) -> Result<(), HookError> {
+        let current = store.current_value(set_name, key).await?;
+        self.0
+            .before_write(set_name, op_name(Operation::Patch), patch, Some(&current))
+            .map_err(script_err)
+    }
+
     async fn after(
         &self,
         _store: &Extender,

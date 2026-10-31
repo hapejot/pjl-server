@@ -135,6 +135,15 @@ pub struct Extender {
 }
 
 impl Extender {
+    /// Aktueller Datensatz als JSON (fuer Hooks, die vor einem Patch den Bestand brauchen).
+    pub async fn current_value(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
+        let record = self
+            .inner
+            .read_entity(set_name, key, &odata::query::ODataQuery::new())
+            .await?;
+        serde_json::to_value(&record).map_err(|e| StoreError::Serialize(e.to_string()))
+    }
+
     /// Erzeugt einen neuen [`Extender`], der einen bestehenden Store mit dem
     /// angegebenen [`Hook`] verdrahtet.
     pub fn new(

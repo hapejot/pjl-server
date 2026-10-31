@@ -45,6 +45,7 @@ services:
     volumes:
       - ./:/app/model
 
+
   runtime:
     build:
       context: ..
@@ -56,13 +57,16 @@ services:
         condition: service_healthy
     environment:
       DDIC: /app/model/ddic.json
+      SCRIPTS_DIR: /app/model/scripts
       STORE_PG_URL: postgres://workbench:${WB_DB_PASSWORD}@db:5432/workbench
       PORT: "8080"
       RUST_LOG: info
     ports:
       - "8091:8080"
+      - "3270:3270"
     volumes:
       - ./ddic.json:/app/model/ddic.json:ro
+      - ./scripts:/app/model/scripts:ro
 
 volumes:
   workbench-db:

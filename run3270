@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+size=$(stty size|while read r c; do echo "${c}x${r}";done)
+c3270 -oversize $size localhost:3270

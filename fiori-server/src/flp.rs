@@ -1,16 +1,16 @@
 use std::collections::HashMap;
 
 use axum::{
+    Json, Router,
     extract::{Path, State},
     http::header,
     response::{Html, IntoResponse},
     routing::get,
-    Json, Router,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use spec::EntitySpec;
 use spec::app::App;
 use spec::data_dictionary::DataDictionary;
-use spec::EntitySpec;
 use tracing::{debug, info};
 
 use crate::AppState;
@@ -257,7 +257,12 @@ async fn init() -> impl IntoResponse {
 fn ui5_module_list(state: &AppState) -> String {
     crate::extension::ui5_modules(&state.extensions)
         .iter()
-        .map(|m| format!(", {}", serde_json::to_string(m).expect("Modulname ist ein String")))
+        .map(|m| {
+            format!(
+                ", {}",
+                serde_json::to_string(m).expect("Modulname ist ein String")
+            )
+        })
         .collect()
 }
 
@@ -514,7 +519,6 @@ pub async fn app_manifest_handler(
         }
     }
 
-
     // Detail-Einstieg: keine Liste, die Object Page ist die einzige Spalte.
     if detail {
         routes.retain(|r| r["name"] != json!(list_target));
@@ -678,8 +682,6 @@ fn list_control_configuration_with_extensions(
 fn list_control_configuration(_state: &AppState, _app_id: &str) -> Value {
     json!({})
 }
-
-
 
 pub async fn app_handler(
     Path((app, path)): Path<(String, String)>,

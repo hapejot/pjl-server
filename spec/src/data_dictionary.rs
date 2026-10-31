@@ -14,6 +14,12 @@ pub struct DataDictionary {
     apps: Vec<App>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     value_lists: Vec<ValueList>,
+    /// Komponenten-Definitionen (z. B. Zeitraum).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    components: Vec<crate::component::ComponentSpec>,
+    /// Verwendungen der Komponenten in Entitaeten. Werden beim Laden expandiert.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    component_uses: Vec<crate::component::ComponentUse>,
     #[serde(skip)]
     active: HashMap<String, EntitySpec>,
     /// Atome mit Festwertliste, die `apply_value_list_lookups` in Lookups umgewandelt hat.
@@ -182,6 +188,8 @@ impl DataDictionary {
             relationships: vec![rel, r2, r3, r4, r5, r6, r7, r8, r9],
             apps: vec![a1, a2, a3, a4, a5, a6],
             value_lists: Vec::new(),
+            components: Vec::new(),
+            component_uses: Vec::new(),
             active: HashMap::new(),
             converted_value_fields: Vec::new(),
         }
@@ -198,6 +206,8 @@ impl DataDictionary {
             relationships: Vec::new(),
             apps: Vec::new(),
             value_lists: Vec::new(),
+            components: Vec::new(),
+            component_uses: Vec::new(),
             active: HashMap::new(),
             converted_value_fields: Vec::new(),
         }
@@ -209,6 +219,21 @@ impl DataDictionary {
 
     pub fn packages(&self) -> impl Iterator<Item = &Package> {
         self.packages.iter()
+    }
+
+    pub fn components(&self) -> &[crate::component::ComponentSpec] {
+        &self.components
+    }
+
+    pub fn component_uses(&self) -> &[crate::component::ComponentUse] {
+        &self.component_uses
+    }
+
+    /// Erzeugt aus den Komponenten-Verwendungen Felder, Nebenwirkungen und ausgeblendete
+    /// Felder. Muss vor [`DataDictionary::apply_value_list_lookups`] und vor dem Ableiten
+    /// des Schemas laufen. Idempotent.
+    pub fn expand_components(&mut self) -> Result<(), String> {
+        crate::component::expand(&mut self.entities, &self.components, &self.component_uses)
     }
 
     pub fn value_lists(&self) -> &[ValueList] {

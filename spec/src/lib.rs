@@ -5,6 +5,7 @@ pub mod entity_spec;
 pub mod relationship;
 
 pub mod data_dictionary;
+pub mod component;
 
 pub mod package;
 
@@ -14,3 +15,4 @@ pub mod system_user;
 pub use entity_spec::*;
 pub use value_list::{ValueEntry, ValueList};
 pub use relationship::*;
+pub use component::{ComponentKind, ComponentSpec, ComponentUse, TimeUnit};

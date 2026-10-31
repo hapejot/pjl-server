@@ -4,7 +4,9 @@ use std::fs;
 fn dir_with(files: &[(&str, &str)]) -> tempdir::Dir {
     let d = tempdir::Dir::new();
     for (name, body) in files {
-        fs::write(d.path().join(name), body).unwrap();
+        let path = d.path().join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
     }
     d
 }
@@ -242,14 +244,30 @@ fn invalid_timestamp_is_script_error() {
     assert!(hooks.before_write("Appointment", "patch", &mut payload, None).is_err());
 }
 
-#[test]
-fn appointment_rules_derive_end_duration_and_start() {
+fn time_range_cfg() -> Value {
+    json!({
+        "instance": "termin",
+        "fields": {"start": "starts_at", "end": "ends_at", "duration": "duration_minutes"},
+        "step_minutes": 5
+    })
+}
+
+fn appointment_hooks() -> (tempdir::Dir, ScriptHooks) {
     let script = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../workbench/scripts/AppointmentSet.rhai"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../workbench/scripts/components/TimeRange.rhai"),
     )
     .unwrap();
-    let d = dir_with(&[("AppointmentSet.rhai", &script)]);
+    let d = dir_with(&[("components/TimeRange.rhai", &script)]);
     let hooks = ScriptHooks::load(d.path()).unwrap();
+    hooks
+        .bind_component("AppointmentSet", "components/TimeRange", time_range_cfg())
+        .unwrap();
+    (d, hooks)
+}
+
+#[test]
+fn time_range_rules_derive_end_duration_and_start() {
+    let (_d, hooks) = appointment_hooks();
     let cur = json!({
         "starts_at": "2026-10-31T09:00:00+01:00",
         "ends_at": "2026-10-31T10:00:00+01:00",
@@ -280,13 +298,41 @@ fn appointment_rules_derive_end_duration_and_start() {
 }
 
 #[test]
-fn fe_style_utc_millis_end_change() {
+fn time_range_uses_configured_fields_and_step() {
     let script = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../workbench/scripts/AppointmentSet.rhai"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../workbench/scripts/components/TimeRange.rhai"),
     )
     .unwrap();
-    let d = dir_with(&[("AppointmentSet.rhai", &script)]);
+    let d = dir_with(&[("components/TimeRange.rhai", &script)]);
     let hooks = ScriptHooks::load(d.path()).unwrap();
+    // Zweite Verwendung mit anderen Feldern und 15-Minuten-Raster.
+    hooks
+        .bind_component(
+            "AppointmentSet",
+            "components/TimeRange",
+            json!({"instance": "ist", "step_minutes": 15,
+                   "fields": {"start": "actual_start", "end": "actual_end", "duration": "actual_minutes"}}),
+        )
+        .unwrap();
+    let mut p = json!({"actual_start": "2026-10-31T09:07:00+01:00", "actual_end": "2026-10-31T10:20:00+01:00"});
+    hooks.before_write("AppointmentSet", "patch", &mut p, None).unwrap();
+    assert_eq!(p["actual_start"], "2026-10-31T09:00:00+01:00");
+    assert_eq!(p["actual_end"], "2026-10-31T10:15:00+01:00");
+    assert_eq!(p["actual_minutes"], 75);
+}
+
+#[test]
+fn binding_to_missing_component_is_error() {
+    let d = dir_with(&[("AppointmentSet.rhai", "fn before_patch(ctx) { ctx }")]);
+    let hooks = ScriptHooks::load(d.path()).unwrap();
+    assert!(hooks
+        .bind_component("AppointmentSet", "components/Nope", json!({}))
+        .is_err());
+}
+
+#[test]
+fn fe_style_utc_millis_end_change() {
+    let (_d, hooks) = appointment_hooks();
     let cur = json!({
         "starts_at": "2026-10-31T08:00:00.000Z",
         "ends_at": "2026-10-31T09:00:00.000Z",

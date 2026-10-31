@@ -88,15 +88,7 @@
         "name": "workbench"
       },
       "subtitle": "Terminplanung",
-      "title": "Termine",
-      "ui": {
-        "controller_extensions": [
-          {
-            "target": "sap.fe.templates.ObjectPage.ObjectPageController",
-            "controller": "TimeSectionController"
-          }
-        ]
-      }
+      "title": "Termine"
     }
   ],
   "entities": [
@@ -505,39 +497,6 @@
         },
         {
           "Atom": {
-            "edm_type": "Edm.DateTimeOffset",
-            "label": "Beginn",
-            "name": "starts_at",
-            "side_effects": [
-              "ends_at",
-              "duration_minutes"
-            ]
-          }
-        },
-        {
-          "Atom": {
-            "edm_type": "Edm.DateTimeOffset",
-            "label": "Ende",
-            "name": "ends_at",
-            "side_effects": [
-              "starts_at",
-              "duration_minutes"
-            ]
-          }
-        },
-        {
-          "Atom": {
-            "edm_type": "Edm.Int32",
-            "label": "Dauer (Minuten)",
-            "name": "duration_minutes",
-            "side_effects": [
-              "starts_at",
-              "ends_at"
-            ]
-          }
-        },
-        {
-          "Atom": {
             "edm_type": "Edm.String",
             "label": "Ort",
             "max_length": 255,
@@ -556,19 +515,7 @@
       "name": "Appointment",
       "package": "workbench",
       "type_name": "Termin",
-      "type_name_plural": "Termine",
-      "ui": {
-        "hidden_fields": ["starts_at", "ends_at", "duration_minutes"],
-        "sections": [
-          {
-            "key": "Zeitraum",
-            "title": "Zeitraum",
-            "fragment": "TimeSection",
-            "anchor": "GeneralSection",
-            "placement": "After"
-          }
-        ]
-      }
+      "type_name_plural": "Termine"
     },
     {
       "name": "ProjectMember",
@@ -588,6 +535,25 @@
   "packages": [
     {
       "name": "workbench"
+    }
+  ],
+  "components": [
+    {
+      "name": "TimeRange",
+      "kind": "time_range",
+      "script": "components/TimeRange",
+      "unit": "minutes",
+      "step_minutes": 5
+    }
+  ],
+  "component_uses": [
+    {
+      "entity": "Appointment",
+      "component": "TimeRange",
+      "instance": "termin",
+      "fields": { "start": "starts_at", "end": "ends_at", "duration": "duration_minutes" },
+      "labels": { "start": "Beginn", "end": "Ende", "duration": "Dauer" },
+      "section_title": "Zeitraum"
     }
   ],
   "relationships": [

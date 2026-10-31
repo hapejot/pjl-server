@@ -28,6 +28,9 @@ use crate::extension::Extension;
 use crate::AppState;
 
 const FORMAT_JS: &str = include_str!("ui_format.js");
+const COMPONENTS_JS: &str = include_str!("ui_components_controller.js");
+/// Controller-Erweiterung fuer alle Komponenten-Verwendungen (Modul `fiori.ext.ComponentsController`).
+const COMPONENTS_CONTROLLER: &str = "fiori.ext.ComponentsController";
 const XML: &str = "application/xml; charset=utf-8";
 const JS: &str = "application/javascript; charset=utf-8";
 
@@ -39,7 +42,21 @@ struct FormattedField {
     format: DisplayFormat,
 }
 
+/// Abschnitt der Object Page aus einer Komponenten-Verwendung.
+#[derive(Clone)]
+struct ComponentSection {
+    /// Fragmentname ohne `.fragment.xml` (`Component__<Entitaet>__<Instanz>`).
+    fragment: String,
+    /// Schluessel des Abschnitts (`Component_<Instanz>`).
+    key: String,
+    title: String,
+    /// Fertiges Fragment-XML.
+    xml: String,
+}
+
 pub struct UiExtension {
+    /// Entitaet (Hauptentitaet) -> Abschnitte aus Komponenten-Verwendungen.
+    components: BTreeMap<String, Vec<ComponentSection>>,
     /// Entitaet -> formatierte Felder.
     formatted: BTreeMap<String, Vec<FormattedField>>,
     /// Entitaet -> ausgeblendete Felder.
@@ -104,7 +121,24 @@ impl UiExtension {
                 }
             }
         }
+        let mut components: BTreeMap<String, Vec<ComponentSection>> = BTreeMap::new();
+        for usage in ddic.component_uses() {
+            let Some(section_title) = usage.section_title.clone() else {
+                continue;
+            };
+            let Some(component) = ddic.components().iter().find(|c| c.name == usage.component) else {
+                continue;
+            };
+            let fragment = format!("Component__{}__{}", usage.entity, usage.instance);
+            components.entry(usage.entity.clone()).or_default().push(ComponentSection {
+                key: format!("Component_{}", usage.instance),
+                title: section_title,
+                xml: component_fragment(component, usage),
+                fragment,
+            });
+        }
         Self {
+            components,
             formatted,
             hidden,
             entity_ui,
@@ -150,6 +184,52 @@ fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
+/// Fragment einer Komponenten-Verwendung: Beginn/Ende als Text (Anzeige) bzw. Auswahl
+/// (Bearbeiten), Dauer als Text bzw. Eingabefeld. Konfiguration fuer den Controller im
+/// customData `timeRange`. Feldnamen sind geprueft (nur Buchstaben, Ziffern, `_`).
+fn component_fragment(
+    component: &spec::component::ComponentSpec,
+    usage: &spec::component::ComponentUse,
+) -> String {
+    use spec::component::{default_label, effective_step};
+    let step = effective_step(component, usage);
+    let kind = component.kind;
+    let field = |role: &str| usage.fields.get(role).cloned().unwrap_or_default();
+    let label = |role: &str| {
+        xml_escape(
+            usage
+                .labels
+                .get(role)
+                .map(String::as_str)
+                .unwrap_or(default_label(kind, role)),
+        )
+    };
+    let config = format!(
+        "instance={};start={};end={};duration={};step={}",
+        usage.instance,
+        field("start"),
+        field("end"),
+        field("duration"),
+        step
+    );
+    let dt = |f: &str| {
+        format!(
+            "{{path: '{f}', type: 'sap.ui.model.odata.type.DateTimeOffset', constraints: {{V4: true, precision: 7}}, formatOptions: {{pattern: 'dd.MM.yyyy HH:mm'}}}}"
+        )
+    };
+    format!(
+        r#"<core:FragmentDefinition xmlns:core="sap.ui.core" xmlns="sap.m" xmlns:f="sap.ui.layout.form"><f:Form editable="true"><f:customData><core:CustomData key="timeRange" value="{config}"/></f:customData><f:layout><f:ResponsiveGridLayout labelSpanL="3" labelSpanM="3" columnsL="1" columnsM="1"/></f:layout><f:formContainers><f:FormContainer><f:formElements><f:FormElement label="{start_label}"><f:fields><Text visible="{{= ${{IsActiveEntity}} }}" text="{dt}"/><DateTimePicker visible="{{= !${{IsActiveEntity}} }}" value="{dt}" displayFormat="dd.MM.yyyy HH:mm" minutesStep="{step}"/></f:fields></f:FormElement><f:FormElement label="{end_label}"><f:fields><Text visible="{{= ${{IsActiveEntity}} }}" text="{dt_end}"/><DateTimePicker visible="{{= !${{IsActiveEntity}} }}" value="{dt_end}" displayFormat="dd.MM.yyyy HH:mm" minutesStep="{step}"/></f:fields></f:FormElement><f:FormElement label="{duration_label}"><f:fields><Text visible="{{= ${{IsActiveEntity}} }}" text="{{path: '{dur}', targetType: 'any', formatter: 'fiori.ext.Format.minutes'}}"/><Input visible="{{= !${{IsActiveEntity}} }}" placeholder="z. B. 2:30 oder 2h oder 30 min" value="{{path: '{dur}', mode: 'OneWay', targetType: 'any', formatter: 'fiori.ext.Format.hm'}}"/></f:fields></f:FormElement></f:formElements></f:FormContainer></f:formContainers></f:Form></core:FragmentDefinition>"#,
+        config = xml_escape(&config),
+        start_label = label("start"),
+        end_label = label("end"),
+        duration_label = label("duration"),
+        dt = dt(&field("start")),
+        dt_end = dt(&field("end")),
+        dur = field("duration"),
+        step = step,
+    )
+}
+
 /// Fragment fuer ein einzelnes formatiertes Feld (Text-Bindung mit Formatter).
 fn field_fragment(field: &str, format: DisplayFormat) -> String {
     format!(
@@ -178,13 +258,25 @@ fn section_fragment(fields: &[FormattedField]) -> String {
 impl Extension for UiExtension {
     fn routes(&self, _state: AppState) -> Router {
         let formatted = self.formatted.clone();
+        let components = self.components.clone();
         let fragments = move |Path(file): Path<String>| {
             let formatted = formatted.clone();
+            let components = components.clone();
             async move {
                 let name = match file.strip_suffix(".fragment.xml") {
                     Some(n) if is_safe_name(n) => n.to_string(),
                     _ => return (StatusCode::NOT_FOUND, "").into_response(),
                 };
+                if name.starts_with("Component__") {
+                    let found = components
+                        .values()
+                        .flatten()
+                        .find(|c| c.fragment == name);
+                    return match found {
+                        Some(c) => ([(header::CONTENT_TYPE, XML)], c.xml.clone()).into_response(),
+                        None => (StatusCode::NOT_FOUND, "").into_response(),
+                    };
+                }
                 if let Some(entity) = name.strip_prefix("Formatted__") {
                     return match formatted.get(entity) {
                         Some(fields) => ([(header::CONTENT_TYPE, XML)], section_fragment(fields)).into_response(),
@@ -201,6 +293,10 @@ impl Extension for UiExtension {
         };
         let mut router = Router::new()
             .route("/ext/fiori/Format.js", get(|| async { ([(header::CONTENT_TYPE, JS)], FORMAT_JS) }))
+            .route(
+                "/ext/fiori/ComponentsController.controller.js",
+                get(|| async { ([(header::CONTENT_TYPE, JS)], COMPONENTS_JS) }),
+            )
             .route("/ext/fiori/fragment/{file}", get(fragments));
         for (app, dir) in &self.assets {
             router = router.nest_service(&format!("/ext/{app}"), ServeDir::new(dir));
@@ -223,7 +319,12 @@ impl Extension for UiExtension {
     }
 
     fn controller_extensions(&self) -> Vec<(String, String)> {
-        self.controller_exts.clone()
+        let mut out = self.controller_exts.clone();
+        let target = "sap.fe.templates.ObjectPage.ObjectPageController";
+        if !self.components.is_empty() && !out.iter().any(|(t, _)| t == target) {
+            out.push((target.to_string(), COMPONENTS_CONTROLLER.to_string()));
+        }
+        out
     }
 
     /// Ausgeblendet im Formular: die Felder aus `ui.hidden_fields` und die Rohfelder der
@@ -320,6 +421,16 @@ impl Extension for UiExtension {
                 );
             }
         }
+        for sec in self.components.get(entity).into_iter().flatten() {
+            sections.insert(
+                sec.key.clone(),
+                json!({
+                    "title": sec.title,
+                    "template": format!("fiori.ext.fragment.{}", sec.fragment),
+                    "position": { "placement": "After", "anchor": "GeneralSection" }
+                }),
+            );
+        }
         if let Some(ui) = self.entity_ui.get(entity) {
             for facet in &ui.hide_facets {
                 sections.insert(facet.clone(), json!({ "visible": false }));
@@ -393,6 +504,64 @@ mod tests {
         assert!(hidden.contains(&"file_size".to_string()));
         assert!(!hidden.contains(&"title".to_string()));
         assert!(ext.hidden_fields("Other").is_empty());
+    }
+
+    fn workbench_ddic() -> DataDictionary {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../workbench/ddic.json");
+        let text = std::fs::read_to_string(path).unwrap();
+        let mut ddic: DataDictionary = serde_json::from_str(&text).unwrap();
+        ddic.expand_components().unwrap();
+        ddic
+    }
+
+    #[test]
+    fn component_section_and_controller_are_generated() {
+        let ext = UiExtension::new(&workbench_ddic(), None);
+        let page = ext.object_page_content("Appointment").expect("Abschnitt");
+        let section = &page["body"]["sections"]["Component_termin"];
+        assert_eq!(section["title"], "Zeitraum");
+        assert_eq!(section["template"], "fiori.ext.fragment.Component__Appointment__termin");
+
+        let ctrl = ext.controller_extensions();
+        assert!(ctrl.iter().any(|(t, c)| t == "sap.fe.templates.ObjectPage.ObjectPageController"
+            && c == "fiori.ext.ComponentsController"));
+    }
+
+    #[test]
+    fn component_fragment_is_valid_xml_with_config_and_step() {
+        let ddic = workbench_ddic();
+        let usage = ddic.component_uses().iter().find(|u| u.instance == "termin").unwrap();
+        let component = ddic.components().iter().find(|c| c.name == usage.component).unwrap();
+        let xml = component_fragment(component, usage);
+        let doc = roxmltree_like_check(&xml);
+        assert!(doc, "kein gueltiges XML");
+        assert!(xml.contains("value=\"instance=termin;start=starts_at;end=ends_at;duration=duration_minutes;step=5\""));
+        assert!(xml.contains("minutesStep=\"5\""));
+        assert!(xml.contains("label=\"Beginn\""));
+        assert!(xml.contains("formatter: 'fiori.ext.Format.hm'"));
+    }
+
+    /// Prueft die Wohlgeformtheit ohne zusaetzliche Abhaengigkeit: Tags sind ausgeglichen.
+    fn roxmltree_like_check(xml: &str) -> bool {
+        let mut depth: i64 = 0;
+        let mut rest = xml;
+        while let Some(start) = rest.find('<') {
+            let Some(end) = rest[start..].find('>') else { return false };
+            let tag = &rest[start + 1..start + end];
+            rest = &rest[start + end + 1..];
+            if tag.starts_with('?') || tag.starts_with('!') {
+                continue;
+            }
+            if tag.starts_with('/') {
+                depth -= 1;
+            } else if !tag.ends_with('/') {
+                depth += 1;
+            }
+            if depth < 0 {
+                return false;
+            }
+        }
+        depth == 0
     }
 
     #[test]

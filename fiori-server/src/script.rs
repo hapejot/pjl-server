@@ -13,6 +13,39 @@ use crate::extension::Extension;
 use crate::hook::{Extender, Hook, HookError, Operation};
 use crate::term3270::section_view;
 
+/// Bindet die Komponenten-Verwendungen der DDIC an die Skripte: je Verwendung ein Aufruf
+/// des Komponenten-Skripts mit Feldzuordnung und Schrittweite. Fehlt ein Skript, bricht der
+/// Start ab.
+pub fn bind_components(
+    hooks: &ScriptHooks,
+    ddic: &spec::data_dictionary::DataDictionary,
+) -> anyhow::Result<()> {
+    let entities = ddic.entities();
+    for usage in ddic.component_uses() {
+        let component = ddic
+            .components()
+            .iter()
+            .find(|c| c.name == usage.component)
+            .ok_or_else(|| anyhow::anyhow!("verwendung {}: unbekannte Komponente", usage.instance))?;
+        let script = component.script.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("komponente '{}' hat kein Skript", component.name)
+        })?;
+        let entity = entities
+            .iter()
+            .find(|e| e.name == usage.entity)
+            .ok_or_else(|| anyhow::anyhow!("verwendung {}: unbekannte Entitaet", usage.instance))?;
+        let config = json!({
+            "instance": usage.instance,
+            "fields": usage.fields,
+            "step_minutes": spec::component::effective_step(component, usage),
+        });
+        hooks
+            .bind_component(&entity.setname(), script, config)
+            .map_err(|e| anyhow::anyhow!("verwendung {}.{}: {e}", usage.entity, usage.instance))?;
+    }
+    Ok(())
+}
+
 fn op_name(op: Operation) -> &'static str {
     match op {
         Operation::Create => "create",

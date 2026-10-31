@@ -45,14 +45,17 @@ pub async fn run_with(
         if config.designer { " (designer)" } else { "" }
     );
 
+    let base = load_dictionary(&config)?;
+
     // Skripte zuletzt registriert: ihre Hooks liegen aussen und sehen jeden Request zuerst.
     if let Some(dir) = &config.scripts_dir {
         let hooks = script_hooks::ScriptHooks::load(dir)
             .with_context(|| format!("cannot load scripts '{}'", dir.display()))?;
+        crate::script::bind_components(&hooks, &base)
+            .with_context(|| format!("components in '{}'", dir.display()))?;
         extensions.push(Arc::new(crate::script::ScriptExtension::new(hooks)));
     }
 
-    let base = load_dictionary(&config)?;
     // Generische UI-Erweiterung aus den `ui`-Bloecken der ddic.json (Formate, ausgeblendete
     // Felder, App-Assets). Wird nach den Skripten eingetragen, damit sie nicht ueberschrieben werden.
     extensions.push(Arc::new(crate::ui_ext::UiExtension::new(&base, config.ext_dir.clone())));
@@ -265,6 +268,10 @@ fn load_dictionary(config: &ServerConfig) -> anyhow::Result<DataDictionary> {
                 }
                 None => ddic,
             };
+            // Komponenten (z. B. Zeitraum) expandieren: Felder, Nebenwirkungen, Ausblendung.
+            ddic.expand_components().map_err(|e| {
+                anyhow::anyhow!("'{}': ungueltige Komponente: {e}", path.display())
+            })?;
             // Festwertlisten: Listen-Entitaeten erzeugen und Atome im Speicher zu Lookups
             // machen (vor dem Schema, damit die Spalten dort stehen).
             ddic.apply_value_list_lookups().map_err(|e| {

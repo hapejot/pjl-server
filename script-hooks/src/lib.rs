@@ -56,10 +56,22 @@ struct Script {
     functions: HashSet<String>,
 }
 
+/// Komponenten-Skript (`components/<name>.rhai`), das die DDIC an Entitaeten bindet.
+struct Binding {
+    /// Schluessel des Komponenten-Skripts, z. B. `components/TimeRange`.
+    script: String,
+    /// Konfiguration aus der DDIC (Feldzuordnung, Schrittweite, ...).
+    config: Value,
+}
+
 struct Inner {
     engine: Engine,
     dir: PathBuf,
     scripts: RwLock<HashMap<String, Arc<Script>>>,
+    /// Komponenten-Skripte, Schluessel `components/<name>`.
+    components: RwLock<HashMap<String, Arc<Script>>>,
+    /// Entitaetsset -> gebundene Komponenten (laufen vor dem Entitaetsskript).
+    bindings: RwLock<HashMap<String, Vec<Binding>>>,
     errors: RwLock<BTreeMap<String, String>>,
     reloads: AtomicU64,
 }
@@ -113,6 +125,34 @@ impl ScriptHooks {
         })
     }
 
+    /// Bindet ein Komponenten-Skript an eine Entitaetsmenge. Die Funktionen
+    /// `before_create`/`before_patch` des Komponenten-Skripts laufen vor dem
+    /// Entitaetsskript und bekommen `(ctx, config)`. Das Skript muss existieren.
+    pub fn bind_component(
+        &self,
+        set: &str,
+        script: &str,
+        config: Value,
+    ) -> Result<(), ScriptError> {
+        if !self.inner.components.read().unwrap().contains_key(script) {
+            return Err(ScriptError::Script(format!(
+                "komponenten-skript '{script}' fehlt im Verzeichnis '{}'",
+                self.inner.dir.display()
+            )));
+        }
+        self.inner
+            .bindings
+            .write()
+            .unwrap()
+            .entry(set.to_string())
+            .or_default()
+            .push(Binding {
+                script: script.to_string(),
+                config,
+            });
+        Ok(())
+    }
+
     /// Laedt alle Skripte neu. Gibt die Anzahl der Fehler zurueck.
     pub fn reload(&self) -> usize {
         self.inner.reload();
@@ -151,9 +191,18 @@ impl ScriptHooks {
         current: Option<&Value>,
     ) -> Result<(), ScriptError> {
         info!("{} before {}: {:?}", set, op, payload);
+        let fname = format!("before_{op}");
+        // Gebundene Komponenten zuerst (Regeln je Verwendung), dann das Entitaetsskript.
+        for (script, config) in self.bound(set) {
+            let ctx = json!({"set": set, "op": op, "kind": "write", "key": null,
+                             "payload": payload, "current": current.cloned().unwrap_or(Value::Null)});
+            if let Some(res) = self.call_component(&script, &fname, ctx, &config)? {
+                take(&res, "payload", payload);
+            }
+        }
         let ctx = json!({"set": set, "op": op, "kind": "write", "key": null,
                          "payload": payload, "current": current.cloned().unwrap_or(Value::Null)});
-        if let Some(res) = self.call(set, &format!("before_{op}"), ctx)? {
+        if let Some(res) = self.call(set, &fname, ctx)? {
             take(&res, "payload", payload);
             info!("-> result payload: {:?}", payload)
         }
@@ -218,6 +267,55 @@ impl ScriptHooks {
         Ok(())
     }
 
+    /// Gebundene Komponenten eines Sets als (Skriptschluessel, Konfiguration).
+    fn bound(&self, set: &str) -> Vec<(String, Value)> {
+        self.inner
+            .bindings
+            .read()
+            .unwrap()
+            .get(set)
+            .map(|v| v.iter().map(|b| (b.script.clone(), b.config.clone())).collect())
+            .unwrap_or_default()
+    }
+
+    /// Ruft `fname` im Komponenten-Skript auf: `(ctx, config)`. `None`, wenn es die Funktion nicht gibt.
+    fn call_component(
+        &self,
+        script: &str,
+        fname: &str,
+        ctx: Value,
+        config: &Value,
+    ) -> Result<Option<Value>, ScriptError> {
+        let Some(compiled) = self.inner.components.read().unwrap().get(script).cloned() else {
+            return Ok(None);
+        };
+        if !compiled.functions.contains(fname) {
+            return Ok(None);
+        }
+        let arg = rhai::serde::to_dynamic(&ctx)
+            .map_err(|e| ScriptError::Script(format!("{script}.{fname}: {e}")))?;
+        let cfg = rhai::serde::to_dynamic(config)
+            .map_err(|e| ScriptError::Script(format!("{script}.{fname}: {e}")))?;
+        DEADLINE.with(|d| d.set(Some(Instant::now() + CALL_TIMEOUT)));
+        let result = self.inner.engine.call_fn::<Dynamic>(
+            &mut Scope::new(),
+            &compiled.ast,
+            fname,
+            (arg, cfg),
+        );
+        DEADLINE.with(|d| d.set(None));
+        let dynamic =
+            result.map_err(|e| ScriptError::Script(format!("{script}.{fname}: {}", describe(&e))))?;
+        let value: Value = rhai::serde::from_dynamic(&dynamic)
+            .map_err(|e| ScriptError::Script(format!("{script}.{fname}: {e}")))?;
+        if !value.is_object() {
+            return Err(ScriptError::Script(format!(
+                "{script}.{fname}: die Funktion muss das ctx-Objekt zurueckgeben"
+            )));
+        }
+        Ok(Some(value))
+    }
+
     /// Ruft `fname` im Skript von `set` auf. `None`, wenn es die Funktion nicht gibt.
     fn call(&self, set: &str, fname: &str, ctx: Value) -> Result<Option<Value>, ScriptError> {
         let script = match self.inner.scripts.read().unwrap().get(set) {
@@ -254,6 +352,8 @@ impl Inner {
             engine: build_engine(),
             dir,
             scripts: RwLock::new(HashMap::new()),
+            components: RwLock::new(HashMap::new()),
+            bindings: RwLock::new(HashMap::new()),
             errors: RwLock::new(BTreeMap::new()),
             reloads: AtomicU64::new(0),
         }
@@ -298,7 +398,36 @@ impl Inner {
             }
         }
 
+        let mut next_components: HashMap<String, Arc<Script>> = HashMap::new();
+        let components_dir = self.dir.join("components");
+        if let Ok(entries) = std::fs::read_dir(&components_dir) {
+            let old_components = self.components.read().unwrap().clone();
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_none_or(|e| e != "rhai") {
+                    continue;
+                }
+                let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                    continue;
+                };
+                let key = format!("components/{stem}");
+                match compile(&self.engine, &path) {
+                    Ok(script) => {
+                        next_components.insert(key, Arc::new(script));
+                    }
+                    Err(msg) => {
+                        errors.insert(format!("components/{}", file_name(&path)), msg.clone());
+                        tracing::error!(file = %path.display(), "component not reloaded: {msg}");
+                        if let Some(prev) = old_components.get(&key) {
+                            next_components.insert(key, prev.clone());
+                        }
+                    }
+                }
+            }
+        }
+
         *self.scripts.write().unwrap() = next;
+        *self.components.write().unwrap() = next_components;
         *self.errors.write().unwrap() = errors;
         self.reloads.fetch_add(1, Ordering::Relaxed);
     }

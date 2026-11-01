@@ -1,3 +1,15 @@
+---
+title: Fiori Lighhouse
+subtitle: Konfiguration und Erweiterung
+author: Peter Jaeckel
+papersize: a4
+pagestyle: headings
+margin-top:     20mm
+margin-bottom:  20mm
+margin-left:    20mm
+margin-right:   20mm
+---
+
 # Customizing: Möglichkeiten und Howto
 
 Die Oberfläche einer App wird über drei Ebenen angepasst. Die erste Ebene ist deklarativ und
@@ -6,7 +18,7 @@ in Rhai oder Rust.
 
 | Ebene | Wo | Wann | Neustart nötig |
 |---|---|---|---|
-| Deklarativ | `ddic.json` (Blöcke `ui`, `side_effects`, `link`, `components`, `component_uses` …) | Formate, Ausblenden, Abschnitte, Spalten, Tabs, wiederverwendbare Bausteine | ja |
+| Deklarativ | `ddic.json` (Blöcke `ui`, `side_effects`, `link`, `components`, `component_uses` ...) | Formate, Ausblenden, Abschnitte, Spalten, Tabs, wiederverwendbare Bausteine | ja |
 | Assets | `<EXT_DIR>/<app>/` | eigene Fragmente, Module, Controller | ja (Browser-Cache beachten) |
 | Logik | Rhai-Skripte (`SCRIPTS_DIR`), Rust-Extensions | Hooks, Routen, Actions | Rhai: nein (Reload). Rust: ja, Neubau |
 
@@ -146,8 +158,8 @@ Es gibt drei Teile in der `ddic.json`:
 |---|---|
 | `entity` | Entität, in der die Komponente liegt |
 | `instance` | Schlüssel des Einsatzes in dieser Entität. Muss eindeutig sein |
-| `fields` | Rolle → Feldname. Alle Rollen der Komponente müssen belegt sein |
-| `labels` | Rolle → Beschriftung (optional, sonst Standardtext) |
+| `fields` | Rolle -> Feldname. Alle Rollen der Komponente müssen belegt sein |
+| `labels` | Rolle -> Beschriftung (optional, sonst Standardtext) |
 | `step_minutes` | Überschreibt das Raster der Komponente für diesen Einsatz (optional) |
 | `section_title` | Titel des Abschnitts auf der Object Page. Ohne Titel entsteht kein Abschnitt |
 
@@ -163,7 +175,7 @@ fn before_patch(ctx, cfg)  { apply_rules(ctx, cfg) }
 
 `cfg` enthält die Zuordnung aus der DDIC: `cfg.instance`, `cfg.fields.start`, `cfg.fields.end`,
 `cfg.fields.duration`, `cfg.step_minutes`. Die Regeln im Modul `components/TimeRange.rhai` sind
-Ende ↔ Dauer, Rundung auf das Raster und Fehler bei negativen Dauern. Das Modul kennt keine
+Ende <-> Dauer, Rundung auf das Raster und Fehler bei negativen Dauern. Das Modul kennt keine
 Feldnamen, nur die Rollen.
 
 ### Was beim Laden passiert
@@ -212,7 +224,7 @@ Ablauf:
 2. **Manifest**: Die Object Page verweist im Abschnitt auf `fiori.ext.fragment.<Name>`, die
    Listenspalte auf `fiori.ext.fragment.<Feld>__<Format>`. Das Manifest kommt aus
    `GET /apps/<Entität>/manifest.json`.
-3. **Anfrage**: FE lädt `…/ext/fiori/fragment/<Name>.fragment.xml`. Die Route in `ui_ext.rs`
+3. **Anfrage**: FE lädt `.../ext/fiori/fragment/<Name>.fragment.xml`. Die Route in `ui_ext.rs`
    sucht den Namen im Speicher und liefert das XML.
 
 Die Namen folgen festen Mustern:
@@ -263,7 +275,7 @@ Auf App-Ebene (`apps[]` in `ddic.json`):
 ```
 
 * `modules`: Datei `<app>/ext/<name>.js` als UI5-Modul `<app>.ext.<name>`. Im Video-Store also
-  `videos/ext/TagSearch.js` → Modul `videos/ext/TagSearch`.
+  `videos/ext/TagSearch.js` -> Modul `videos/ext/TagSearch`.
 * `controller_extensions`: `controller` ist der Dateiname ohne `.controller.js`. Die Datei heißt
   `<controller>.controller.js` (siehe Abschnitt 10).
 
@@ -277,13 +289,13 @@ mit dem App-Namen (`apps[].name`):
 
 ```
 <EXT_DIR>/
-  videos/                        ← App "videos"
-    Player.js                    → Modul videos/ext/Player
-    TagSearch.js                 → Modul videos/ext/TagSearch
+  videos/                        <- App "videos"
+    Player.js                    -> Modul videos/ext/Player
+    TagSearch.js                 -> Modul videos/ext/TagSearch
     ObjectPageController.controller.js
     TagSearchController.controller.js
     fragment/
-      Player.fragment.xml        → "fragment": "Player"
+      Player.fragment.xml        -> "fragment": "Player"
       Thumbnails.fragment.xml
       PreviewColumn.fragment.xml
       TagSearch.fragment.xml

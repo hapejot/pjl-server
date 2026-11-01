@@ -13,19 +13,19 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use axum::{
+    Router,
     extract::Path,
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     response::IntoResponse,
     routing::get,
-    Router,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use spec::data_dictionary::DataDictionary;
 use spec::{DisplayFormat, EntityUi, FieldSpec};
 use tower_http::services::ServeDir;
 
-use crate::extension::Extension;
 use crate::AppState;
+use crate::extension::Extension;
 
 const FORMAT_JS: &str = include_str!("ui_format.js");
 const COMPONENTS_JS: &str = include_str!("ui_components_controller.js");
@@ -80,13 +80,22 @@ impl UiExtension {
         let mut hidden: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for entity in ddic.entities() {
             for f in entity.fields.iter() {
-                if let FieldSpec::Atom { name, label, ui: Some(ui), .. } = f {
+                if let FieldSpec::Atom {
+                    name,
+                    label,
+                    ui: Some(ui),
+                    ..
+                } = f
+                {
                     if let Some(format) = ui.format {
-                        formatted.entry(entity.name.clone()).or_default().push(FormattedField {
-                            field: name.clone(),
-                            label: label.clone(),
-                            format,
-                        });
+                        formatted
+                            .entry(entity.name.clone())
+                            .or_default()
+                            .push(FormattedField {
+                                field: name.clone(),
+                                label: label.clone(),
+                                format,
+                            });
                     }
                 }
             }
@@ -126,16 +135,20 @@ impl UiExtension {
             let Some(section_title) = usage.section_title.clone() else {
                 continue;
             };
-            let Some(component) = ddic.components().iter().find(|c| c.name == usage.component) else {
+            let Some(component) = ddic.components().iter().find(|c| c.name == usage.component)
+            else {
                 continue;
             };
             let fragment = format!("Component__{}__{}", usage.entity, usage.instance);
-            components.entry(usage.entity.clone()).or_default().push(ComponentSection {
-                key: format!("Component_{}", usage.instance),
-                title: section_title,
-                xml: component_fragment(component, usage),
-                fragment,
-            });
+            components
+                .entry(usage.entity.clone())
+                .or_default()
+                .push(ComponentSection {
+                    key: format!("Component_{}", usage.instance),
+                    title: section_title,
+                    xml: component_fragment(component, usage),
+                    fragment,
+                });
         }
         Self {
             components,
@@ -151,7 +164,9 @@ impl UiExtension {
 
     /// Namespace der Fragmente einer Entitaet: `<app>.ext.fragment`.
     fn fragment_ns(&self, entity: &str) -> Option<String> {
-        self.app_of_entity.get(entity).map(|app| format!("{app}.ext.fragment"))
+        self.app_of_entity
+            .get(entity)
+            .map(|app| format!("{app}.ext.fragment"))
     }
 }
 
@@ -181,7 +196,10 @@ fn is_safe_name(s: &str) -> bool {
 }
 
 fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 /// Fragment einer Komponenten-Verwendung: Beginn/Ende als Text (Anzeige) bzw. Auswahl
@@ -218,7 +236,27 @@ fn component_fragment(
         )
     };
     format!(
-        r#"<core:FragmentDefinition xmlns:core="sap.ui.core" xmlns="sap.m" xmlns:f="sap.ui.layout.form"><f:Form editable="true"><f:customData><core:CustomData key="timeRange" value="{config}"/></f:customData><f:layout><f:ResponsiveGridLayout labelSpanL="3" labelSpanM="3" columnsL="1" columnsM="1"/></f:layout><f:formContainers><f:FormContainer><f:formElements><f:FormElement label="{start_label}"><f:fields><Text visible="{{= ${{IsActiveEntity}} }}" text="{dt}"/><DateTimePicker visible="{{= !${{IsActiveEntity}} }}" value="{dt}" displayFormat="dd.MM.yyyy HH:mm" minutesStep="{step}"/></f:fields></f:FormElement><f:FormElement label="{end_label}"><f:fields><Text visible="{{= ${{IsActiveEntity}} }}" text="{dt_end}"/><DateTimePicker visible="{{= !${{IsActiveEntity}} }}" value="{dt_end}" displayFormat="dd.MM.yyyy HH:mm" minutesStep="{step}"/></f:fields></f:FormElement><f:FormElement label="{duration_label}"><f:fields><Text visible="{{= ${{IsActiveEntity}} }}" text="{{path: '{dur}', targetType: 'any', formatter: 'fiori.ext.Format.minutes'}}"/><Input visible="{{= !${{IsActiveEntity}} }}" placeholder="z. B. 2:30 oder 2h oder 30 min" value="{{path: '{dur}', mode: 'OneWay', targetType: 'any', formatter: 'fiori.ext.Format.hm'}}"/></f:fields></f:FormElement></f:formElements></f:FormContainer></f:formContainers></f:Form></core:FragmentDefinition>"#,
+        r#"<core:FragmentDefinition xmlns:core="sap.ui.core" xmlns="sap.m" xmlns:f="sap.ui.layout.form">
+            <f:Form editable="true">
+            <f:customData>
+                <core:CustomData key="timeRange" value="{config}"/>
+            </f:customData>
+            <f:layout>
+                <f:ResponsiveGridLayout labelSpanL="3" labelSpanM="3" columnsL="1" columnsM="1"/>
+            </f:layout>
+            <f:formContainers>
+                <f:FormContainer>
+                    <f:formElements>
+                        <f:FormElement label="{start_label}">
+                            <f:fields>
+                                <Text visible="{{= ${{IsActiveEntity}} }}" text="{dt}"/>
+                                <DateTimePicker visible="{{= !${{IsActiveEntity}} }}" value="{dt}" displayFormat="dd.MM.yyyy HH:mm" minutesStep="{step}"/>
+                            </f:fields>
+                        </f:FormElement>
+                        <f:FormElement label="{end_label}">
+                            <f:fields>
+                                <Text visible="{{= ${{IsActiveEntity}} }}" text="{dt_end}"/>
+                                <DateTimePicker visible="{{= !${{IsActiveEntity}} }}" value="{dt_end}" displayFormat="dd.MM.yyyy HH:mm" minutesStep=""/></f:fields></f:FormElement><f:FormElement label="{duration_label}"><f:fields><Text visible="{{= ${{IsActiveEntity}} }}" text="{{path: '{dur}', targetType: 'any', formatter: 'fiori.ext.Format.minutes'}}"/><Input visible="{{= !${{IsActiveEntity}} }}" placeholder="z. B. 2:30 oder 2h oder 30 min" value="{{path: '{dur}', mode: 'OneWay', targetType: 'any', formatter: 'fiori.ext.Format.hm'}}"/></f:fields></f:FormElement></f:formElements></f:FormContainer></f:formContainers></f:Form></core:FragmentDefinition>"#,
         config = xml_escape(&config),
         start_label = label("start"),
         end_label = label("end"),
@@ -268,10 +306,7 @@ impl Extension for UiExtension {
                     _ => return (StatusCode::NOT_FOUND, "").into_response(),
                 };
                 if name.starts_with("Component__") {
-                    let found = components
-                        .values()
-                        .flatten()
-                        .find(|c| c.fragment == name);
+                    let found = components.values().flatten().find(|c| c.fragment == name);
                     return match found {
                         Some(c) => ([(header::CONTENT_TYPE, XML)], c.xml.clone()).into_response(),
                         None => (StatusCode::NOT_FOUND, "").into_response(),
@@ -279,20 +314,31 @@ impl Extension for UiExtension {
                 }
                 if let Some(entity) = name.strip_prefix("Formatted__") {
                     return match formatted.get(entity) {
-                        Some(fields) => ([(header::CONTENT_TYPE, XML)], section_fragment(fields)).into_response(),
+                        Some(fields) => ([(header::CONTENT_TYPE, XML)], section_fragment(fields))
+                            .into_response(),
                         None => (StatusCode::NOT_FOUND, "").into_response(),
                     };
                 }
                 // `<field>__<format>`: Feld gegen die DDIC pruefen, nicht blind ausliefern.
-                let found = formatted.values().flatten().find(|f| field_fragment_name(&f.field, f.format) == name);
+                let found = formatted
+                    .values()
+                    .flatten()
+                    .find(|f| field_fragment_name(&f.field, f.format) == name);
                 match found {
-                    Some(f) => ([(header::CONTENT_TYPE, XML)], field_fragment(&f.field, f.format)).into_response(),
+                    Some(f) => (
+                        [(header::CONTENT_TYPE, XML)],
+                        field_fragment(&f.field, f.format),
+                    )
+                        .into_response(),
                     None => (StatusCode::NOT_FOUND, "").into_response(),
                 }
             }
         };
         let mut router = Router::new()
-            .route("/ext/fiori/Format.js", get(|| async { ([(header::CONTENT_TYPE, JS)], FORMAT_JS) }))
+            .route(
+                "/ext/fiori/Format.js",
+                get(|| async { ([(header::CONTENT_TYPE, JS)], FORMAT_JS) }),
+            )
             .route(
                 "/ext/fiori/ComponentsController.controller.js",
                 get(|| async { ([(header::CONTENT_TYPE, JS)], COMPONENTS_JS) }),
@@ -356,7 +402,11 @@ impl Extension for UiExtension {
 
     fn list_columns(&self, entity: &str) -> Option<Value> {
         let formatted = self.formatted.get(entity);
-        let custom = self.entity_ui.get(entity).map(|u| u.list_columns.as_slice()).unwrap_or(&[]);
+        let custom = self
+            .entity_ui
+            .get(entity)
+            .map(|u| u.list_columns.as_slice())
+            .unwrap_or(&[]);
         if formatted.is_none() && custom.is_empty() {
             return None;
         }
@@ -389,7 +439,10 @@ impl Extension for UiExtension {
                     "position": { "anchor": f.field, "placement": "After" }
                 }),
             );
-            cols.insert(format!("DataField::{}", f.field), json!({ "visible": false }));
+            cols.insert(
+                format!("DataField::{}", f.field),
+                json!({ "visible": false }),
+            );
         }
         Some(Value::Object(cols))
     }
@@ -474,8 +527,14 @@ mod tests {
     fn formatted_fields_become_list_columns_and_hide_raw_columns() {
         let ext = UiExtension::new(&ddic_with_video(), None);
         let cols = ext.list_columns("Video").expect("Spalten");
-        assert_eq!(cols["Fmtduration_seconds"]["template"], "fiori.ext.fragment.duration_seconds__duration");
-        assert_eq!(cols["Fmtfile_size"]["template"], "fiori.ext.fragment.file_size__bytes");
+        assert_eq!(
+            cols["Fmtduration_seconds"]["template"],
+            "fiori.ext.fragment.duration_seconds__duration"
+        );
+        assert_eq!(
+            cols["Fmtfile_size"]["template"],
+            "fiori.ext.fragment.file_size__bytes"
+        );
         assert_eq!(cols["DataField::duration_seconds"]["visible"], false);
         assert!(ext.list_columns("Other").is_none());
     }
@@ -520,22 +579,37 @@ mod tests {
         let page = ext.object_page_content("Appointment").expect("Abschnitt");
         let section = &page["body"]["sections"]["Component_termin"];
         assert_eq!(section["title"], "Zeitraum");
-        assert_eq!(section["template"], "fiori.ext.fragment.Component__Appointment__termin");
+        assert_eq!(
+            section["template"],
+            "fiori.ext.fragment.Component__Appointment__termin"
+        );
 
         let ctrl = ext.controller_extensions();
-        assert!(ctrl.iter().any(|(t, c)| t == "sap.fe.templates.ObjectPage.ObjectPageController"
-            && c == "fiori.ext.ComponentsController"));
+        assert!(ctrl.iter().any(
+            |(t, c)| t == "sap.fe.templates.ObjectPage.ObjectPageController"
+                && c == "fiori.ext.ComponentsController"
+        ));
     }
 
     #[test]
     fn component_fragment_is_valid_xml_with_config_and_step() {
         let ddic = workbench_ddic();
-        let usage = ddic.component_uses().iter().find(|u| u.instance == "termin").unwrap();
-        let component = ddic.components().iter().find(|c| c.name == usage.component).unwrap();
+        let usage = ddic
+            .component_uses()
+            .iter()
+            .find(|u| u.instance == "termin")
+            .unwrap();
+        let component = ddic
+            .components()
+            .iter()
+            .find(|c| c.name == usage.component)
+            .unwrap();
         let xml = component_fragment(component, usage);
         let doc = roxmltree_like_check(&xml);
         assert!(doc, "kein gueltiges XML");
-        assert!(xml.contains("value=\"instance=termin;start=starts_at;end=ends_at;duration=duration_minutes;step=5\""));
+        assert!(xml.contains(
+            "value=\"instance=termin;start=starts_at;end=ends_at;duration=duration_minutes;step=5\""
+        ));
         assert!(xml.contains("minutesStep=\"5\""));
         assert!(xml.contains("label=\"Beginn\""));
         assert!(xml.contains("formatter: 'fiori.ext.Format.hm'"));
@@ -546,7 +620,9 @@ mod tests {
         let mut depth: i64 = 0;
         let mut rest = xml;
         while let Some(start) = rest.find('<') {
-            let Some(end) = rest[start..].find('>') else { return false };
+            let Some(end) = rest[start..].find('>') else {
+                return false;
+            };
             let tag = &rest[start + 1..start + end];
             rest = &rest[start + end + 1..];
             if tag.starts_with('?') || tag.starts_with('!') {
@@ -568,7 +644,9 @@ mod tests {
     fn field_fragment_is_built_from_ddic_only() {
         let ext = UiExtension::new(&ddic_with_video(), None);
         let all: Vec<&FormattedField> = ext.formatted.values().flatten().collect();
-        let hit = all.iter().find(|f| field_fragment_name(&f.field, f.format) == "file_size__bytes");
+        let hit = all
+            .iter()
+            .find(|f| field_fragment_name(&f.field, f.format) == "file_size__bytes");
         assert!(hit.is_some());
         assert!(!is_safe_name("../etc/passwd"));
         assert!(is_safe_name("file_size__bytes"));

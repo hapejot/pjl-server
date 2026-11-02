@@ -25,6 +25,10 @@ in Rhai oder Rust.
 Die Vorgaben stammen aus `fiori-server/src/ui_ext.rs`, `spec/src/entity_spec.rs` und `spec/src/app.rs`.
 Die Beispiele beziehen sich auf den Video-Store (`video-store/`).
 
+Die Spaltenzuordnung folgt dem Einstieg: Aus dem List Report stehen Haupt- und
+Unter-Object-Page in der mittleren und rechten Spalte. Beim direkten
+Detail-Einstieg ohne Liste stehen sie in der ersten und mittleren Spalte.
+
 ---
 
 ## 1. Anzeige-Formate für Felder

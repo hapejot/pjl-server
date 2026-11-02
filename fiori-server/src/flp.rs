@@ -430,9 +430,8 @@ pub async fn app_manifest_handler(
 
     let mut object_navigation: serde_json::Map<String, Value> = serde_json::Map::new();
 
-    // Every to-many navigation of the main entity becomes a section (table) on the
-    // mid column ObjectPage. Clicking a row must open the sub ObjectPage in the
-    // third (end) column of the FlexibleColumnLayout.
+    // Child pages follow the main ObjectPage: begin/mid for detail entry,
+    // mid/end when a ListReport occupies the begin column.
     for rel in ddic
         .relationships()
         .filter(|r| r.one.is_some() && r.many.is_some() && r.one() == main_name)
@@ -459,7 +458,7 @@ pub async fn app_manifest_handler(
             child_object_target.clone(),
             json!({
               "contextPattern": format!("/{}({{key}})/{}({{key2}})", main_set, nav),
-              "controlAggregation": "endColumnPages",
+              "controlAggregation": if detail { "midColumnPages" } else { "endColumnPages" },
               "id": child_object_target,
               "name": "sap.fe.templates.ObjectPage",
               "options": {
@@ -519,7 +518,7 @@ pub async fn app_manifest_handler(
         }
     }
 
-    // Detail-Einstieg: keine Liste, die Object Page ist die einzige Spalte.
+    // Detail-Einstieg: keine Liste, die Haupt-Object-Page beginnt in der ersten Spalte.
     if detail {
         routes.retain(|r| r["name"] != json!(list_target));
         for r in routes.iter_mut() {
@@ -822,4 +821,63 @@ pub async fn index() -> impl IntoResponse {
         )],
         Html(out_format.to_string()),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{ServerConfig, ServerMode};
+    use odata_yaml_store::YamlStore;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn child_object_pages_follow_the_main_page_for_list_and_detail_entry() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("workbench")
+            .join("ddic.json");
+        let mut ddic = crate::ddic_file::load(&path).unwrap();
+        ddic.expand_components().unwrap();
+        ddic.apply_value_list_lookups().unwrap();
+        ddic.inject_system_user();
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = Arc::new(YamlStore::open(dir.path()).unwrap());
+        let state = AppState::new(
+            store,
+            Arc::new(ServerConfig::defaults(ServerMode::Runtime)),
+            ddic,
+        );
+
+        for (app, main_column, child_column, route_targets) in [
+            (
+                "Project", "midColumnPages", "endColumnPages",
+                json!(["ProjectList", "ProjectObjectPage", "ProjectNotesObjectPage"]),
+            ),
+            (
+                "ProjectDetail", "beginColumnPages", "midColumnPages",
+                json!(["ProjectObjectPage", "ProjectNotesObjectPage"]),
+            ),
+        ] {
+            let Json(manifest) =
+                app_manifest_handler(Path(app.to_string()), State(state.clone()))
+                    .await
+                    .unwrap_or_else(|_| panic!("manifest for {app}"));
+            let routing = &manifest["sap.ui5"]["routing"];
+            let targets = &routing["targets"];
+            assert_eq!(targets["ProjectObjectPage"]["controlAggregation"], main_column);
+            assert_eq!(
+                targets["ProjectNotesObjectPage"]["options"]["settings"]["contextPath"],
+                "/ProjectSet/_Notes"
+            );
+            for (name, target) in targets.as_object().unwrap() {
+                if name != "ProjectList" && name != "ProjectObjectPage" {
+                    assert_eq!(target["controlAggregation"], child_column, "{app}/{name}");
+                }
+            }
+            let route = routing["routes"].as_array().unwrap().iter()
+                .find(|r| r["name"] == "ProjectNotesObjectPage").unwrap();
+            assert_eq!(route["target"], route_targets);
+            assert_eq!(route["pattern"], "ProjectSet({key})/_Notes({key2}):?query:");
+        }
+    }
 }

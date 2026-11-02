@@ -76,6 +76,12 @@ zulässigen Zustandsübergänge. Freies Filtern/Schreiben über `IsActiveEntity`
 außerhalb dieser sechs Pfade ist laut Spezifikation nicht vorgesehen
 ("Manual filtering on draft-related properties is not allowed").
 
+Die technische `ID` wird in den OData-Metadaten mit
+`Org.OData.Core.V1.Computed = true` gekennzeichnet. Fehlt sie beim Anlegen,
+vergibt der Server eine UUID. Fiori Elements soll deshalb keine manuelle
+GUID-Eingabe im Anlegedialog verlangen. Fachliche Felder und bearbeitbare
+Verknuepfungen bleiben davon unberuehrt.
+
 ## 4. Sperrverhalten (Draft Lock)
 
 - Sobald ein Draft existiert (Zustand `Active+Draft` oder `New-Draft`), ist die

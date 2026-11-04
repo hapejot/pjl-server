@@ -94,10 +94,11 @@ impl DdicStore {
         let mut next = inner.sets.clone();
         let out = f(next.entry(set.to_string()).or_default())?;
         if PERSISTED.contains(&set) {
-            let json = build(&inner.base, &next)?;
-            ddic_file::save(&self.path, &json)
-                .map_err(|e| StoreError::Conflict(format!("cannot write ddic: {e:#}")))?;
-            inner.base = json;
+            if let Ok(json) = build(&inner.base, &next) {
+                ddic_file::save(&self.path, &json)
+                    .map_err(|e| StoreError::Conflict(format!("cannot write ddic: {e:#}")))?;
+                inner.base = json;
+            }
         }
         inner.sets = next;
         Ok(out)
@@ -113,11 +114,16 @@ fn id_for(set: &str, name: &str) -> String {
 }
 
 fn items<'a>(v: &'a Value, key: &str) -> &'a [Value] {
-    v.get(key).and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[])
+    v.get(key)
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
 }
 
 fn text<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
-    v.get(key).and_then(Value::as_str).filter(|s| !s.trim().is_empty())
+    v.get(key)
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
 }
 
 /// Paketname eines App-Eintrags: `"package": {"name": ...}` oder `"package": "..."`.
@@ -152,7 +158,9 @@ fn project(base: &Value) -> Sets {
         }
     }
     for e in items(base, "entities") {
-        let Some(name) = text(e, "name") else { continue };
+        let Some(name) = text(e, "name") else {
+            continue;
+        };
         let pkg = text(e, "package").unwrap_or(DEFAULT_PACKAGE);
         sets.entry("EntitySet".into()).or_default().push(rec(
             "EntitySet",
@@ -166,7 +174,9 @@ fn project(base: &Value) -> Sets {
         ));
         for f in items(e, "fields") {
             let Some(atom) = f.get("Atom") else { continue };
-            let Some(fname) = text(atom, "name") else { continue };
+            let Some(fname) = text(atom, "name") else {
+                continue;
+            };
             let list_id = atom
                 .get("value_list")
                 .and_then(|vl| vl.get("FieldValueList"))
@@ -181,7 +191,11 @@ fn project(base: &Value) -> Sets {
             for key in ATOM_NUMBERS {
                 fields[key] = atom.get(key).cloned().unwrap_or(Value::Null);
             }
-            fields["multiline"] = json!(atom.get("multiline").and_then(Value::as_bool).unwrap_or(false));
+            fields["multiline"] = json!(
+                atom.get("multiline")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            );
             sets.entry("FieldSet".into()).or_default().push(rec(
                 "FieldSet",
                 id_for("FieldSet", &format!("{name}.{fname}")),
@@ -190,7 +204,9 @@ fn project(base: &Value) -> Sets {
         }
     }
     for r in items(base, "relationships") {
-        let Some(name) = text(r, "name") else { continue };
+        let Some(name) = text(r, "name") else {
+            continue;
+        };
         let one = text(r, "one").unwrap_or_default();
         let many = text(r, "many").unwrap_or_default();
         sets.entry("RelationSet".into()).or_default().push(rec(
@@ -207,14 +223,18 @@ fn project(base: &Value) -> Sets {
         ));
     }
     for l in items(base, "value_lists") {
-        let (Some(id), Some(name)) = (text(l, "id"), text(l, "name")) else { continue };
+        let (Some(id), Some(name)) = (text(l, "id"), text(l, "name")) else {
+            continue;
+        };
         sets.entry("ValueListSet".into()).or_default().push(rec(
             "ValueListSet",
             id.to_string(),
             json!({ "name": name }),
         ));
         for v in items(l, "values") {
-            let Some(code) = text(v, "code") else { continue };
+            let Some(code) = text(v, "code") else {
+                continue;
+            };
             sets.entry("ValueSet".into()).or_default().push(rec(
                 "ValueSet",
                 id_for("ValueSet", &format!("{id}/{code}")),
@@ -229,7 +249,9 @@ fn project(base: &Value) -> Sets {
         }
     }
     for a in items(base, "apps") {
-        let Some(name) = text(a, "name") else { continue };
+        let Some(name) = text(a, "name") else {
+            continue;
+        };
         let main = text(a, "main_entity").unwrap_or_default();
         let pkg = package_name(a).unwrap_or(DEFAULT_PACKAGE);
         sets.entry("AppSet".into()).or_default().push(rec(
@@ -258,7 +280,9 @@ fn value_of(r: &DataRecord) -> Value {
 
 /// Original-Objekt mit `name` aus einer Liste des Basis-JSON.
 fn original<'a>(base: &'a Value, key: &str, name: &str) -> Option<&'a Value> {
-    items(base, key).iter().find(|o| text(o, "name") == Some(name))
+    items(base, key)
+        .iter()
+        .find(|o| text(o, "name") == Some(name))
 }
 
 /// Setzt `key` auf `v`, oder entfernt ihn bei `null`.
@@ -283,7 +307,13 @@ fn names_by_id(sets: &Sets, set: &str) -> HashMap<String, String> {
 
 fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
     let empty = Vec::new();
-    let recs = |set: &str| sets.get(set).unwrap_or(&empty).iter().map(value_of).collect::<Vec<_>>();
+    let recs = |set: &str| {
+        sets.get(set)
+            .unwrap_or(&empty)
+            .iter()
+            .map(value_of)
+            .collect::<Vec<_>>()
+    };
     let pkg_names = names_by_id(sets, "PackageSet");
     let ent_names = names_by_id(sets, "EntitySet");
     let need = |v: &Value| {
@@ -295,7 +325,9 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
     let mut packages = Vec::new();
     for r in recs("PackageSet") {
         let name = need(&r)?;
-        let mut obj = original(base, "packages", &name).and_then(|o| o.as_object().cloned()).unwrap_or_default();
+        let mut obj = original(base, "packages", &name)
+            .and_then(|o| o.as_object().cloned())
+            .unwrap_or_default();
         obj.insert("name".into(), json!(name));
         packages.push(Value::Object(obj));
     }
@@ -305,35 +337,66 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
     for r in recs("EntitySet") {
         let name = need(&r)?;
         let ent_id = text(&r, "ID").unwrap_or_default().to_string();
-        let mut obj = original(base, "entities", &name).and_then(|o| o.as_object().cloned()).unwrap_or_default();
+        let mut obj = original(base, "entities", &name)
+            .and_then(|o| o.as_object().cloned())
+            .unwrap_or_default();
         let pkg = r
             .get("package_ID")
             .and_then(Value::as_str)
             .and_then(|id| pkg_names.get(id))
-            .ok_or_else(|| StoreError::Conflict(format!("Entitaet '{name}': Paket fehlt oder unbekannt")))?;
+            .ok_or_else(|| {
+                StoreError::Conflict(format!("Entitaet '{name}': Paket fehlt oder unbekannt"))
+            })?;
         obj.insert("name".into(), json!(name));
         obj.insert("package".into(), json!(pkg));
-        let plural = text(&r, "plural").map(str::to_string).unwrap_or_else(|| format!("{name}s"));
+        let plural = text(&r, "plural")
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{name}s"));
         obj.insert("type_name_plural".into(), json!(plural));
-        put(&mut obj, "type_name", &r.get("type_name").cloned().unwrap_or(Value::Null));
+        put(
+            &mut obj,
+            "type_name",
+            &r.get("type_name").cloned().unwrap_or(Value::Null),
+        );
 
         // Nicht gefuehrte Felder (Navigationen, Measures) bleiben unveraendert.
-        let orig_fields = obj.get("fields").and_then(Value::as_array).cloned().unwrap_or_default();
-        let mut fields: Vec<Value> = orig_fields.iter().filter(|f| f.get("Atom").is_none()).cloned().collect();
-        for fr in field_recs.iter().filter(|f| text(f, "entity_ID") == Some(ent_id.as_str())) {
+        let orig_fields = obj
+            .get("fields")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut fields: Vec<Value> = orig_fields
+            .iter()
+            .filter(|f| f.get("Atom").is_none())
+            .cloned()
+            .collect();
+        for fr in field_recs
+            .iter()
+            .filter(|f| text(f, "entity_ID") == Some(ent_id.as_str()))
+        {
             let fname = need(fr)?;
             let mut atom = orig_fields
                 .iter()
-                .find_map(|f| f.get("Atom").filter(|a| text(a, "name") == Some(fname.as_str())))
+                .find_map(|f| {
+                    f.get("Atom")
+                        .filter(|a| text(a, "name") == Some(fname.as_str()))
+                })
                 .and_then(|a| a.as_object().cloned())
                 .unwrap_or_default();
             atom.insert("name".into(), json!(fname));
             atom.insert("label".into(), json!(text(fr, "label").unwrap_or(&fname)));
-            atom.insert("edm_type".into(), json!(text(fr, "type").unwrap_or("Edm.String")));
+            atom.insert(
+                "edm_type".into(),
+                json!(text(fr, "type").unwrap_or("Edm.String")),
+            );
             for key in ATOM_NUMBERS {
                 put(&mut atom, key, &fr.get(key).cloned().unwrap_or(Value::Null));
             }
-            if fr.get("multiline").and_then(Value::as_bool).unwrap_or(false) {
+            if fr
+                .get("multiline")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
                 atom.insert("multiline".into(), json!(true));
             } else {
                 atom.remove("multiline");
@@ -351,7 +414,10 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
                 Some(list_id) => {
                     let prefer = orig_fields
                         .iter()
-                        .find_map(|f| f.get("Atom").filter(|a| text(a, "name") == Some(fname.as_str())))
+                        .find_map(|f| {
+                            f.get("Atom")
+                                .filter(|a| text(a, "name") == Some(fname.as_str()))
+                        })
                         .and_then(|a| a.pointer("/value_list/FieldValueList/prefer_dialog"))
                         .and_then(Value::as_bool)
                         .unwrap_or(false);
@@ -379,16 +445,34 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
     let mut relationships = Vec::new();
     for r in recs("RelationSet") {
         let name = need(&r)?;
-        let one = r.get("one_ID").and_then(Value::as_str).and_then(|id| ent_names.get(id));
-        let many = r.get("many_ID").and_then(Value::as_str).and_then(|id| ent_names.get(id));
+        let one = r
+            .get("one_ID")
+            .and_then(Value::as_str)
+            .and_then(|id| ent_names.get(id));
+        let many = r
+            .get("many_ID")
+            .and_then(Value::as_str)
+            .and_then(|id| ent_names.get(id));
         // Beziehung ohne bekannte Entitaeten (z. B. nach Loeschen) entfaellt.
-        let (Some(one), Some(many)) = (one, many) else { continue };
-        let mut obj = original(base, "relationships", &name).and_then(|o| o.as_object().cloned()).unwrap_or_default();
+        let (Some(one), Some(many)) = (one, many) else {
+            continue;
+        };
+        let mut obj = original(base, "relationships", &name)
+            .and_then(|o| o.as_object().cloned())
+            .unwrap_or_default();
         obj.insert("name".into(), json!(name));
         obj.insert("one".into(), json!(one));
         obj.insert("many".into(), json!(many));
-        put(&mut obj, "one_field", &r.get("source_field").cloned().unwrap_or(Value::Null));
-        put(&mut obj, "many_property", &r.get("target_field").cloned().unwrap_or(Value::Null));
+        put(
+            &mut obj,
+            "one_field",
+            &r.get("source_field").cloned().unwrap_or(Value::Null),
+        );
+        put(
+            &mut obj,
+            "many_property",
+            &r.get("target_field").cloned().unwrap_or(Value::Null),
+        );
         if r.get("owned").and_then(Value::as_bool).unwrap_or(false) {
             obj.insert("owned".into(), json!(true));
         } else {
@@ -401,21 +485,38 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
     let mut apps = Vec::new();
     for r in recs("AppSet") {
         let name = need(&r)?;
-        let main = r.get("main_entity_ID").and_then(Value::as_str).and_then(|id| ent_names.get(id));
+        let main = r
+            .get("main_entity_ID")
+            .and_then(Value::as_str)
+            .and_then(|id| ent_names.get(id));
         let Some(main) = main else {
-            return Err(StoreError::Conflict(format!("App '{name}': Hauptentitaet fehlt")));
+            return Err(StoreError::Conflict(format!(
+                "App '{name}': Hauptentitaet fehlt"
+            )));
         };
         let pkg = r
             .get("package_ID")
             .and_then(Value::as_str)
             .and_then(|id| pkg_names.get(id))
-            .ok_or_else(|| StoreError::Conflict(format!("App '{name}': Paket fehlt oder unbekannt")))?;
-        let mut obj = original(base, "apps", &name).and_then(|o| o.as_object().cloned()).unwrap_or_default();
+            .ok_or_else(|| {
+                StoreError::Conflict(format!("App '{name}': Paket fehlt oder unbekannt"))
+            })?;
+        let mut obj = original(base, "apps", &name)
+            .and_then(|o| o.as_object().cloned())
+            .unwrap_or_default();
         obj.insert("name".into(), json!(name));
         obj.insert("title".into(), json!(text(&r, "title").unwrap_or(&name)));
         obj.insert("main_entity".into(), json!(main));
-        put(&mut obj, "subtitle", &r.get("subtitle").cloned().unwrap_or(Value::Null));
-        put(&mut obj, "icon", &r.get("icon").cloned().unwrap_or(Value::Null));
+        put(
+            &mut obj,
+            "subtitle",
+            &r.get("subtitle").cloned().unwrap_or(Value::Null),
+        );
+        put(
+            &mut obj,
+            "icon",
+            &r.get("icon").cloned().unwrap_or(Value::Null),
+        );
         obj.insert("package".into(), json!({ "name": pkg }));
         apps.push(Value::Object(obj));
     }
@@ -476,7 +577,11 @@ fn unique_key(set: &str, v: &Value) -> Option<String> {
     };
     Some(match set {
         "FieldSet" => format!("{}/{name}", text(v, "entity_ID").unwrap_or_default()),
-        "ValueSet" => format!("{}/{}", text(v, "list_ID").unwrap_or_default(), text(v, "value").unwrap_or_default()),
+        "ValueSet" => format!(
+            "{}/{}",
+            text(v, "list_ID").unwrap_or_default(),
+            text(v, "value").unwrap_or_default()
+        ),
         _ => name.to_string(),
     })
 }
@@ -491,7 +596,11 @@ impl DataStore for DdicStore {
         format!("DdicStore -> {}", self.path.display())
     }
 
-    async fn get_collection(&self, set: &str, query: &ODataQuery) -> Result<Vec<DataRecord>, StoreError> {
+    async fn get_collection(
+        &self,
+        set: &str,
+        query: &ODataQuery,
+    ) -> Result<Vec<DataRecord>, StoreError> {
         let mut records = self.read(|s| s.get(set).cloned().unwrap_or_default());
         apply_query(&mut records, query);
         Ok(records)
@@ -506,7 +615,12 @@ impl DataStore for DdicStore {
         records.len()
     }
 
-    async fn read_entity(&self, set: &str, key: &EntityKey, _query: &ODataQuery) -> Result<DataRecord, StoreError> {
+    async fn read_entity(
+        &self,
+        set: &str,
+        key: &EntityKey,
+        _query: &ODataQuery,
+    ) -> Result<DataRecord, StoreError> {
         self.read(|s| {
             s.get(set)
                 .and_then(|list| list.iter().find(|r| r.id() == key.id).cloned())
@@ -531,9 +645,13 @@ impl DataStore for DdicStore {
         self.write(set, |list| {
             let new_value = value_of(&new);
             if let Some(key) = unique_key(set, &new_value) {
-                let dup = list.iter().any(|r| unique_key(set, &value_of(r)).as_deref() == Some(key.as_str()));
+                let dup = list
+                    .iter()
+                    .any(|r| unique_key(set, &value_of(r)).as_deref() == Some(key.as_str()));
                 if dup {
-                    return Err(StoreError::Conflict(format!("{set}: '{key}' existiert bereits")));
+                    return Err(StoreError::Conflict(format!(
+                        "{set}: '{key}' existiert bereits"
+                    )));
                 }
             }
             list.push(new.clone());
@@ -541,7 +659,12 @@ impl DataStore for DdicStore {
         })
     }
 
-    async fn patch_entity(&self, set: &str, key: &EntityKey, patch: &Value) -> Result<Value, StoreError> {
+    async fn patch_entity(
+        &self,
+        set: &str,
+        key: &EntityKey,
+        patch: &Value,
+    ) -> Result<Value, StoreError> {
         self.write(set, |list| {
             let idx = list
                 .iter()
@@ -573,7 +696,10 @@ impl DataStore for DdicStore {
         let mut inner = self.inner.lock().expect("ddic lock");
         let mut next = inner.sets.clone();
         let list = next.entry(set.to_string()).or_default();
-        let idx = list.iter().position(|r| r.id() == key.id).ok_or_else(|| not_found(set, key))?;
+        let idx = list
+            .iter()
+            .position(|r| r.id() == key.id)
+            .ok_or_else(|| not_found(set, key))?;
         list.remove(idx);
         if set == "ValueListSet" {
             let lid = key.id.to_string();
@@ -599,7 +725,8 @@ impl DataStore for DdicStore {
             if let Some(rels) = next.get_mut("RelationSet") {
                 rels.retain(|r| {
                     let v = value_of(r);
-                    text(&v, "one_ID") != Some(eid.as_str()) && text(&v, "many_ID") != Some(eid.as_str())
+                    text(&v, "one_ID") != Some(eid.as_str())
+                        && text(&v, "many_ID") != Some(eid.as_str())
                 });
             }
         }
@@ -624,12 +751,21 @@ impl DataStore for DdicStore {
         }
     }
 
-    async fn read_sibling_entity(&self, set: &str, key: &EntityKey) -> Result<DataRecord, StoreError> {
+    async fn read_sibling_entity(
+        &self,
+        set: &str,
+        key: &EntityKey,
+    ) -> Result<DataRecord, StoreError> {
         // Keine Entwuerfe: der aktive Satz ist zugleich der einzige.
         self.read_entity(set, key, &ODataQuery::new()).await
     }
 
-    async fn get_property(&self, set: &str, key: &EntityKey, property: &str) -> Result<Value, StoreError> {
+    async fn get_property(
+        &self,
+        set: &str,
+        key: &EntityKey,
+        property: &str,
+    ) -> Result<Value, StoreError> {
         let record = self.read_entity(set, key, &ODataQuery::new()).await?;
         value_of(&record)
             .get(property)
@@ -653,15 +789,21 @@ impl DataStore for DdicStore {
 impl DraftDataStore for DdicStore {
     // Ohne Entwurfszustand ist jede Draft-Aktion die Lesung des aktiven Satzes.
     async fn draft_edit(&self, set: &str, key: &EntityKey) -> Result<Value, StoreError> {
-        Ok(value_of(&self.read_entity(set, key, &ODataQuery::new()).await?))
+        Ok(value_of(
+            &self.read_entity(set, key, &ODataQuery::new()).await?,
+        ))
     }
 
     async fn draft_activate(&self, set: &str, key: &EntityKey) -> Result<Value, StoreError> {
-        Ok(value_of(&self.read_entity(set, key, &ODataQuery::new()).await?))
+        Ok(value_of(
+            &self.read_entity(set, key, &ODataQuery::new()).await?,
+        ))
     }
 
     async fn draft_prepare(&self, set: &str, key: &EntityKey) -> Result<Value, StoreError> {
-        Ok(value_of(&self.read_entity(set, key, &ODataQuery::new()).await?))
+        Ok(value_of(
+            &self.read_entity(set, key, &ODataQuery::new()).await?,
+        ))
     }
 }
 
@@ -688,10 +830,19 @@ mod tests {
         // 11 Atome plus das Statusfeld der Verkaufschance.
         assert_eq!(store.count("FieldSet", &ODataQuery::new()).await, 12);
         // Ein No-op-Patch schreibt die Datei neu, ohne Inhalt zu verlieren.
-        let accounts = store.get_collection("EntitySet", &ODataQuery::new()).await.unwrap();
-        let acc = accounts.iter().find(|r| r.get("name") == Some(json!("Account"))).unwrap();
+        let accounts = store
+            .get_collection("EntitySet", &ODataQuery::new())
+            .await
+            .unwrap();
+        let acc = accounts
+            .iter()
+            .find(|r| r.get("name") == Some(json!("Account")))
+            .unwrap();
         let key = EntityKey::new(acc.id(), true);
-        store.patch_entity("EntitySet", &key, &json!({"plural": "Firmen"})).await.unwrap();
+        store
+            .patch_entity("EntitySet", &key, &json!({"plural": "Firmen"}))
+            .await
+            .unwrap();
         let after: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(before, after);
     }
@@ -700,8 +851,15 @@ mod tests {
     async fn create_field_and_entity_end_up_in_file() {
         let path = temp_copy("create");
         let store = DdicStore::open(&path).unwrap();
-        let ents = store.get_collection("EntitySet", &ODataQuery::new()).await.unwrap();
-        let acc = ents.iter().find(|r| r.get("name") == Some(json!("Account"))).unwrap().id();
+        let ents = store
+            .get_collection("EntitySet", &ODataQuery::new())
+            .await
+            .unwrap();
+        let acc = ents
+            .iter()
+            .find(|r| r.get("name") == Some(json!("Account")))
+            .unwrap()
+            .id();
         store
             .create_entity("FieldSet", &json!({"name": "vat_id", "label": "USt-ID", "type": "Edm.String", "max_length": 20, "entity_ID": acc.to_string()}))
             .await
@@ -724,7 +882,9 @@ mod tests {
         let store = DdicStore::open(&path).unwrap();
         let before = std::fs::read_to_string(&path).unwrap();
         // App ohne Hauptentitaet ist ungueltig.
-        let res = store.create_entity("AppSet", &json!({"name": "x", "title": "X"})).await;
+        let res = store
+            .create_entity("AppSet", &json!({"name": "x", "title": "X"}))
+            .await;
         assert!(res.is_err());
         assert_eq!(before, std::fs::read_to_string(&path).unwrap());
         assert_eq!(store.count("AppSet", &ODataQuery::new()).await, 3);
@@ -741,16 +901,27 @@ mod tests {
         let lid = list.id().to_string();
         for (code, label, sort) in [("open", "Offen", 1), ("closed", "Geschlossen", 2)] {
             store
-                .create_entity("ValueSet", &json!({"value": code, "label": label, "sort": sort, "list_ID": lid}))
+                .create_entity(
+                    "ValueSet",
+                    &json!({"value": code, "label": label, "sort": sort, "list_ID": lid}),
+                )
                 .await
                 .unwrap();
         }
         // Doppelter Code in derselben Liste ist ein Konflikt.
-        assert!(store
-            .create_entity("ValueSet", &json!({"value": "open", "label": "x", "list_ID": lid}))
+        assert!(
+            store
+                .create_entity(
+                    "ValueSet",
+                    &json!({"value": "open", "label": "x", "list_ID": lid})
+                )
+                .await
+                .is_err()
+        );
+        let ents = store
+            .get_collection("EntitySet", &ODataQuery::new())
             .await
-            .is_err());
-        let ents = store.get_collection("EntitySet", &ODataQuery::new()).await.unwrap();
+            .unwrap();
         let ticket = store
             .create_entity("EntitySet", &json!({"name": "Ticket", "plural": "Tickets", "package_ID": store_package_id(&store).await}))
             .await
@@ -762,7 +933,11 @@ mod tests {
             .unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         let dd: DataDictionary = serde_json::from_str(&text).unwrap();
-        let ticket_list = dd.value_lists().iter().find(|l| l.name == "TicketStatus").unwrap();
+        let ticket_list = dd
+            .value_lists()
+            .iter()
+            .find(|l| l.name == "TicketStatus")
+            .unwrap();
         assert_eq!(ticket_list.values.len(), 2);
         assert!(dd.validate_value_lists().is_ok());
         assert!(text.contains(&format!("\"list_id\": \"{lid}\"")) || text.contains(&lid));
@@ -782,22 +957,44 @@ mod tests {
     async fn deleting_entity_removes_its_fields_and_relations() {
         let path = temp_copy("delete");
         let store = DdicStore::open(&path).unwrap();
-        let ents = store.get_collection("EntitySet", &ODataQuery::new()).await.unwrap();
-        let acc = ents.iter().find(|r| r.get("name") == Some(json!("Account"))).unwrap().id();
+        let ents = store
+            .get_collection("EntitySet", &ODataQuery::new())
+            .await
+            .unwrap();
+        let acc = ents
+            .iter()
+            .find(|r| r.get("name") == Some(json!("Account")))
+            .unwrap()
+            .id();
         // Apps verweisen auf Account; daher zuerst die App loeschen.
-        let apps = store.get_collection("AppSet", &ODataQuery::new()).await.unwrap();
+        let apps = store
+            .get_collection("AppSet", &ODataQuery::new())
+            .await
+            .unwrap();
         let account = id_for("EntitySet", "Account");
-        for a in apps.iter().filter(|a| value_of(a).get("main_entity_ID").and_then(Value::as_str) == Some(account.as_str())) {
-            store.delete_entity("AppSet", &EntityKey::new(a.id(), true)).await.unwrap();
+        for a in apps.iter().filter(|a| {
+            value_of(a).get("main_entity_ID").and_then(Value::as_str) == Some(account.as_str())
+        }) {
+            store
+                .delete_entity("AppSet", &EntityKey::new(a.id(), true))
+                .await
+                .unwrap();
         }
-        store.delete_entity("EntitySet", &EntityKey::new(acc, true)).await.unwrap();
-        let reloaded: DataDictionary = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        store
+            .delete_entity("EntitySet", &EntityKey::new(acc, true))
+            .await
+            .unwrap();
+        let reloaded: DataDictionary =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert!(!reloaded.entity_names().any(|n| n == "Account"));
         assert_eq!(store.count("RelationSet", &ODataQuery::new()).await, 0);
     }
 
     async fn store_package_id(store: &DdicStore) -> String {
-        let p = store.get_collection("PackageSet", &ODataQuery::new()).await.unwrap();
+        let p = store
+            .get_collection("PackageSet", &ODataQuery::new())
+            .await
+            .unwrap();
         p[0].id().to_string()
     }
 }

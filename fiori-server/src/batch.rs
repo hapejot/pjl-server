@@ -162,7 +162,6 @@ async fn handle_batch(router: Router, headers: HeaderMap, body: Bytes) -> impl I
     while let Some(field) = multipart.next_field().await.unwrap() {
         let part_bytes = field.bytes().await.unwrap();
         let sub_request = parse_raw_http_request(&part_bytes);
-        info!("batch request: {}", sub_request.uri());
         let response = router.clone().oneshot(sub_request).await.unwrap();
         response_parts.push(response_to_batch_part(response).await);
     }

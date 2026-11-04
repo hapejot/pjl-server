@@ -1,13 +1,8 @@
 use std::collections::HashMap;
-
+use std::time::Instant;
+use axum::middleware::Next;
 use axum::{
-    extract::{Path, Query, State},
-    http::{header, HeaderName, StatusCode},
-    response::Html,
-    response::IntoResponse,
-    response::Response,
-    routing::{get, post},
-    Json, Router,
+    Json, Router, extract::{Path, Query, State}, http::{HeaderName, Request, StatusCode, header}, response::{Html, IntoResponse, Response}, routing::{get, post},
 };
 use data_store::{DataRecord, EntityKey, StoreError};
 use odata::{
@@ -1429,6 +1424,23 @@ async fn info(State(state): State<AppState>) -> impl IntoResponse {
     )
 }
 
+async fn log_request(req: axum::extract::Request, next: Next) -> Response {
+    let method = req.method().clone();
+    let uri = req.uri().clone();
+    let start = Instant::now();
+
+    let res = next.run(req).await;
+
+    tracing::info!(
+        method = %method,
+        uri = %uri,
+        status = res.status().as_u16(),
+        latency_ms = start.elapsed().as_millis() as u64,
+        "request"
+    );
+
+    res
+}
 ////////////////////////////////////////////////////////////////////////////////////////
 /// router entry point
 pub fn router() -> Router<AppState> {
@@ -1443,7 +1455,7 @@ pub fn router() -> Router<AppState> {
                 .post(post_handler)
                 .patch(patch_handler)
                 .delete(delete_handler),
-        )
+        ).layer(axum::middleware::from_fn(log_request))
 }
 
 /// Das Data Dictionary aus dem Storage neu aufbauen.

@@ -8,18 +8,18 @@ pub mod batch;
 pub mod config;
 pub mod ddic_file;
 pub mod ddic_store;
-pub mod ddic_loader;
+// pub mod ddic_loader;
 pub mod extension;
 pub mod flp;
 pub mod hook;
-pub mod system_user;
 pub mod overlay;
 pub mod script;
 pub mod server;
 pub mod srv;
-pub mod ui_ext;
 pub mod status;
+pub mod system_user;
 pub mod term3270;
+pub mod ui_ext;
 
 use config::{ServerConfig, ServerMode};
 
@@ -106,13 +106,13 @@ impl AppState {
     /// Dictionary komplett neu aufbauen; Lookups entstehen dabei erneut aus den Relations.
     pub fn reload(&self) -> Arc<DataDictionary> {
         let base = self.base.read().expect("base lock").clone();
-        let mut ddic = (*base).clone();
-        ddic.activate();
-        self.store
-            .set_navigations(ddic_loader::navigations_from_ddic(&ddic));
+        let ddic = (*base).clone();
+        // ddic.activate();
+        // self.store
+        //     .set_navigations(ddic_loader::navigations_from_ddic(&ddic));
 
         let ddic = Arc::new(ddic);
-        *self.ddic.write().expect("ddic lock") = ddic.clone();
+        // *self.ddic.write().expect("ddic lock") = ddic.clone();
         ddic
     }
 }

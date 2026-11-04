@@ -788,7 +788,6 @@ impl RelationalStore {
         rows: &mut [DataRecord],
         assoc: &Association,
     ) -> Result<(), StoreError> {
-        info!("expand association");
         let schema = self.schema();
         let target = schema
             .set(&assoc.target_set)

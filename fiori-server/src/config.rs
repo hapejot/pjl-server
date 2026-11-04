@@ -120,12 +120,13 @@ pub struct Cli {
 impl Cli {
     pub fn into_config(self, mode: ServerMode) -> ServerConfig {
         let (default_port, default_data_dir) = mode.defaults();
-        let ddic = Some(
-            self.ddic
-                .unwrap_or_else(|| self.export_dir.join("ddic.json")),
-        );
+        let ddic = self.ddic.or_else(|| Some(PathBuf::from("ddic.json")));
         // Overlay gilt nur fuer die Laufzeit; der Designer schreibt die Datei selbst.
-        let ddic_overlay = if self.designer { None } else { self.ddic_overlay };
+        let ddic_overlay = if self.designer {
+            None
+        } else {
+            self.ddic_overlay
+        };
         ServerConfig {
             mode,
             port: self.port.unwrap_or(default_port),

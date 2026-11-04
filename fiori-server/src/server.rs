@@ -19,7 +19,7 @@ use postgres_relational_store::PostgresStore;
 use spec::data_dictionary::DataDictionary;
 use spec_schema::DdicSchemaSource;
 use sqlite_relational_store::RelationalStore;
-use tower_http::{services::ServeDir, trace::TraceLayer};
+use tower_http::services::ServeDir;
 use tracing::info;
 
 use crate::config::{ServerConfig, ServerMode};
@@ -391,5 +391,4 @@ fn router(state: AppState, config: &ServerConfig) -> Router {
             crate::auth::identity,
         ))
         .layer(axum::middleware::from_fn(crate::status::count_requests))
-        .layer(TraceLayer::new_for_http())
 }

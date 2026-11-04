@@ -381,6 +381,7 @@ impl PostgresStore {
         set: &EntitySet,
         key: &EntityKey,
     ) -> Result<DataRecord, StoreError> {
+        set.validate_key(key)?;
         let mut t = Translator::new(set, self.dialect())
             .filter(&Expr::equals_guid(key.id.to_string(), "ID"));
         if set.draft_enabled {
@@ -481,6 +482,9 @@ impl PostgresStore {
                         map.insert(name, param_to_json(&value, &column.data_type));
                     }
                 }
+            }
+            if !set.draft_enabled {
+                map.insert("IsActiveEntity".into(), json!(true));
             }
             raw.push((map, admin_id, messages));
         }
@@ -623,6 +627,7 @@ impl PostgresStore {
         set: &EntitySet,
         key: &EntityKey,
     ) -> Result<(), StoreError> {
+        set.validate_key(key)?;
         // Verwaltungszeilen des Teilbaums vor dem Loeschen merken, danach aufraeumen.
         let mut admin_uuids = Vec::new();
         if set.draft_enabled && !key.is_active_entity {
@@ -888,7 +893,7 @@ impl PostgresStore {
     ) -> Result<DataRecord, StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
-        let mut record = DataRecord::from_json(data)?;
+        let mut record = DataRecord::from_entity_json(data, set.draft_enabled)?;
 
         // Unbekannte Felder sind ein Fehler: im relationalen Modell gibt es
         // keine Spalte, in der sie verschwinden koennten.
@@ -1147,6 +1152,7 @@ impl DataStore for PostgresStore {
     ) -> Result<DataRecord, StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
+        set.require_drafts()?;
         let client = conn!(self);
         self.load_one(&client, set, &key.sibling()).await
     }
@@ -1222,6 +1228,8 @@ impl DataStore for PostgresStore {
 #[async_trait::async_trait]
 impl DraftDataStore for PostgresStore {
     async fn draft_edit(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
+        self.entity_set(set_name)?.set(set_name)
+            .map_err(|e| StoreError::Metadata(e.to_string()))?.require_drafts()?;
         if !key.is_active_entity {
             return Err(StoreError::InvalidState);
         }
@@ -1268,6 +1276,8 @@ impl DraftDataStore for PostgresStore {
 
     /// Draft Datensatz aktivieren und die potenziellen Kinder auch aktivieren.
     async fn draft_activate(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
+        self.entity_set(set_name)?.set(set_name)
+            .map_err(|e| StoreError::Metadata(e.to_string()))?.require_drafts()?;
         if key.is_active_entity {
             return Err(StoreError::InvalidState);
         }
@@ -1282,6 +1292,7 @@ impl DraftDataStore for PostgresStore {
     async fn draft_prepare(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
+        set.require_drafts()?;
         let client = conn!(self);
         Ok(json!(self.load_one(&client, set, key).await?))
     }

@@ -249,14 +249,14 @@ fn component_fragment(
                     <f:formElements>
                         <f:FormElement label="{start_label}">
                             <f:fields>
-                                <Text visible="{{= ${{IsActiveEntity}} }}" text="{dt}"/>
-                                <DateTimePicker visible="{{= !${{IsActiveEntity}} }}" value="{dt}" displayFormat="dd.MM.yyyy HH:mm" minutesStep="{step}"/>
+                                <Text visible="{{= !${{ui>/isEditable}} }}" text="{dt}"/>
+                                <DateTimePicker visible="{{ui>/isEditable}}" value="{dt}" displayFormat="dd.MM.yyyy HH:mm" minutesStep="{step}"/>
                             </f:fields>
                         </f:FormElement>
                         <f:FormElement label="{end_label}">
                             <f:fields>
-                                <Text visible="{{= ${{IsActiveEntity}} }}" text="{dt_end}"/>
-                                <DateTimePicker visible="{{= !${{IsActiveEntity}} }}" value="{dt_end}" displayFormat="dd.MM.yyyy HH:mm" minutesStep=""/></f:fields></f:FormElement><f:FormElement label="{duration_label}"><f:fields><Text visible="{{= ${{IsActiveEntity}} }}" text="{{path: '{dur}', targetType: 'any', formatter: 'fiori.ext.Format.minutes'}}"/><Input visible="{{= !${{IsActiveEntity}} }}" placeholder="z. B. 2:30 oder 2h oder 30 min" value="{{path: '{dur}', mode: 'OneWay', targetType: 'any', formatter: 'fiori.ext.Format.hm'}}"/></f:fields></f:FormElement></f:formElements></f:FormContainer></f:formContainers></f:Form></core:FragmentDefinition>"#,
+                                <Text visible="{{= !${{ui>/isEditable}} }}" text="{dt_end}"/>
+                                <DateTimePicker visible="{{ui>/isEditable}}" value="{dt_end}" displayFormat="dd.MM.yyyy HH:mm" minutesStep=""/></f:fields></f:FormElement><f:FormElement label="{duration_label}"><f:fields><Text visible="{{= !${{ui>/isEditable}} }}" text="{{path: '{dur}', targetType: 'any', formatter: 'fiori.ext.Format.minutes'}}"/><Input visible="{{ui>/isEditable}}" placeholder="z. B. 2:30 oder 2h oder 30 min" value="{{path: '{dur}', mode: 'OneWay', targetType: 'any', formatter: 'fiori.ext.Format.hm'}}"/></f:fields></f:FormElement></f:formElements></f:FormContainer></f:formContainers></f:Form></core:FragmentDefinition>"#,
         config = xml_escape(&config),
         start_label = label("start"),
         end_label = label("end"),
@@ -615,29 +615,16 @@ mod tests {
         assert!(xml.contains("formatter: 'fiori.ext.Format.hm'"));
     }
 
-    /// Prueft die Wohlgeformtheit ohne zusaetzliche Abhaengigkeit: Tags sind ausgeglichen.
+    /// Der XML-Reader beruecksichtigt auch `>` innerhalb von Binding-Attributen.
     fn roxmltree_like_check(xml: &str) -> bool {
-        let mut depth: i64 = 0;
-        let mut rest = xml;
-        while let Some(start) = rest.find('<') {
-            let Some(end) = rest[start..].find('>') else {
-                return false;
-            };
-            let tag = &rest[start + 1..start + end];
-            rest = &rest[start + end + 1..];
-            if tag.starts_with('?') || tag.starts_with('!') {
-                continue;
-            }
-            if tag.starts_with('/') {
-                depth -= 1;
-            } else if !tag.ends_with('/') {
-                depth += 1;
-            }
-            if depth < 0 {
-                return false;
+        let mut reader = quick_xml::Reader::from_str(xml);
+        loop {
+            match reader.read_event() {
+                Ok(quick_xml::events::Event::Eof) => return true,
+                Err(_) => return false,
+                _ => {}
             }
         }
-        depth == 0
     }
 
     #[test]

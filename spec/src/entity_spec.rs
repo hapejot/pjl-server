@@ -441,6 +441,9 @@ impl FieldSpec {
 /// with additional fields, header info, and data points.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntitySpec {
+    /// Draft-Unterstuetzung; bestehende Dictionaries bleiben draft-faehig.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub draft_enabled: bool,
     /// Entity name (e.g. "Orders"). Must match the entity name used in Relationships.
     pub name: String,
 
@@ -478,7 +481,7 @@ pub struct EntitySpec {
 
     /// Auditierung (Owner, CreatedBy/At, ChangedBy/At). Standard: `true`.
     /// `false` fuer Entitaeten wie Festwerte, die keinen Owner brauchen.
-    #[serde(default = "default_audited", skip_serializing_if = "is_true")]
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub audited: bool,
 
     /// Anzeige-Einstellungen der Entitaet (`ui`-Block in `ddic.json`).
@@ -486,7 +489,7 @@ pub struct EntitySpec {
     pub ui: Option<EntityUi>,
 }
 
-fn default_audited() -> bool {
+fn default_true() -> bool {
     true
 }
 
@@ -579,6 +582,7 @@ impl EntitySpec {
         type_name_plural: impl Into<String>,
     ) -> Self {
         Self {
+            draft_enabled: true,
             name: name.into(),
             package: package.into(),
             type_name: None,
@@ -597,6 +601,19 @@ impl EntitySpec {
     pub fn without_audit(mut self) -> Self {
         self.audited = false;
         self
+    }
+
+    pub fn without_drafts(mut self) -> Self {
+        self.draft_enabled = false;
+        self
+    }
+
+    pub fn key_names(&self) -> &[&str] {
+        if self.draft_enabled {
+            &["ID", "IsActiveEntity"]
+        } else {
+            &["ID"]
+        }
     }
 
     pub fn is_audited(&self) -> bool {

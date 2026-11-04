@@ -7,6 +7,35 @@ Fiori UIs", Node.js "Fiori Support", Java "Fiori Drafts".
 
 ## 1. Datenmodell
 
+### Konfiguration im pjl-server
+
+Eine Entity kann in `ddic.json` mit `"draft_enabled": false` auf direkte
+CRUD-Operationen ohne Entwurf umgestellt werden. Ohne Angabe gilt weiterhin
+`true`. Dasselbe Feld ist im Designer an der Entity pflegbar und kann im
+DDIC-Overlay gesetzt werden.
+
+- Mit Draft: OData-Key `ID, IsActiveEntity`, Draft-Aktionen und Navigationen.
+- Ohne Draft: OData-Key nur `ID`; keine technischen Draft-Felder, -Aktionen
+  oder -Navigationen in Metadaten und Antworten. POST legt sofort einen aktiven
+  Satz an, PATCH und DELETE wirken direkt.
+- Alle Entities einer Komposition muessen denselben Modus deklarieren;
+  Abweichungen werden abgelehnt. Lose Assoziationen duerfen die Modi mischen.
+- Der Designer selbst arbeitet immer ohne Drafts, unabhaengig vom
+  Draft-Modus der darin gepflegten fachlichen Entities.
+- UI-Einschraenkung: Fiori Elements OData V4 stellt fuer reine Non-Draft-Entities
+  keine Standardaktionen zum Anlegen/Bearbeiten bereit. Anzeigen und Loeschen
+  funktionieren; direkte CRUD-Endpunkte sind vorhanden. Eine zusaetzliche
+  Bearbeitungsoberflaeche oder echte Sticky-Session-Unterstuetzung ist noch
+  nicht implementiert. Dies gilt auch fuer den Designer.
+- Ein Moduswechsel bestehender relationaler Tabellen erfordert eine explizite
+  Daten- und Primaerschluesselmigration. Der automatische Schemaabgleich
+  bricht dabei ab, statt offene Drafts zu verwerfen oder Schluessel still zu aendern.
+  Neue Tabellen unterstuetzen beide Modi.
+
+Die folgenden Abschnitte beschreiben das CAP-Referenzmodell fuer Draft-Entities;
+die relationalen pjl-Stores verwenden eine Tabelle mit zusammengesetztem Key
+statt separater Aktiv-/Draft-Tabellen.
+
 Pro draft-fähiger Entität `E` (annotiert mit `@odata.draft.enabled`) existieren
 **zwei physische Tabellen**, aber **ein logisches OData-Entity-Set**:
 

@@ -80,6 +80,17 @@ pub struct DataRecord {
 }
 
 impl DataRecord {
+    pub fn from_entity_json(value: &Value, draft_enabled: bool) -> Result<Self, StoreError> {
+        if !draft_enabled && value.get("IsActiveEntity") == Some(&Value::Bool(false)) {
+            return Err(StoreError::Conflict("Entity does not support drafts".into()));
+        }
+        let mut record = Self::from_json(value)?;
+        if !draft_enabled {
+            record.activate()?;
+        }
+        Ok(record)
+    }
+
     pub fn new(id: Uuid, is_active_entity: bool) -> Self {
         let has_active_entity: bool = false;
         let has_draft_entity: bool = false;

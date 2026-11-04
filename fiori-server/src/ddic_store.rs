@@ -94,11 +94,10 @@ impl DdicStore {
         let mut next = inner.sets.clone();
         let out = f(next.entry(set.to_string()).or_default())?;
         if PERSISTED.contains(&set) {
-            if let Ok(json) = build(&inner.base, &next) {
-                ddic_file::save(&self.path, &json)
-                    .map_err(|e| StoreError::Conflict(format!("cannot write ddic: {e:#}")))?;
-                inner.base = json;
-            }
+            let json = build(&inner.base, &next)?;
+            ddic_file::save(&self.path, &json)
+                .map_err(|e| StoreError::Conflict(format!("cannot write ddic: {e:#}")))?;
+            inner.base = json;
         }
         inner.sets = next;
         Ok(out)
@@ -168,6 +167,7 @@ fn project(base: &Value) -> Sets {
             json!({
                 "name": name,
                 "plural": text(e, "type_name_plural"),
+                "draft_enabled": e.get("draft_enabled").and_then(Value::as_bool).unwrap_or(true),
                 "type_name": text(e, "type_name"),
                 "package_ID": id_for("PackageSet", pkg),
             }),
@@ -353,6 +353,15 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
             .map(str::to_string)
             .unwrap_or_else(|| format!("{name}s"));
         obj.insert("type_name_plural".into(), json!(plural));
+        match r.get("draft_enabled") {
+            None | Some(Value::Bool(true)) => {
+                obj.remove("draft_enabled");
+            }
+            Some(Value::Bool(false)) => {
+                obj.insert("draft_enabled".into(), json!(false));
+            }
+            Some(_) => return Err(StoreError::Conflict("draft_enabled muss Boolean sein".into())),
+        }
         put(
             &mut obj,
             "type_name",
@@ -754,10 +763,9 @@ impl DataStore for DdicStore {
     async fn read_sibling_entity(
         &self,
         set: &str,
-        key: &EntityKey,
+        _key: &EntityKey,
     ) -> Result<DataRecord, StoreError> {
-        // Keine Entwuerfe: der aktive Satz ist zugleich der einzige.
-        self.read_entity(set, key, &ODataQuery::new()).await
+        Err(StoreError::Conflict(format!("{set} does not support drafts")))
     }
 
     async fn get_property(
@@ -787,23 +795,16 @@ impl DataStore for DdicStore {
 
 #[async_trait::async_trait]
 impl DraftDataStore for DdicStore {
-    // Ohne Entwurfszustand ist jede Draft-Aktion die Lesung des aktiven Satzes.
-    async fn draft_edit(&self, set: &str, key: &EntityKey) -> Result<Value, StoreError> {
-        Ok(value_of(
-            &self.read_entity(set, key, &ODataQuery::new()).await?,
-        ))
+    async fn draft_edit(&self, set: &str, _key: &EntityKey) -> Result<Value, StoreError> {
+        Err(StoreError::Conflict(format!("{set} does not support drafts")))
     }
 
-    async fn draft_activate(&self, set: &str, key: &EntityKey) -> Result<Value, StoreError> {
-        Ok(value_of(
-            &self.read_entity(set, key, &ODataQuery::new()).await?,
-        ))
+    async fn draft_activate(&self, set: &str, _key: &EntityKey) -> Result<Value, StoreError> {
+        Err(StoreError::Conflict(format!("{set} does not support drafts")))
     }
 
-    async fn draft_prepare(&self, set: &str, key: &EntityKey) -> Result<Value, StoreError> {
-        Ok(value_of(
-            &self.read_entity(set, key, &ODataQuery::new()).await?,
-        ))
+    async fn draft_prepare(&self, set: &str, _key: &EntityKey) -> Result<Value, StoreError> {
+        Err(StoreError::Conflict(format!("{set} does not support drafts")))
     }
 }
 

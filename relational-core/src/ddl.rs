@@ -297,6 +297,12 @@ pub async fn migration_plan(
     {
         if catalog.table_exists(&set.name).await? {
             let existing = catalog.existing_columns(&set.name).await?;
+            if existing.contains(IS_ACTIVE_COLUMN) != set.draft_enabled {
+                return Err(StoreError::Metadata(format!(
+                    "{}: Aenderung des Draft-Modus erfordert eine explizite Daten- und Primaerschluesselmigration",
+                    set.name
+                )));
+            }
             let mut wanted: Vec<(String, String)> = set
                 .columns()
                 .map(|c| (c.name.clone(), dialect.column_type(&c.data_type).to_string()))
@@ -426,6 +432,25 @@ mod tests {
         assert!(!plan.iter().any(|s| s.starts_with("ALTER TABLE")));
     }
 
+    #[tokio::test]
+    async fn draft_mode_changes_require_explicit_migration() {
+        for enabled in [false, true] {
+            let mut set = EntitySet::new("ThingSet", "Thing");
+            if enabled {
+                set = set.drafts();
+            }
+            let schema = Schema::builder().set(set).build().unwrap();
+            let columns = if enabled {
+                vec!["ID"]
+            } else {
+                vec!["ID", "IsActiveEntity"]
+            };
+            let catalog = FakeCatalog::default().with_table("ThingSet", &columns);
+            let error = migration_plan(&catalog, &SQLITE, &schema).await.unwrap_err();
+            assert!(error.to_string().contains("Primaerschluesselmigration"), "{error}");
+        }
+    }
+
     /// Der Parent muss vor dem Kind stehen, sonst greift der Fremdschluessel
     /// ins Leere.
     #[tokio::test]
@@ -458,7 +483,7 @@ mod tests {
     /// nicht angefasst.
     #[tokio::test]
     async fn dropped_columns_are_reported_not_removed() {
-        let catalog = FakeCatalog::default().with_table("OrderSet", &["ID", "Vergessen"]);
+        let catalog = FakeCatalog::default().with_table("OrderSet", &["ID", "IsActiveEntity", "Vergessen"]);
         let plan = migration_plan(&catalog, &SQLITE, &schema()).await.unwrap();
         assert!(!plan.iter().any(|s| s.contains("DROP")));
 
@@ -538,7 +563,7 @@ mod tests {
         use data_store::schema::EntitySet;
         let set = EntitySet::new("ProjectSet", "Project").drafts();
         let schema = Schema::builder().set(set).build().unwrap();
-        let catalog = FakeCatalog::default().with_table("ProjectSet", &["ID"]);
+        let catalog = FakeCatalog::default().with_table("ProjectSet", &["ID", "IsActiveEntity"]);
         let plan = migration_plan(&catalog, &SQLITE, &schema).await.unwrap();
         assert!(!plan.iter().any(|s| s.contains("DROP COLUMN")));
     }

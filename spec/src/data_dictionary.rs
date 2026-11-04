@@ -46,6 +46,7 @@ impl DataDictionary {
 
         let entity_ent = EntitySpec::new("Entity", core.name(), "Entities")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
+            .field(FieldSpec::bool_field("draft_enabled", "Draft Enabled"))
             .field(FieldSpec::atom("plural", "Plural", "Edm.String"));
 
         let field_ent = EntitySpec::new("Field", core.name(), "Fields")
@@ -431,6 +432,13 @@ impl DataDictionary {
             }
         }
         entities
+    }
+
+    /// Der dateibasierte Designer hat keinen Entwurfszustand.
+    pub fn disable_drafts(&mut self) {
+        for entity in &mut self.entities {
+            entity.draft_enabled = false;
+        }
     }
 
     pub fn relationships(&self) -> impl Iterator<Item = &Relationship> {

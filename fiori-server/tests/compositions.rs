@@ -3,7 +3,7 @@ use axum::{
     http::{Method, Request, StatusCode},
 };
 use fiori_server::{AppState, srv};
-use odata_yaml_store::{DataStore, EntityKey, YamlStore};
+use data_store::{DataStore, EntityKey, StaticSchema};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -13,14 +13,22 @@ const ENTITY_ID: &str = "00000000-0000-0000-0000-000000000001";
 
 async fn app_state() -> (TempDir, AppState) {
     let dir = TempDir::new().unwrap();
-    let store = Arc::new(YamlStore::open(dir.path()).unwrap());
+    let base = spec::data_dictionary::DataDictionary::new();
+    let mut active = base.clone();
+    active.activate();
+    let schema = spec_schema::schema_from_ddic(&active).unwrap();
+    let store = Arc::new(sqlite_relational_store::RelationalStore::open_in_memory(
+        Arc::new(StaticSchema::new(schema)),
+    ).await.unwrap());
     store
         .create_entity(
             "EntitySet",
             &json!({ "ID": ENTITY_ID, "IsActiveEntity": true, "name": "Order", "plural": "Orders" }),
         ).await
         .unwrap();
-    let state = AppState::designer(store);
+    let state = AppState::new(store, Arc::new(fiori_server::config::ServerConfig::defaults(
+        fiori_server::config::ServerMode::Runtime,
+    )), base);
     state.reload();
     (dir, state)
 }

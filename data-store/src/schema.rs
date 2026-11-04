@@ -263,6 +263,26 @@ pub struct LegacyValueColumn {
 }
 
 impl EntitySet {
+    pub fn validate_key(&self, key: &crate::EntityKey) -> Result<(), crate::StoreError> {
+        if !self.draft_enabled && !key.is_active_entity {
+            Err(crate::StoreError::not_found(format!(
+                "{}/draft/{}", self.name, key.id
+            )))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn require_drafts(&self) -> Result<(), crate::StoreError> {
+        if self.draft_enabled {
+            Ok(())
+        } else {
+            Err(crate::StoreError::Conflict(format!(
+                "{} does not support drafts", self.name
+            )))
+        }
+    }
+
     pub fn new(name: impl Into<String>, entity_name: impl Into<String>) -> Self {
         let mut columns = IndexMap::new();
         columns.insert(
@@ -544,6 +564,14 @@ impl SchemaBuilder {
                         target: assoc.target_set.clone(),
                     }
                 })?;
+                if assoc.ownership == Ownership::Composition
+                    && set.draft_enabled != target.draft_enabled
+                {
+                    return Err(SchemaError::Incomplete(format!(
+                        "Komposition {}.{}: {} und {} muessen denselben Draft-Modus haben",
+                        set.name, assoc.name, set.name, target.name
+                    )));
+                }
                 // Die Fremdschluesselspalte muss dort existieren, wo sie laut
                 // Deklaration liegt.
                 let (owner, column) = match &assoc.foreign_key {

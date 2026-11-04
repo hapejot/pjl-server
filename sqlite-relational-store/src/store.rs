@@ -395,6 +395,7 @@ impl RelationalStore {
         set: &EntitySet,
         key: &EntityKey,
     ) -> Result<DataRecord, StoreError> {
+        set.validate_key(key)?;
         let mut t = Translator::new(set, self.dialect())
             .filter(&Expr::equals_guid(key.id.to_string(), "ID"));
         if set.draft_enabled {
@@ -527,6 +528,9 @@ impl RelationalStore {
                     if has("DraftMessages") {
                         messages = row.get("DraftMessages").ok();
                     }
+                }
+                if !set.draft_enabled {
+                    map.insert("IsActiveEntity".into(), json!(true));
                 }
                 raw.push((map, admin_id, messages));
             }
@@ -670,6 +674,7 @@ impl RelationalStore {
         set: &EntitySet,
         key: &EntityKey,
     ) -> Result<(), StoreError> {
+        set.validate_key(key)?;
         // Verwaltungszeilen des Teilbaums vor dem Loeschen merken, danach aufraeumen.
         let mut admin_uuids = Vec::new();
         if set.draft_enabled && !key.is_active_entity {
@@ -950,7 +955,7 @@ impl DataStore for RelationalStore {
         for c in helper_cols.iter() {
             sql = sql.select(c);
         }
-        if !sql.select_is_empty() {
+        if set.draft_enabled && !sql.select_is_empty() {
             sql = sql.select("DraftAdministrativeData_ID");
         }
         if let Some(filter) = &query.filter {
@@ -1010,7 +1015,7 @@ impl DataStore for RelationalStore {
     async fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
-        let mut record = DataRecord::from_json(data)?;
+        let mut record = DataRecord::from_entity_json(data, set.draft_enabled)?;
 
         // Unbekannte Felder sind ein Fehler: im relationalen Modell gibt es
         // keine Spalte, in der sie verschwinden koennten.
@@ -1135,6 +1140,7 @@ impl DataStore for RelationalStore {
     ) -> Result<DataRecord, StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
+        set.require_drafts()?;
         let conn = self.conn.lock().expect("connection lock");
         self.load_one(&conn, set, &key.sibling())
     }
@@ -1157,6 +1163,8 @@ impl DataStore for RelationalStore {
 #[async_trait::async_trait]
 impl DraftDataStore for RelationalStore {
     async fn draft_edit(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
+        self.entity_set(set_name)?.set(set_name)
+            .map_err(|e| StoreError::Metadata(e.to_string()))?.require_drafts()?;
         if !key.is_active_entity {
             return Err(StoreError::InvalidState);
         }
@@ -1205,6 +1213,8 @@ impl DraftDataStore for RelationalStore {
     /// Kinder sonst einen Foreign-Key Fehler bekommen, da sie ja auf die
     /// Eltern zeigen.
     async fn draft_activate(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
+        self.entity_set(set_name)?.set(set_name)
+            .map_err(|e| StoreError::Metadata(e.to_string()))?.require_drafts()?;
         if key.is_active_entity {
             return Err(StoreError::InvalidState);
         }
@@ -1220,6 +1230,7 @@ impl DraftDataStore for RelationalStore {
     async fn draft_prepare(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
+        set.require_drafts()?;
         let conn = self.conn.lock().expect("connection lock");
         Ok(json!(self.load_one(&conn, set, key)?))
     }

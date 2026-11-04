@@ -5,6 +5,7 @@
 //! veraendern. Der Merge erfolgt ueber den Entitaetsnamen.
 //!
 //! Regeln:
+//! - `draft_enabled`: ueberschreibt den Draft-Modus der Entity.
 //! - `type_name_plural`, `package`: ueberschreiben die Basis.
 //! - `list_views`: je Ansicht per `name`. Gleichnamige ersetzen die Basis,
 //!   unbekannte werden angehaengt.
@@ -35,6 +36,8 @@ pub struct Overlay {
 #[serde(deny_unknown_fields)]
 pub struct OverlayEntity {
     pub name: String,
+    #[serde(default)]
+    pub draft_enabled: Option<bool>,
     #[serde(default)]
     pub package: Option<String>,
     #[serde(default)]
@@ -83,6 +86,9 @@ pub fn apply(base: DataDictionary, overlay: &Overlay) -> anyhow::Result<DataDict
 
         if let Some(package) = &oe.package {
             obj["package"] = json!(package);
+        }
+        if let Some(enabled) = oe.draft_enabled {
+            obj["draft_enabled"] = json!(enabled);
         }
         if let Some(name) = &oe.type_name {
             obj["type_name"] = json!(name);
@@ -326,6 +332,15 @@ mod tests {
 
     fn video(d: &DataDictionary) -> EntitySpec {
         d.entities().into_iter().find(|e| e.name() == "Video").unwrap()
+    }
+
+    #[test]
+    fn draft_mode_can_be_overridden_in_both_directions() {
+        let disabled = parse(r#"{"entities":[{"name":"Video","draft_enabled":false}]}"#).unwrap();
+        let ddic = apply(base(), &disabled).unwrap();
+        assert!(!video(&ddic).draft_enabled);
+        let enabled = parse(r#"{"entities":[{"name":"Video","draft_enabled":true}]}"#).unwrap();
+        assert!(video(&apply(ddic, &enabled).unwrap()).draft_enabled);
     }
 
     #[test]

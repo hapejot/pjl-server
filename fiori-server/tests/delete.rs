@@ -28,7 +28,9 @@ async fn app_state() -> (TempDir, AppState) {
                      "name": "Order", "plural": "Orders", "package_ID": PACKAGE_ID }),
         ).await
         .unwrap();
-    let state = AppState::designer(store);
+    let state = AppState::new(store, Arc::new(fiori_server::config::ServerConfig::defaults(
+        fiori_server::config::ServerMode::Runtime,
+    )), spec::data_dictionary::DataDictionary::new());
     state.reload();
     (dir, state)
 }

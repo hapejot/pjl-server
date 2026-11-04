@@ -49,8 +49,11 @@ impl AppState {
     pub fn new(
         store: Arc<dyn DraftDataStore>,
         config: Arc<ServerConfig>,
-        base: DataDictionary,
+        mut base: DataDictionary,
     ) -> Self {
+        if config.designer {
+            base.disable_drafts();
+        }
         let base = Arc::new(base);
         let mut active = (*base).clone();
         active.activate();

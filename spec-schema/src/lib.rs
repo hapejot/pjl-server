@@ -83,8 +83,10 @@ fn entity_set(
     entity: &EntitySpec,
     ownership: &HashMap<(String, String), Ownership>,
 ) -> Result<EntitySet, SchemaError> {
-    // Alle DDIC-Entitaeten nehmen am Draft-Flow teil.
-    let mut set = EntitySet::new(entity.setname(), entity.name()).drafts();
+    let mut set = EntitySet::new(entity.setname(), entity.name());
+    if entity.draft_enabled {
+        set = set.drafts();
+    }
 
     for field in entity.fields() {
         match field {

@@ -241,7 +241,9 @@ async fn seed_value_lists(store: &dyn DraftDataStore, ddic: &DataDictionary) -> 
 fn load_dictionary(config: &ServerConfig) -> anyhow::Result<DataDictionary> {
     if config.designer {
         // Der Designer zeigt sein eincompiliertes Metamodell; die Daten liegen im Store.
-        return Ok(DataDictionary::new());
+        let mut ddic = DataDictionary::new();
+        ddic.disable_drafts();
+        return Ok(ddic);
     }
     match (&config.ddic, config.mode) {
         (Some(path), _) => {
@@ -307,6 +309,20 @@ fn schema_source(
     if let Some(path) = &config.schema {
         let schema = Schema::load(path)
             .with_context(|| format!("cannot read schema '{}'", path.display()))?;
+        for entity in base.entities() {
+            let set = schema.set(&entity.setname())?;
+            anyhow::ensure!(
+                set.draft_enabled == entity.draft_enabled,
+                "{}: Draft-Modus in Dictionary und Speicher-Schema stimmt nicht ueberein",
+                entity.name()
+            );
+            let keys: Vec<&str> = set.key_columns().iter().map(|column| column.name.as_str()).collect();
+            anyhow::ensure!(
+                keys == entity.key_names(),
+                "{}: Schluessel in Dictionary und Speicher-Schema stimmen nicht ueberein",
+                entity.name()
+            );
+        }
         info!(
             "schema '{}': {} sets",
             path.display(),

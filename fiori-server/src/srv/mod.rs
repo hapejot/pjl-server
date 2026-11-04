@@ -42,9 +42,11 @@ impl EntityType {
         let mut navigation_properties = Vec::new();
 
         properties.push(Property::new("ID", "Edm.Guid").nullable(false));
-        properties.push(Property::new("IsActiveEntity", "Edm.Boolean").nullable(false));
-        properties.push(Property::new("HasActiveEntity", "Edm.Boolean").nullable(false));
-        properties.push(Property::new("HasDraftEntity", "Edm.Boolean").nullable(false));
+        if x.draft_enabled {
+            properties.push(Property::new("IsActiveEntity", "Edm.Boolean").nullable(false));
+            properties.push(Property::new("HasActiveEntity", "Edm.Boolean").nullable(false));
+            properties.push(Property::new("HasDraftEntity", "Edm.Boolean").nullable(false));
+        }
 
         for f in x.fields() {
             match f {
@@ -111,19 +113,21 @@ impl EntityType {
                 }
             }
         }
-        navigation_properties.push(NavigationProperty::new(
-            "SiblingEntity",
-            format!("Service.{}", x.name()),
-            None,
-        ));
-        navigation_properties.push(NavigationProperty::new(
-            "DraftAdministrativeData",
-            "Service.DraftAdministrativeData",
-            Some(true),
-        ));
+        if x.draft_enabled {
+            navigation_properties.push(NavigationProperty::new(
+                "SiblingEntity",
+                format!("Service.{}", x.name()),
+                None,
+            ));
+            navigation_properties.push(NavigationProperty::new(
+                "DraftAdministrativeData",
+                "Service.DraftAdministrativeData",
+                Some(true),
+            ));
+        }
         Self {
             name: x.name().into(),
-            key: Key::new(&["ID", "IsActiveEntity"]),
+            key: Key::new(x.key_names()),
             properties,
             navigation_properties,
         }
@@ -294,14 +298,16 @@ pub struct EntitySet {
 impl EntitySet {
     fn from_entity(ddic: &DataDictionary, x: &EntitySpec) -> EntitySet {
         let mut navigation_property_bindings = Vec::new();
-        navigation_property_bindings.push(NavigationPropertyBinding {
-            path: "SiblingEntity".into(),
-            target: x.setname().into(),
-        });
-        navigation_property_bindings.push(NavigationPropertyBinding {
-            path: "DraftAdministrativeData".into(),
-            target: "DraftAdministrativeData".into(),
-        });
+        if x.draft_enabled {
+            navigation_property_bindings.push(NavigationPropertyBinding {
+                path: "SiblingEntity".into(),
+                target: x.setname().into(),
+            });
+            navigation_property_bindings.push(NavigationPropertyBinding {
+                path: "DraftAdministrativeData".into(),
+                target: "DraftAdministrativeData".into(),
+            });
+        }
         for field in x.fields() {
             debug!("from entity field: {}", field.name());
             if let FieldSpec::Lookup {
@@ -333,9 +339,17 @@ impl EntitySet {
     }
 }
 
-fn draft_annotations_for_entity(ddic: &DataDictionary, entity: &EntitySpec) -> Vec<String> {
+fn capability_annotations_for_entity(ddic: &DataDictionary, entity: &EntitySpec) -> Vec<String> {
     let entity_name = entity.name();
     let set_name = entity.setname();
+    if !entity.draft_enabled {
+        return vec![format!(
+            r##"<Annotations Target="Service.EntityContainer/{set_name}"><Annotation Term="Capabilities.UpdateRestrictions"><Record><PropertyValue Property="Updatable" Bool="true"/></Record></Annotation><Annotation Term="Capabilities.DeleteRestrictions"><Record><PropertyValue Property="Deletable" Bool="true"/></Record></Annotation><Annotation Term="Capabilities.InsertRestrictions"><Record><PropertyValue Property="Insertable" Bool="true"/><PropertyValue Property="NonInsertableProperties"><Collection><PropertyPath>ID</PropertyPath></Collection></PropertyValue></Record></Annotation>{}</Annotations>"##,
+            navigation_restrictions(ddic, entity)
+        ), format!(
+            r##"<Annotations Target="Service.{entity_name}/ID"><Annotation Term="Core.Computed" Bool="true"/></Annotations>"##
+        )];
+    }
     // Ein Kind einer Composition ist DraftNode, alles andere ein eigenstaendiger DraftRoot.
     let draft_role = match ddic.owning_relationship(entity_name) {
         Some(_) => r##"<Annotation Term="Common.DraftNode"><Record Type="Common.DraftNodeType"><PropertyValue Property="PreparationAction" String="Service.draftPrepare"/></Record></Annotation>"##.to_string(),
@@ -1758,6 +1772,7 @@ enum Cursor {
         record: Box<DataRecord>,
     },
     Collection {
+        spec: EntitySpec,
         records: Vec<DataRecord>,
         count: Option<usize>,
     },
@@ -1796,6 +1811,7 @@ async fn resolve_get_path(
 ) -> Result<GetResult, ODataError> {
     let resolved = resolve_path(state, query, segments).await?;
     materialize(
+        state,
         resolved.cursor,
         resolved.suffix,
         &resolved.query,
@@ -1853,7 +1869,7 @@ async fn resolve_path<'a>(
     let mut cursor = if root.keys.is_empty() {
         read_collection(state, &root.name, root_query).await?
     } else {
-        let record = read_single(state, &root.name, &entity_key(root)?, root_query).await?;
+        let record = read_single(state, &root.name, &entity_key(&spec, root)?, root_query).await?;
         Cursor::Entity {
             spec,
             set: root.name.clone(),
@@ -1880,6 +1896,7 @@ async fn resolve_path<'a>(
 }
 
 fn materialize(
+    state: &AppState,
     cursor: Cursor,
     suffix: Option<&str>,
     query: &ODataQuery,
@@ -1897,13 +1914,15 @@ fn materialize(
         (_, Some(suffix)) => Err(ODataError::bad_request(format!(
             "'{suffix}' is not applicable here"
         ))),
-        (Cursor::Entity { record, .. }, None) => {
-            let mut value = json!(record);
+        (Cursor::Entity { spec, record, .. }, None) => {
+            let mut value = entity_json(state, &spec, json!(record));
             touch_selected_fields(&mut value, query);
             value["@odata.context"] = json!(format!("{context}/$entity"));
             Ok(GetResult::Json(value))
         }
-        (Cursor::Collection { records, count }, None) => {
+        (Cursor::Collection { spec, records, count }, None) => {
+            let records: Vec<Value> = records.into_iter()
+                .map(|r| entity_json(state, &spec, json!(r))).collect();
             let mut value = json!({ "@odata.context": context, "value": records });
             if let Some(count) = count {
                 value["@odata.count"] = json!(count);
@@ -1915,6 +1934,73 @@ fn materialize(
         )),
         (Cursor::Empty, None) => Ok(GetResult::NoContent),
     }
+}
+
+const DRAFT_PROPERTIES: &[&str] = &[
+    "IsActiveEntity", "HasActiveEntity", "HasDraftEntity",
+    "DraftAdministrativeData", "DraftAdministrativeData_ID", "DraftMessages", "SiblingEntity",
+];
+
+fn entity_json(state: &AppState, spec: &EntitySpec, mut value: Value) -> Value {
+    if let Some(items) = value.as_array_mut() {
+        for item in items {
+            *item = entity_json(state, spec, item.take());
+        }
+        return value;
+    }
+    if let Some(object) = value.as_object_mut() {
+        if !spec.draft_enabled {
+            for name in DRAFT_PROPERTIES {
+                object.remove(*name);
+            }
+        }
+        let ddic = state.ddic();
+        for field in spec.fields() {
+            if let FieldSpec::Lookup { name, entity, .. } = field {
+                if let (Some(target), Some(nested)) = (ddic.active_entity(entity), object.get_mut(name)) {
+                    *nested = entity_json(state, target, nested.take());
+                }
+            }
+        }
+    }
+    value
+}
+
+fn validate_write(spec: &EntitySpec, body: &Value) -> Result<(), ODataError> {
+    if !body.is_object() {
+        return Err(ODataError::bad_request("Expected an entity object"));
+    }
+    if !spec.draft_enabled {
+        if let Some(name) = DRAFT_PROPERTIES.iter().find(|name| body.get(**name).is_some()) {
+            return Err(ODataError::bad_request(format!(
+                "{} does not support draft property '{name}'", spec.name()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_query(state: &AppState, spec: &EntitySpec, query: &ODataQuery) -> Result<(), ODataError> {
+    if !spec.draft_enabled {
+        for name in query.select.iter().map(String::as_str)
+            .chain(query.expand.iter().map(|e| e.navigation_property.as_str()))
+        {
+            if DRAFT_PROPERTIES.contains(&name) {
+                return Err(ODataError::bad_request(format!("Unknown property '{name}'")));
+            }
+        }
+    }
+    let ddic = state.ddic();
+    for expand in &query.expand {
+        if let Some(FieldSpec::Lookup { entity, .. }) = spec.fields()
+            .find(|f| f.name() == expand.navigation_property)
+        {
+            if let Some(target) = ddic.active_entity(entity) {
+                validate_query(state, target, &expand.nested_query)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Ein Navigations-, Property- oder Draft-Segment ausgehend vom aktuellen Cursor aufloesen.
@@ -1931,12 +2017,15 @@ async fn follow_segment(
             segment.name
         )));
     };
-    context.push_str(&format!(
-        "(ID={},IsActiveEntity={})/{}",
-        record.id(),
-        record.is_active_entity(),
-        segment.name
-    ));
+    let key = if spec.draft_enabled {
+        format!("ID={},IsActiveEntity={}", record.id(), record.is_active_entity())
+    } else {
+        format!("ID={}", record.id())
+    };
+    context.push_str(&format!("({key})/{}", segment.name));
+    if !spec.draft_enabled && DRAFT_PROPERTIES.contains(&segment.name.as_str()) {
+        return Err(ODataError::not_found(format!("Unknown property '{}'", segment.name)));
+    }
 
     match segment.name.as_str() {
         // Beide Draft-Navigationen sind nullable: fehlt das Ziel, ist die Antwort leer.
@@ -2050,7 +2139,7 @@ async fn follow_to_many(
         return read_collection(state, &set, &child_query).await;
     }
 
-    let record = read_single(state, &set, &entity_key(segment)?, query).await?;
+    let record = read_single(state, &set, &entity_key(&target, segment)?, query).await?;
     if record
         .get(&foreign_key)
         .and_then(|v| v.as_str().map(str::to_string))
@@ -2079,11 +2168,34 @@ fn and_filter(existing: Option<Expr>, additional: Expr) -> Expr {
     }
 }
 
-fn entity_key(segment: &PathSegment) -> Result<EntityKey, ODataError> {
+fn entity_key(spec: &EntitySpec, segment: &PathSegment) -> Result<EntityKey, ODataError> {
+    if segment.keys.len() != spec.key_names().len() {
+        return Err(ODataError::bad_request(format!(
+            "Expected keys {} for '{}'", spec.key_names().join(", "), spec.name()
+        )));
+    }
+    for (index, key) in segment.keys.iter().enumerate() {
+        if segment.keys[..index].iter().any(|other| other.name == key.name) {
+            return Err(ODataError::bad_request("Duplicate key"));
+        }
+        if key.name.is_none() && spec.draft_enabled {
+            return Err(ODataError::bad_request("Composite keys must be named"));
+        }
+        if let Some(name) = &key.name {
+            if !spec.key_names().contains(&name.as_str()) {
+                return Err(ODataError::bad_request(format!("Unknown key '{name}' for '{}'", spec.name())));
+            }
+        }
+    }
+    if spec.draft_enabled && !segment.keys.iter().any(|key| {
+        key.name.as_deref() == Some("IsActiveEntity") && key.value.as_bool().is_some()
+    }) {
+        return Err(ODataError::bad_request("Missing boolean key 'IsActiveEntity'"));
+    }
     let id = segment.id().ok_or_else(|| {
         ODataError::bad_request(format!("Missing key 'ID' in '{}'", segment.name))
     })?;
-    Ok(EntityKey::new(id, segment.is_active_entity()))
+    Ok(EntityKey::new(id, !spec.draft_enabled || segment.is_active_entity()))
 }
 
 fn touch_selected_fields(value: &mut Value, query: &ODataQuery) {
@@ -2134,6 +2246,10 @@ async fn read_single(
     key: &EntityKey,
     query: &ODataQuery,
 ) -> Result<DataRecord, ODataError> {
+    let ddic = state.ddic();
+    let spec = ddic.active_entity_by_setname(set)
+        .ok_or_else(|| ODataError::not_found(format!("Unknown entity set '{set}'")))?;
+    validate_query(state, spec, query)?;
     state
         .store
         .read_entity(set, key, query)
@@ -2146,13 +2262,16 @@ async fn read_collection(
     set: &str,
     query: &ODataQuery,
 ) -> Result<Cursor, ODataError> {
+    let spec = state.ddic().active_entity_by_setname(set).cloned()
+        .ok_or_else(|| ODataError::not_found(format!("Unknown entity set '{set}'")))?;
+    validate_query(state, &spec, query)?;
     // Ein Aufruf: Hooks laufen einmal pro Request, Count beruecksichtigt Entfernungen.
     let (records, count) = state
         .store
         .read_collection(set, query, query.count)
         .await
         .map_err(ODataError::from_store)?;
-    Ok(Cursor::Collection { records, count })
+    Ok(Cursor::Collection { spec, records, count })
 }
 
 async fn post_handler(
@@ -2175,26 +2294,44 @@ async fn post_handler(
     let body = payload.map(|Json(v)| v).unwrap_or_else(|| json!({}));
 
     match path_struct.segments.as_slice() {
-        [entity] => match state.store.create_entity(&entity.name, &body).await {
-            Ok(r) => created_response(json!(r)),
-            Err(e) => ODataError::from_store(e).into_response(),
+        [entity] if entity.keys.is_empty() => {
+            let spec = match entity_spec_for_segment(&state, entity)
+                .and_then(|spec| { validate_write(&spec, &body)?; Ok(spec) }) {
+                Ok(spec) => spec,
+                Err(e) => return e.into_response(),
+            };
+            let mut body = body;
+            if !spec.draft_enabled {
+                body["IsActiveEntity"] = json!(true);
+            }
+            match state.store.create_entity(&entity.name, &body).await {
+                Ok(r) => created_response(entity_json(&state, &spec, json!(r))),
+                Err(e) => ODataError::from_store(e).into_response(),
+            }
         },
         [entity, action]
             if !entity.keys.is_empty() && action.keys.is_empty() && action.name.contains('.') =>
         {
             let action_name = action.name.rsplit('.').next().unwrap_or_default();
-            let key: EntityKey = entity.into();
+            let spec = match entity_spec_for_segment(&state, entity) {
+                Ok(spec) => spec,
+                Err(e) => return e.into_response(),
+            };
+            let key = match entity_key(&spec, entity) {
+                Ok(key) => key,
+                Err(e) => return e.into_response(),
+            };
             if let Some(a) =
                 crate::extension::find_action(&state.extensions, &entity.name, action_name)
             {
                 return match a.handler.invoke(&state, &key).await {
                     Ok(Value::Null) => StatusCode::NO_CONTENT.into_response(),
-                    Ok(r) => to_json_response(r).into_response(),
+                    Ok(r) => to_json_response(entity_json(&state, &spec, r)).into_response(),
                     Err(e) => ODataError::from(e).into_response(),
                 };
             }
             match draft_action(&state, &entity.name, &key, action_name).await {
-                Ok(r) => to_json_response(r).into_response(),
+                Ok(r) => to_json_response(entity_json(&state, &spec, r)).into_response(),
                 Err(e) => e.into_response(),
             }
         }
@@ -2223,6 +2360,12 @@ async fn draft_action(
     key: &EntityKey,
     action: &str,
 ) -> Result<Value, ODataError> {
+    let ddic = state.ddic();
+    let spec = ddic.active_entity_by_setname(set)
+        .ok_or_else(|| ODataError::not_found(format!("Unknown entity set '{set}'")))?;
+    if !spec.draft_enabled {
+        return Err(ODataError::not_found(format!("Draft actions are not supported for '{set}'")));
+    }
     match action {
         "draftEdit" => {
             let r = state
@@ -2310,6 +2453,7 @@ async fn create_in_navigation(
     let target = ddic
         .active_entity(target_entity)
         .ok_or_else(|| ODataError::not_found(format!("Unknown entity '{target_entity}'")))?;
+    validate_write(target, &body)?;
     let foreign_key = ddic
         .foreign_key_field(&spec, &field)
         .map(|f| format!("{f}{}", spec::ID_SUFFIX))
@@ -2322,13 +2466,13 @@ async fn create_in_navigation(
 
     body[foreign_key] = json!(record.id().to_string());
     // Das Kind teilt den Draft-Zustand seines Parents.
-    body["IsActiveEntity"] = json!(record.is_active_entity());
+    body["IsActiveEntity"] = json!(!target.draft_enabled || record.is_active_entity());
     let created = state
         .store
         .create_entity(&target.setname(), &body)
         .await
         .map_err(ODataError::from_store)?;
-    Ok(json!(created))
+    Ok(entity_json(state, target, json!(created)))
 }
 
 /// Zielset und FK-Feld aller Compositions unterhalb von `set`.
@@ -2380,10 +2524,17 @@ async fn patch_handler(
     let Some(key) = path_struct.segments.first() else {
         return ODataError::bad_request("Missing entity segment in path").into_response();
     };
-    let Some(id) = key.id() else {
-        return ODataError::bad_request(format!("Invalid key for '{}'", key.name)).into_response();
+    let spec = match entity_spec_for_segment(&state, key) {
+        Ok(spec) => spec,
+        Err(e) => return e.into_response(),
     };
-    let ekey = EntityKey::new(id, key.is_active_entity());
+    if let Err(e) = validate_write(&spec, &body) {
+        return e.into_response();
+    }
+    let ekey = match entity_key(&spec, key) {
+        Ok(key) => key,
+        Err(e) => return e.into_response(),
+    };
     match state.store.patch_entity(&key.name, &ekey, &body).await {
         Ok(_) => (StatusCode::NO_CONTENT, [odata_version()]).into_response(),
         Err(e) => ODataError::from_store(e).into_response(),
@@ -2411,7 +2562,7 @@ async fn delete_entity(state: &AppState, segments: &[PathSegment]) -> Result<(),
             "'{suffix}' cannot be deleted"
         )));
     }
-    let Cursor::Entity { set, record, .. } = resolved.cursor else {
+    let Cursor::Entity { spec, set, record } = resolved.cursor else {
         return Err(ODataError::bad_request(
             "DELETE requires a single entity addressed by key",
         ));
@@ -2419,6 +2570,10 @@ async fn delete_entity(state: &AppState, segments: &[PathSegment]) -> Result<(),
 
     let key = EntityKey::from(&*record);
     delete_owned_children(state, &set, &key).await?;
+    if !spec.draft_enabled {
+        return state.store.delete_entity_tree_only(&set, &key).await
+            .map_err(ODataError::from_store);
+    }
 
     // If deleting a draft, don't also delete active sibling (discard only the draft)
     // If deleting an active, also delete its draft sibling (cleanup both versions)
@@ -2549,7 +2704,7 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
     //     trace!("A: {} {:?}", a.term, a.qualifier);
     // }
 
-    let meta = edmx_template();
+    let meta = edmx_template(ddic.active_entities().any(|e| e.draft_enabled));
     let mut type_defs = vec![]; //quick_xml::se::to_string(&sample_entity).unwrap()];
     for x in entity_lst {
         type_defs.push(quick_xml::se::to_string(&x).unwrap());
@@ -2563,12 +2718,13 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
         annotations.push(quick_xml::se::to_string(&x).unwrap());
     }
     for x in ddic.active_entities() {
-        annotations.extend(draft_annotations_for_entity(&ddic, x));
+        annotations.extend(capability_annotations_for_entity(&ddic, x));
     }
 
     let mut actions = vec![];
     for e in ddic.active_entities() {
         let entity_name = format!("Service.{}", e.name());
+        if e.draft_enabled {
         actions.push(format!(
             r##"<Action Name="draftEdit" IsBound="true" EntitySetPath="in">
                     <Parameter Name="in" Type="{entity_name}"/>
@@ -2586,6 +2742,7 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
                     <Parameter Name="SideEffectsQualifier" Type="Edm.String"/>
                     <ReturnType Type="{entity_name}"/></Action>"##,
         ));
+        }
         actions.push(format!(
             r##"<Action Name="publishConfig" IsBound="true" EntitySetPath="in">
                     <Parameter Name="in" Type="{entity_name}"/>
@@ -2690,7 +2847,7 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
     )
 }
 
-fn edmx_template() -> String {
+fn edmx_template(drafts: bool) -> String {
     let meta = r##"<?xml version="1.0" encoding="utf-8"?>
 <edmx:Edmx Version="4.0" xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx">
 
@@ -2717,7 +2874,14 @@ fn edmx_template() -> String {
       %ACTION-IMPORTS%
     </EntityContainer>
     %TYPE-DEFINITIONS%
-    <EntityType Name="DraftAdministrativeData">
+%DRAFT-TYPE%
+%ACTIONS%
+
+%ANNOTATIONS%
+   </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>"##;
+    let draft_type = r##"<EntityType Name="DraftAdministrativeData">
         <Key>
             <PropertyRef Name="DraftUUID"/>
         </Key>
@@ -2729,14 +2893,8 @@ fn edmx_template() -> String {
         <Property Name="LastChangedByUser"      Type="Edm.String" MaxLength="256"/>
         <Property Name="InProcessByUser"        Type="Edm.String" MaxLength="256"/>
         <Property Name="DraftIsProcessedByMe"   Type="Edm.Boolean"/>
-    </EntityType>
-%ACTIONS%
-
-%ANNOTATIONS%
-   </Schema>
-  </edmx:DataServices>
-</edmx:Edmx>"##;
-    meta.into()
+    </EntityType>"##;
+    meta.replace("%DRAFT-TYPE%", if drafts { draft_type } else { "" })
 }
 
 #[cfg(test)]

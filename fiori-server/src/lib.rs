@@ -17,6 +17,7 @@ pub mod script;
 pub mod server;
 pub mod srv;
 pub mod status;
+pub mod sticky;
 pub mod system_user;
 pub mod term3270;
 pub mod ui_ext;
@@ -31,6 +32,7 @@ use config::{ServerConfig, ServerMode};
 /// ist identischer Code.
 #[derive(Clone)]
 pub struct AppState {
+    pub sticky: Option<Arc<sticky::StickySessions>>,
     pub store: Arc<dyn DraftDataStore>,
     pub config: Arc<ServerConfig>,
     /// Unaktivierter Ausgangsstand; jeder `reload()` geht wieder von hier aus,
@@ -58,6 +60,7 @@ impl AppState {
         let mut active = (*base).clone();
         active.activate();
         Self {
+            sticky: None,
             store,
             config,
             base: Arc::new(RwLock::new(base)),
@@ -69,6 +72,12 @@ impl AppState {
     /// Erweiterungen setzen; ersetzt die bisherigen.
     pub fn with_extensions(mut self, extensions: extension::Extensions) -> Self {
         self.extensions = Arc::new(extensions);
+        self
+    }
+
+    pub fn with_sticky_sessions(mut self, store: Arc<ddic_store::DdicStore>) -> Self {
+        assert!(self.is_designer(), "Sticky sessions currently require the designer store");
+        self.sticky = Some(Arc::new(sticky::StickySessions::new(store)));
         self
     }
 

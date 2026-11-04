@@ -39,15 +39,18 @@ const ATOM_NUMBERS: [&str; 5] = ["max_length", "precision", "scale", "computed",
 
 type Sets = HashMap<String, Vec<DataRecord>>;
 
-struct Inner {
+#[derive(Clone)]
+pub(crate) struct Snapshot {
     sets: Sets,
     /// Zuletzt geschriebenes (bzw. gelesenes) JSON; Grundlage fuer das Einmischen.
     base: Value,
+    revision: u64,
 }
 
 pub struct DdicStore {
     path: PathBuf,
-    inner: Mutex<Inner>,
+    inner: Mutex<Snapshot>,
+    transient: bool,
     navigation: Navigation,
     navigations: Mutex<Vec<Navigation>>,
 }
@@ -72,10 +75,50 @@ impl DdicStore {
         let sets = project(&base);
         Ok(Self {
             path,
-            inner: Mutex::new(Inner { sets, base }),
+            inner: Mutex::new(Snapshot { sets, base, revision: 0 }),
+            transient: false,
             navigation: Navigation::default(),
             navigations: Mutex::new(Vec::new()),
         })
+    }
+
+    pub(crate) fn snapshot(&self) -> Snapshot {
+        self.inner.lock().expect("ddic lock").clone()
+    }
+
+    pub(crate) fn changed_since(&self, snapshot: &Snapshot) -> bool {
+        self.inner.lock().expect("ddic lock").revision != snapshot.revision
+    }
+
+    pub(crate) fn fork(&self) -> Self {
+        Self {
+            path: self.path.clone(),
+            inner: Mutex::new(self.snapshot()),
+            transient: true,
+            navigation: Navigation::default(),
+            navigations: Mutex::new(self.navigations.lock().expect("nav lock").clone()),
+        }
+    }
+
+    pub(crate) fn restore(&self, snapshot: Snapshot) {
+        *self.inner.lock().expect("ddic lock") = snapshot;
+    }
+
+    pub(crate) fn save_session(&self, baseline: &Snapshot, working: &DdicStore) -> Result<(), StoreError> {
+        let next = working.snapshot();
+        let mut inner = self.inner.lock().expect("ddic lock");
+        if inner.revision != baseline.revision {
+            return Err(StoreError::Conflict(
+                "Dictionary changed since editing started; discard and reload before editing again".into(),
+            ));
+        }
+        let json = build(&inner.base, &next.sets)?;
+        ddic_file::save(&self.path, &json)
+            .map_err(|e| StoreError::Conflict(format!("cannot write ddic: {e:#}")))?;
+        inner.sets = next.sets;
+        inner.base = json;
+        inner.revision += 1;
+        Ok(())
     }
 
     fn read<T>(&self, f: impl FnOnce(&Sets) -> T) -> T {
@@ -93,13 +136,14 @@ impl DdicStore {
         let mut inner = self.inner.lock().expect("ddic lock");
         let mut next = inner.sets.clone();
         let out = f(next.entry(set.to_string()).or_default())?;
-        if PERSISTED.contains(&set) {
+        if !self.transient && PERSISTED.contains(&set) {
             let json = build(&inner.base, &next)?;
             ddic_file::save(&self.path, &json)
                 .map_err(|e| StoreError::Conflict(format!("cannot write ddic: {e:#}")))?;
             inner.base = json;
         }
         inner.sets = next;
+        inner.revision += 1;
         Ok(out)
     }
 }
@@ -642,6 +686,9 @@ impl DataStore for DdicStore {
         let obj = v
             .as_object_mut()
             .ok_or_else(|| StoreError::Serialize("Objekt erwartet".into()))?;
+        if set == "EntitySet" {
+            obj.entry("draft_enabled").or_insert(json!(true));
+        }
         // Festwerte tragen den Code zusaetzlich in `name` (Titel der Liste).
         if set == "ValueSet" && !obj.contains_key("name") {
             if let Some(code) = obj.get("value").cloned() {
@@ -739,13 +786,14 @@ impl DataStore for DdicStore {
                 });
             }
         }
-        if PERSISTED.contains(&set) {
+        if !self.transient && PERSISTED.contains(&set) {
             let json = build(&inner.base, &next)?;
             ddic_file::save(&self.path, &json)
                 .map_err(|e| StoreError::Conflict(format!("cannot write ddic: {e:#}")))?;
             inner.base = json;
         }
         inner.sets = next;
+        inner.revision += 1;
         Ok(())
     }
 

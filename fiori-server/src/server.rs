@@ -59,13 +59,16 @@ pub async fn run_with(
     // Generische UI-Erweiterung aus den `ui`-Bloecken der ddic.json (Formate, ausgeblendete
     // Felder, App-Assets). Wird nach den Skripten eingetragen, damit sie nicht ueberschrieben werden.
     extensions.push(Arc::new(crate::ui_ext::UiExtension::new(&base, config.ext_dir.clone())));
+    let mut designer_store = None;
     let (inner, sqlite) = if config.designer {
         // Designer: Metamodell als Basis, Daten aus `ddic.json`.
         let path = config.ddic.clone().context("designer needs --ddic")?;
         let store = DdicStore::open(&path)
             .with_context(|| format!("cannot open designer file '{}'", path.display()))?;
         info!("designer on '{}' (metamodel, file store)", path.display());
-        (Arc::new(store) as Arc<dyn DraftDataStore>, None)
+        let store = Arc::new(store);
+        designer_store = Some(store.clone());
+        (store as Arc<dyn DraftDataStore>, None)
     } else {
         let schema_source = schema_source(&config, &base)?;
         open_store(&config, schema_source).await?
@@ -94,7 +97,10 @@ pub async fn run_with(
     if !config.designer {
         seed_value_lists(store.as_ref(), &base).await?;
     }
-    let state = AppState::new(store, config.clone(), base).with_extensions(extensions);
+    let mut state = AppState::new(store, config.clone(), base).with_extensions(extensions);
+    if let Some(store) = designer_store {
+        state = state.with_sticky_sessions(store);
+    }
     state.reload();
     crate::term3270::spawn(&config, &state);
 
@@ -368,7 +374,7 @@ async fn open_store(
 }
 
 /// Haengt die Erweiterungs-Hooks um den Store.
-fn wrap_store(
+pub(crate) fn wrap_store(
     store: Arc<dyn DraftDataStore>,
     extensions: &crate::extension::Extensions,
 ) -> anyhow::Result<Arc<dyn DraftDataStore>> {

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 use axum::middleware::Next;
 use axum::{
-    Json, Router, extract::{Path, Query, State}, http::{HeaderName, Request, StatusCode, header}, response::{Html, IntoResponse, Response}, routing::{get, post},
+    Json, Router, extract::{Path, Query, State}, http::{HeaderName, StatusCode, header}, response::{Html, IntoResponse, Response}, routing::{get, post},
 };
 use data_store::{DataRecord, EntityKey, StoreError};
 use odata::{
@@ -1470,6 +1470,7 @@ pub fn router() -> Router<AppState> {
                 .patch(patch_handler)
                 .delete(delete_handler),
         ).layer(axum::middleware::from_fn(log_request))
+        .layer(axum::middleware::from_fn(crate::sticky::context))
 }
 
 /// Das Data Dictionary aus dem Storage neu aufbauen.
@@ -1787,6 +1788,10 @@ async fn get_handler(
     state: State<AppState>,
     params: Query<HashMap<String, String>>,
 ) -> Response {
+    let (state, _session_guard) = match crate::sticky::request_state(&state).await {
+        Ok(state) => state,
+        Err(response) => return response,
+    };
     let query = match build_query(&params) {
         Ok(q) => q,
         Err(e) => return e.into_response(),
@@ -2200,7 +2205,7 @@ fn entity_key(spec: &EntitySpec, segment: &PathSegment) -> Result<EntityKey, ODa
 
 fn touch_selected_fields(value: &mut Value, query: &ODataQuery) {
     for field in query.select.iter() {
-        if field == "*" {
+        if field == "*" || query.expand.iter().any(|item| item.navigation_property == *field) {
             continue;
         }
         if value[field].is_null() {
@@ -2250,11 +2255,59 @@ async fn read_single(
     let spec = ddic.active_entity_by_setname(set)
         .ok_or_else(|| ODataError::not_found(format!("Unknown entity set '{set}'")))?;
     validate_query(state, spec, query)?;
-    state
+    let mut record = state
         .store
         .read_entity(set, key, query)
         .await
-        .map_err(ODataError::from_store)
+        .map_err(ODataError::from_store)?;
+    expand_designer_rows(state, spec, set, std::slice::from_mut(&mut record), query).await?;
+    Ok(record)
+}
+
+fn expand_designer_rows<'a>(
+    state: &'a AppState,
+    spec: &'a EntitySpec,
+    set: &'a str,
+    records: &'a mut [DataRecord],
+    query: &'a ODataQuery,
+) -> futures_util::future::BoxFuture<'a, Result<(), ODataError>> {
+    // Nested expansions re-enter collection reads.
+    Box::pin(async move {
+        if state.sticky.is_none() {
+            return Ok(());
+        }
+        for item in &query.expand {
+            let name = &item.navigation_property;
+            let segment = PathSegment { name: name.clone(), keys: vec![] };
+            for record in records.iter_mut() {
+                if record.get(name).is_some() {
+                    continue;
+                }
+                let cursor = Cursor::Entity {
+                    spec: spec.clone(), set: set.into(), record: Box::new(record.clone()),
+                };
+                let mut context = set.to_string();
+                let expanded = follow_segment(state, cursor, &segment, &item.nested_query, &mut context).await?;
+                record[name] = match expanded {
+                    Cursor::Entity { spec, set, record: mut child } => {
+                        expand_designer_rows(state, &spec, &set, std::slice::from_mut(child.as_mut()),
+                            &item.nested_query).await?;
+                        json!(child)
+                    }
+                    Cursor::Collection { records, count, .. } => {
+                        if let Some(count) = count {
+                            record[&format!("{name}@odata.count")] = json!(count);
+                        }
+                        json!(records)
+                    }
+                    Cursor::Empty => Value::Null,
+                    Cursor::Property { .. } => return Err(ODataError::bad_request(
+                        format!("'{name}' is not a navigation property"))),
+                };
+            }
+        }
+        Ok(())
+    })
 }
 
 async fn read_collection(
@@ -2266,12 +2319,30 @@ async fn read_collection(
         .ok_or_else(|| ODataError::not_found(format!("Unknown entity set '{set}'")))?;
     validate_query(state, &spec, query)?;
     // Ein Aufruf: Hooks laufen einmal pro Request, Count beruecksichtigt Entfernungen.
-    let (records, count) = state
+    let (mut records, count) = state
         .store
         .read_collection(set, query, query.count)
         .await
         .map_err(ODataError::from_store)?;
+    expand_designer_rows(state, &spec, set, &mut records, query).await?;
     Ok(Cursor::Collection { spec, records, count })
+}
+
+pub(crate) async fn action_entity_json(
+    state: &AppState,
+    set: &str,
+    key: &EntityKey,
+    query: &ODataQuery,
+) -> Result<Value, Response> {
+    let record = read_single(state, set, key, query).await.map_err(IntoResponse::into_response)?;
+    let spec = state.ddic().active_entity_by_setname(set).cloned()
+        .ok_or_else(|| ODataError::not_found(format!("Unknown entity set '{set}'")).into_response())?;
+    let result = materialize(state, Cursor::Entity { spec, set: set.into(), record: Box::new(record) },
+        None, query, set).map_err(IntoResponse::into_response)?;
+    match result {
+        GetResult::Json(value) => Ok(value),
+        _ => unreachable!("single entity JSON representation"),
+    }
 }
 
 async fn post_handler(
@@ -2280,7 +2351,11 @@ async fn post_handler(
     params: Query<HashMap<String, String>>,
     payload: Option<Json<Value>>,
 ) -> Response {
-    let _p = match build_query(&params) {
+    let (state, _session_guard) = match crate::sticky::request_state(&state).await {
+        Ok(state) => state,
+        Err(response) => return response,
+    };
+    let query = match build_query(&params) {
         Ok(q) => q,
         Err(e) => return e.into_response(),
     };
@@ -2292,6 +2367,29 @@ async fn post_handler(
         }
     };
     let body = payload.map(|Json(v)| v).unwrap_or_else(|| json!({}));
+
+    if let Some(sessions) = &state.sticky {
+        match path_struct.segments.as_slice() {
+            [action] if action.name == "stickyDiscard" && action.keys.is_empty() => {
+                return sessions.action(&state, None, None, "stickyDiscard", &query).await;
+            }
+            [entity, action] if action.name.starts_with("Service.sticky") && action.keys.is_empty() => {
+                let spec = match entity_spec_for_segment(&state, entity) {
+                    Ok(spec) => spec,
+                    Err(error) => return error.into_response(),
+                };
+                let key = if entity.keys.is_empty() { None } else {
+                    match entity_key(&spec, entity) {
+                        Ok(key) => Some(key),
+                        Err(error) => return error.into_response(),
+                    }
+                };
+                return sessions.action(&state, Some(&entity.name), key.as_ref(),
+                    action.name.trim_start_matches("Service."), &query).await;
+            }
+            _ => {}
+        }
+    }
 
     match path_struct.segments.as_slice() {
         [entity] if entity.keys.is_empty() => {
@@ -2305,7 +2403,7 @@ async fn post_handler(
                 body["IsActiveEntity"] = json!(true);
             }
             match state.store.create_entity(&entity.name, &body).await {
-                Ok(r) => created_response(entity_json(&state, &spec, json!(r))),
+                Ok(r) => created_response(entity_json(&state, &spec, json!(r)), &path),
                 Err(e) => ODataError::from_store(e).into_response(),
             }
         },
@@ -2337,7 +2435,7 @@ async fn post_handler(
         }
         segments if segments.len() > 1 => {
             match create_in_navigation(&state, segments, body).await {
-                Ok(r) => created_response(r),
+                Ok(r) => created_response(r, &path),
                 Err(e) => e.into_response(),
             }
         }
@@ -2345,10 +2443,15 @@ async fn post_handler(
     }
 }
 
-fn created_response(body: Value) -> Response {
+fn created_response(body: Value, path: &str) -> Response {
+    let id = body["ID"].as_str().expect("created entity ID");
+    let key = match body.get("IsActiveEntity").and_then(Value::as_bool) {
+        Some(active) => format!("ID={id},IsActiveEntity={active}"),
+        None => id.to_string(),
+    };
     (
         StatusCode::CREATED,
-        [content_type_json(), odata_version()],
+        [content_type_json(), odata_version(), (header::LOCATION, format!("/Service/{path}({key})"))],
         body.to_string(),
     )
         .into_response()
@@ -2512,6 +2615,10 @@ async fn patch_handler(
     params: Query<HashMap<String, String>>,
     payload: Option<Json<Value>>,
 ) -> Response {
+    let (state, _session_guard) = match crate::sticky::request_state(&state).await {
+        Ok(state) => state,
+        Err(response) => return response,
+    };
     let _p = build_query(&params);
     let path_struct = match parse_odata_path(&path) {
         Ok(p) => p,
@@ -2542,6 +2649,10 @@ async fn patch_handler(
 }
 
 async fn delete_handler(path: Path<String>, state: State<AppState>) -> Response {
+    let (state, _session_guard) = match crate::sticky::request_state(&state).await {
+        Ok(state) => state,
+        Err(response) => return response,
+    };
     let path_struct = match parse_odata_path(&path) {
         Ok(p) => p,
         Err(e) => {
@@ -2654,7 +2765,11 @@ fn content_type_json() -> (HeaderName, String) {
     )
 }
 
-async fn index(State(state): State<AppState>) -> Json<Value> {
+async fn index(State(state): State<AppState>) -> Response {
+    let (state, _session_guard) = match crate::sticky::request_state(&state).await {
+        Ok(state) => state,
+        Err(response) => return response,
+    };
     trace!("index");
     // Ausschliesslich das, was auch in `$metadata` steht. Frueher haengte hier
     // eine feste Liste (`EntityConfigs`, `EntityFields`, ...) an, die seit dem
@@ -2671,7 +2786,7 @@ async fn index(State(state): State<AppState>) -> Json<Value> {
     Json(json!({
       "@odata.context": "/Service/$metadata",
       "value": value
-    }))
+    })).into_response()
 }
 /// Namen der Hauptentitaeten aller Apps (Ziele der semantischen Verlinkung).
 fn app_entity_names(ddic: &DataDictionary) -> Vec<String> {
@@ -2680,7 +2795,11 @@ fn app_entity_names(ddic: &DataDictionary) -> Vec<String> {
         .collect()
 }
 
-async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
+async fn metadata(State(state): State<AppState>) -> Response {
+    let (state, _session_guard) = match crate::sticky::request_state(&state).await {
+        Ok(state) => state,
+        Err(response) => return response,
+    };
     let ddic = state.ddic();
     let entity_lst: Vec<EntityType> = ddic
         .active_entities()
@@ -2722,6 +2841,23 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
     }
 
     let mut actions = vec![];
+    let mut action_imports = String::new();
+    if state.sticky.is_some() {
+        action_imports.push_str(r#"<ActionImport Name="stickyDiscard" Action="Service.stickyDiscard"/>"#);
+        actions.push(r#"<Action Name="stickyDiscard"/>"#.to_string());
+        for entity in ddic.active_entities().filter(|entity| !entity.draft_enabled) {
+            let name = entity.name();
+            let set = entity.setname();
+            actions.push(format!(
+                r#"<Action Name="stickyNew" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Collection(Service.{name})"/><ReturnType Type="Service.{name}"/></Action>
+                <Action Name="stickyEdit" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.{name}"/><ReturnType Type="Service.{name}"/></Action>
+                <Action Name="stickySave" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="Service.{name}"/><ReturnType Type="Service.{name}"/></Action>"#
+            ));
+            annotations.push(format!(
+                r#"<Annotations Target="Service.EntityContainer/{set}"><Annotation Term="Session.StickySessionSupported"><Record Type="Session.StickySessionSupportedType"><PropertyValue Property="NewAction" String="Service.stickyNew"/><PropertyValue Property="EditAction" String="Service.stickyEdit"/><PropertyValue Property="SaveAction" String="Service.stickySave"/><PropertyValue Property="DiscardAction" String="stickyDiscard"/></Record></Annotation></Annotations>"#
+            ));
+        }
+    }
     for e in ddic.active_entities() {
         let entity_name = format!("Service.{}", e.name());
         if e.draft_enabled {
@@ -2834,7 +2970,7 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
     let xml = meta
         .replace("%TYPE-DEFINITIONS%", &type_defs.concat())
         .replace("%ENTITY-SETS%", &entity_sets.concat())
-        .replace("%ACTION-IMPORTS%", "")
+        .replace("%ACTION-IMPORTS%", &action_imports)
         .replace("%ANNOTATIONS%", &annotations.concat())
         .replace("%ACTIONS%", &actions.concat())
         .to_string();
@@ -2844,7 +2980,7 @@ async fn metadata(State(state): State<AppState>) -> impl IntoResponse {
             (HeaderName::from_static("odata-version"), "4.0"),
         ],
         xml,
-    )
+    ).into_response()
 }
 
 fn edmx_template(drafts: bool) -> String {
@@ -2854,6 +2990,7 @@ fn edmx_template(drafts: bool) -> String {
  <edmx:Reference Uri="https://oasis-tcs.github.io/odata-vocabularies/vocabularies/Org.OData.Aggregation.V1.xml"> <edmx:Include Alias="Aggregation" Namespace="Org.OData.Aggregation.V1"/> </edmx:Reference>
  <edmx:Reference Uri="https://oasis-tcs.github.io/odata-vocabularies/vocabularies/Org.OData.Capabilities.V1.xml"> <edmx:Include Alias="Capabilities" Namespace="Org.OData.Capabilities.V1"/> </edmx:Reference>
  <edmx:Reference Uri="https://sap.github.io/odata-vocabularies/vocabularies/Common.xml"> <edmx:Include Alias="Common" Namespace="com.sap.vocabularies.Common.v1"/> </edmx:Reference>
+ <edmx:Reference Uri="https://sap.github.io/odata-vocabularies/vocabularies/Session.xml"> <edmx:Include Alias="Session" Namespace="com.sap.vocabularies.Session.v1"/> </edmx:Reference>
  <edmx:Reference Uri="https://oasis-tcs.github.io/odata-vocabularies/vocabularies/Org.OData.Core.V1.xml"> <edmx:Include Alias="Core" Namespace="Org.OData.Core.V1"/> </edmx:Reference>
  <edmx:Reference Uri="https://sap.github.io/odata-vocabularies/vocabularies/Hierarchy.xml"> <edmx:Include Alias="Hierarchy" Namespace="com.sap.vocabularies.Hierarchy.v1"/> </edmx:Reference>
  <edmx:Reference Uri="https://oasis-tcs.github.io/odata-vocabularies/vocabularies/Org.OData.Measures.V1.xml"> <edmx:Include Alias="Measures" Namespace="Org.OData.Measures.V1"/> </edmx:Reference>

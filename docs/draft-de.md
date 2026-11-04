@@ -22,15 +22,61 @@ DDIC-Overlay gesetzt werden.
   Abweichungen werden abgelehnt. Lose Assoziationen duerfen die Modi mischen.
 - Der Designer selbst arbeitet immer ohne Drafts, unabhaengig vom
   Draft-Modus der darin gepflegten fachlichen Entities.
-- UI-Einschraenkung: Fiori Elements OData V4 stellt fuer reine Non-Draft-Entities
+- UI-Einschraenkung der Laufzeit: Fiori Elements OData V4 stellt fuer reine Non-Draft-Entities
   keine Standardaktionen zum Anlegen/Bearbeiten bereit. Anzeigen und Loeschen
-  funktionieren; direkte CRUD-Endpunkte sind vorhanden. Eine zusaetzliche
-  Bearbeitungsoberflaeche oder echte Sticky-Session-Unterstuetzung ist noch
-  nicht implementiert. Dies gilt auch fuer den Designer.
+  funktionieren; direkte CRUD-Endpunkte sind vorhanden. Der Designer verwendet
+  stattdessen die unten beschriebenen Sticky Sessions.
 - Ein Moduswechsel bestehender relationaler Tabellen erfordert eine explizite
   Daten- und Primaerschluesselmigration. Der automatische Schemaabgleich
   bricht dabei ab, statt offene Drafts zu verwerfen oder Schluessel still zu aendern.
   Neue Tabellen unterstuetzen beide Modi.
+
+### Sticky Sessions im Designer
+
+Der Start mit `--designer` aktiviert SAP Sticky Sessions fuer das Metamodell,
+ohne Draft-Unterstuetzung vorzutäuschen. Die Standardaktionen von Fiori Elements
+V4 sind damit verfuegbar:
+
+- **Anlegen/Bearbeiten** startet eine temporaere, benutzergebundene Session.
+  `Session.StickySessionSupported` benennt die Aktionen `Service.stickyNew`,
+  `Service.stickyEdit`, `Service.stickySave` und den Action-Import `stickyDiscard`.
+- Der Client sendet die vom Server erhaltene `sap-contextid` bei Folgerequests.
+  Lesen, PATCH, POST und DELETE mit dieser ID arbeiten auf einem isolierten
+  Dictionary-Snapshot, einschliesslich untergeordneter Entities. Andere Clients
+  sehen weiterhin nur den gespeicherten Stand.
+- **Sichern** validiert das gesamte Dictionary und ersetzt `ddic.json` atomar.
+  Erst danach endet die Session. Validierungs- und Schreibfehler lassen die
+  Session bestehen.
+- **Abbrechen/Verwerfen** verwirft den Snapshot, ohne die Datei zu aendern.
+  Die Session endet auch nach 120 Sekunden ohne Zugriff. UI5 kann sie ueber
+  `HEAD /Service/` verlaengern; abgelaufene IDs liefern HTTP 410 und
+  `SAP-Err-Id: ICMENOSESSION`. Die Pruefung und Bereinigung erfolgen beim Zugriff.
+  Ein Serverneustart verliert alle nicht gespeicherten Sessions.
+- Paralleles Bearbeiten derselben Ausgangs-Entity wird abgelehnt. Jede
+  anderweitige Aenderung des gespeicherten Dictionaries seit Sessionbeginn
+  fuehrt beim Sichern zu HTTP 409, statt fremde Aenderungen zu ueberschreiben.
+  In diesem Fall verwerfen, neu laden und erneut bearbeiten. Diese
+  Revisionspruefung gilt innerhalb einer Serverinstanz, nicht fuer externe
+  Dateiaenderungen oder mehrere Prozesse auf derselben Datei.
+- OData-Batch-Changesets im Designer sind atomar, unterstuetzen Content-ID-Referenzen
+  und transportieren den Session-Kontext auch am Batch-Umschlag. Schlaegt eine
+  Teiloperation fehl, wird der vorherige Session-Stand wiederhergestellt.
+  Ein Save wird erst nach Erfolg des gesamten Changesets persistiert.
+
+Kompatibilitaet: Die verwendete Fiori-Elements-Version erwartet bereits vom
+`NewAction` eine angelegte Entity als Rueckgabe. Deshalb legt `stickyNew` im
+temporaeren Snapshot einen leeren Datensatz an und liefert ihn zurueck
+(`EntitySetPath="in"`, Entity als ReturnType). Das weicht von der generischen
+[SAP-Session-Vokabularbeschreibung](https://sap.github.io/odata-vocabularies/vocabularies/Session.html)
+ab, die fuer NewAction keinen ReturnType vorsieht. Unvollstaendige Datensaetze
+werden erst bei Save auf Vollstaendigkeit validiert.
+
+Eine Session ist eine gemeinsame Bearbeitungseinheit fuer das Dictionary:
+ein Save uebernimmt alle darin geaenderten Datensaetze, nicht nur den adressierten.
+Es gibt keine wiederaufnehmbaren, persistenten Drafts. Ohne Session-ID bleiben
+direkte CRUD-Aufrufe moeglich und werden wie bisher sofort gespeichert.
+Die Laufzeit aktiviert keine Sticky Sessions; atomare mehrteilige Changesets
+ohne Designer-Store werden explizit mit HTTP 501 abgelehnt.
 
 Die folgenden Abschnitte beschreiben das CAP-Referenzmodell fuer Draft-Entities;
 die relationalen pjl-Stores verwenden eine Tabelle mit zusammengesetztem Key

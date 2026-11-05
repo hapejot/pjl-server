@@ -626,17 +626,18 @@ impl Annotations {
 
 /// Listenannotationen einer Entitaet.
 ///
-/// * Ohne `list_views`: unqualifiziertes `UI.LineItem` mit `name` (bisheriges Verhalten).
+/// * Ohne `list_views`: unqualifiziertes `UI.LineItem` mit `name`, ersatzweise dem ersten
+///   darstellbaren Feld.
 /// * Mit `list_views`: je Ansicht ein `UI.LineItem` (Qualifier = Ansichtsname, die
 ///   Ansicht `default` ist unqualifiziert). Zu jeder Ansicht ein
 ///   `UI.PresentationVariant` mit `Visualizations` auf das LineItem; die Varianten
 ///   sind die Auswahlpunkte in der ListReport-Ansicht (siehe `flp.rs`).
-/// * Eine fehlende `default`-Ansicht wird durch `name` ersetzt, weil Fiori Elements
-///   ein unqualifiziertes LineItem fuer die Standardtabelle braucht.
+/// * Eine fehlende `default`-Ansicht wird durch dieselbe Fallback-Spalte ersetzt, weil
+///   Fiori Elements ein unqualifiziertes LineItem fuer die Standardtabelle braucht.
 fn line_item_annotations(x: &EntitySpec, app_entities: &[String]) -> Vec<Annotation> {
     let views = x.list_views();
     if views.is_empty() {
-        return vec![line_item(None, &["name".to_string()], x, app_entities)];
+        return vec![line_item(None, &[default_line_item_column(x)], x, app_entities)];
     }
 
     let mut out = Vec::new();
@@ -644,7 +645,7 @@ fn line_item_annotations(x: &EntitySpec, app_entities: &[String]) -> Vec<Annotat
         .iter()
         .find(|v| v.is_default())
         .map(|v| v.columns.clone())
-        .unwrap_or_else(|| vec!["name".to_string()]);
+        .unwrap_or_else(|| vec![default_line_item_column(x)]);
     out.push(line_item(None, &default_cols, x, app_entities));
 
     for view in views {
@@ -654,6 +655,30 @@ fn line_item_annotations(x: &EntitySpec, app_entities: &[String]) -> Vec<Annotat
         out.push(presentation_variant(&view.name));
     }
     out
+}
+
+fn default_line_item_column(entity: &EntitySpec) -> String {
+    let displayable = |field: &&FieldSpec| {
+        matches!(
+            field,
+            FieldSpec::Atom { .. }
+                | FieldSpec::Lookup {
+                    collection: false,
+                    ..
+                }
+        )
+    };
+    if entity
+        .fields()
+        .any(|field| field.name() == "name" && displayable(&field))
+    {
+        return "name".into();
+    }
+    entity
+        .fields()
+        .find(displayable)
+        .map(|field| field.name().to_string())
+        .unwrap_or_else(|| "name".into())
 }
 
 /// Ein `UI.LineItem`. Spalten sind Atome (`Value = name`) oder einwertige
@@ -3527,6 +3552,15 @@ mod list_view_annotation_tests {
         assert_eq!(anns.len(), 1);
         assert_eq!(anns[0].qualifier, None);
         assert_eq!(datafield_paths(&anns[0]), vec!["name"]);
+    }
+
+    #[test]
+    fn without_name_field_uses_first_displayable_field() {
+        let entity = EntitySpec::new("ListColumn", "core", "List Columns")
+            .field(FieldSpec::atom("field", "Field", "Edm.String"))
+            .field(FieldSpec::atom("order", "Position", "Edm.Int64"));
+        let annotations = line_item_annotations(&entity, &[]);
+        assert_eq!(datafield_paths(&annotations[0]), vec!["field"]);
     }
 
     #[test]

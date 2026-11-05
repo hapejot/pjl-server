@@ -7,6 +7,7 @@ description = "Rhai-Skripte pro Entity Set als Lese-/Schreib-Hooks (mit Hot-Relo
 [dependencies]
 anyhow = "1.0"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+file-repo = { version = "0.1.0", path = "../file-repo" }
 notify = "8"
 odata = { version = "0.1.0", path = "../odata" }
 rhai = { version = "1.27", features = ["serde", "sync"] }

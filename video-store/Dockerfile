@@ -37,7 +37,6 @@ RUN mkdir -p /app/export && chown -R appuser /app/export
 
 USER appuser
 ENV PORT=8080 \
-    EXPORT_DIR=/app/export \
     WEB_ROOT=/app/web \
     TERM3270_PORT=3270 \
     TERM3270_BIND=0.0.0.0

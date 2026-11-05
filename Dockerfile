@@ -71,12 +71,11 @@ COPY web /app/web
 RUN mkdir -p /app/data /app/export && chown -R appuser /app/data /app/export
 
 USER appuser
-# Der Server liest PORT/DATA_DIR/EXPORT_DIR/WEB_ROOT aus der Umgebung
+# Der Server liest PORT/DATA_DIR/WEB_ROOT aus der Umgebung
 # (siehe fiori-server/src/config.rs); früher war 3033 hart verdrahtet und
 # EXPOSE 8080 damit wirkungslos.
 ENV PORT=8080 \
     DATA_DIR=/app/data \
-    EXPORT_DIR=/app/export \
     WEB_ROOT=/app/web
 EXPOSE 8080
 

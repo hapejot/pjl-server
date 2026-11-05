@@ -14,7 +14,6 @@
 //! - `fields` ist nicht Teil des Overlays (unbekannte Schluessel werden abgelehnt).
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use anyhow::{bail, Context};
 use serde::Deserialize;
@@ -54,11 +53,16 @@ pub struct OverlayEntity {
     pub facets: Vec<FacetSpec>,
 }
 
-/// Overlay-Datei lesen und parsen.
-pub fn load(path: &Path) -> anyhow::Result<Overlay> {
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("cannot read ddic overlay '{}'", path.display()))?;
-    parse(&text).with_context(|| format!("'{}' is not a valid ddic overlay", path.display()))
+/// Overlay-Datei aus der Quelle lesen und parsen.
+pub fn load(file: &crate::sources::FileRef) -> anyhow::Result<Overlay> {
+    let bytes = file
+        .repo
+        .read(&file.rel)
+        .with_context(|| format!("cannot read ddic overlay '{}'", file.label))?
+        .with_context(|| format!("cannot read ddic overlay '{}': not found", file.label))?;
+    let text = std::str::from_utf8(&bytes)
+        .with_context(|| format!("'{}' is not UTF-8", file.label))?;
+    parse(text).with_context(|| format!("'{}' is not a valid ddic overlay", file.label))
 }
 
 pub fn parse(text: &str) -> anyhow::Result<Overlay> {

@@ -19,10 +19,9 @@ use postgres_relational_store::PostgresStore;
 use spec::data_dictionary::DataDictionary;
 use spec_schema::DdicSchemaSource;
 use sqlite_relational_store::RelationalStore;
-use tower_http::services::ServeDir;
 use tracing::info;
 
-use crate::config::{ServerConfig, ServerMode};
+use crate::config::ServerConfig;
 use crate::ddic_store::DdicStore;
 use crate::hook::Extender;
 use crate::{AppState, batch, flp, srv};
@@ -45,24 +44,39 @@ pub async fn run_with(
         if config.designer { " (designer)" } else { "" }
     );
 
-    let base = load_dictionary(&config)?;
+    if config.designer {
+        if let Some(uri) = &config.model_root {
+            anyhow::ensure!(
+                file_repo::file_path(uri).is_some(),
+                "designer: MODEL_ROOT '{uri}' muss file:// sein (der Designer schreibt nur auf das Dateisystem)"
+            );
+        }
+    }
+    let sources = crate::sources::resolve(&config).context("cannot resolve sources")?;
+    let base = load_dictionary(&config, &sources)?;
 
     // Skripte zuletzt registriert: ihre Hooks liegen aussen und sehen jeden Request zuerst.
-    if let Some(dir) = &config.scripts_dir {
-        let hooks = script_hooks::ScriptHooks::load(dir)
-            .with_context(|| format!("cannot load scripts '{}'", dir.display()))?;
+    if let Some(dir) = &sources.scripts {
+        let hooks = match &dir.fs_dir {
+            Some(path) => script_hooks::ScriptHooks::load(path),
+            None => script_hooks::ScriptHooks::load_from(dir.repo.clone(), dir.label.clone()),
+        }
+        .with_context(|| format!("cannot load scripts '{}'", dir.label))?;
         crate::script::bind_components(&hooks, &base)
-            .with_context(|| format!("components in '{}'", dir.display()))?;
+            .with_context(|| format!("components in '{}'", dir.label))?;
         extensions.push(Arc::new(crate::script::ScriptExtension::new(hooks)));
     }
 
     // Generische UI-Erweiterung aus den `ui`-Bloecken der ddic.json (Formate, ausgeblendete
     // Felder, App-Assets). Wird nach den Skripten eingetragen, damit sie nicht ueberschrieben werden.
-    extensions.push(Arc::new(crate::ui_ext::UiExtension::new(&base, config.ext_dir.clone())));
+    extensions.push(Arc::new(crate::ui_ext::UiExtension::new(
+        &base,
+        sources.ext.as_ref().map(|d| d.repo.clone()),
+    )));
     let mut designer_store = None;
     let (inner, sqlite) = if config.designer {
-        // Designer: Metamodell als Basis, Daten aus `ddic.json`.
-        let path = config.ddic.clone().context("designer needs --ddic")?;
+        // Designer: Metamodell als Basis, Daten aus `ddic.json` (nur Dateisystem).
+        let path = crate::sources::designer_path(&config)?;
         let store = DdicStore::open(&path)
             .with_context(|| format!("cannot open designer file '{}'", path.display()))?;
         info!("designer on '{}' (metamodel, file store)", path.display());
@@ -104,7 +118,7 @@ pub async fn run_with(
     state.reload();
     crate::term3270::spawn(&config, &state);
 
-    let app = router(state, &config);
+    let app = router(state, &config, sources.fiori.clone());
 
     let addr = SocketAddr::from((config.bind, config.port));
     let listener = tokio::net::TcpListener::bind(addr)
@@ -244,62 +258,54 @@ async fn seed_value_lists(store: &dyn DraftDataStore, ddic: &DataDictionary) -> 
 /// Der Designer kennt sein Modell selbst. Die Laufzeit hat ohne Exportdatei
 /// nichts zu tun und bricht deshalb mit einem Hinweis ab, statt mit einem
 /// leeren Launchpad zu starten.
-fn load_dictionary(config: &ServerConfig) -> anyhow::Result<DataDictionary> {
+fn load_dictionary(config: &ServerConfig, sources: &crate::sources::Sources) -> anyhow::Result<DataDictionary> {
     if config.designer {
         // Der Designer zeigt sein eincompiliertes Metamodell; die Daten liegen im Store.
         let mut ddic = DataDictionary::new();
         ddic.disable_drafts();
         return Ok(ddic);
     }
-    match (&config.ddic, config.mode) {
-        (Some(path), _) => {
-            let file = std::fs::File::open(path).with_context(|| {
-                format!(
-                    "cannot read data dictionary '{}'. Run the designer and press \
-                     'Publish Dictionary' to create it.",
-                    path.display()
-                )
-            })?;
-            info!("loading ddic from {}", path.display());
-            let mut ddic: DataDictionary = serde_json::from_reader(std::io::BufReader::new(file))
-                .with_context(|| {
-                format!("'{}' is not a valid data dictionary", path.display())
-            })?;
-            // Benutzerverwaltung direkt nach dem Einlesen (nur im Speicher).
-            ddic.inject_system_user();
-            let mut ddic = match &config.ddic_overlay {
-                Some(path) => {
-                    info!("applying ddic overlay {}", path.display());
-                    let overlay = crate::overlay::load(path)?;
-                    crate::overlay::apply(ddic, &overlay)
-                        .with_context(|| format!("ddic overlay '{}'", path.display()))?
-                }
-                None => ddic,
-            };
-            // Komponenten (z. B. Zeitraum) expandieren: Felder, Nebenwirkungen, Ausblendung.
-            ddic.expand_components().map_err(|e| {
-                anyhow::anyhow!("'{}': ungueltige Komponente: {e}", path.display())
-            })?;
-            // Festwertlisten: Listen-Entitaeten erzeugen und Atome im Speicher zu Lookups
-            // machen (vor dem Schema, damit die Spalten dort stehen).
-            ddic.apply_value_list_lookups().map_err(|e| {
-                anyhow::anyhow!("'{}': ungueltige Festwertliste: {e}", path.display())
-            })?;
-            ddic.validate_list_views().map_err(|e| {
-                anyhow::anyhow!("'{}': ungueltige Listenansicht: {e}", path.display())
-            })?;
-            info!(
-                "dictionary '{}': {} entities, {} apps",
-                path.display(),
-                ddic.entities().len(),
-                ddic.apps().count()
-            );
-            Ok(ddic)
+    let file = &sources.ddic;
+    let bytes = file
+        .repo
+        .read(&file.rel)
+        .with_context(|| format!("cannot read data dictionary '{}'", file.label))?
+        .with_context(|| {
+            format!(
+                "cannot read data dictionary '{}'. Run the designer and press \
+                 'Publish Dictionary' to create it.",
+                file.label
+            )
+        })?;
+    info!("loading ddic from {}", file.label);
+    let mut ddic: DataDictionary = serde_json::from_slice(&bytes)
+        .with_context(|| format!("'{}' is not a valid data dictionary", file.label))?;
+    // Benutzerverwaltung direkt nach dem Einlesen (nur im Speicher).
+    ddic.inject_system_user();
+    let mut ddic = match &sources.overlay {
+        Some(overlay_file) => {
+            info!("applying ddic overlay {}", overlay_file.label);
+            let overlay = crate::overlay::load(overlay_file)?;
+            crate::overlay::apply(ddic, &overlay)
+                .with_context(|| format!("ddic overlay '{}'", overlay_file.label))?
         }
-        (None, ServerMode::Runtime) => {
-            anyhow::bail!("the runtime server needs --ddic (or EXPORT_DIR/ddic.json)")
-        }
-    }
+        None => ddic,
+    };
+    // Komponenten (z. B. Zeitraum) expandieren: Felder, Nebenwirkungen, Ausblendung.
+    ddic.expand_components()
+        .map_err(|e| anyhow::anyhow!("'{}': ungueltige Komponente: {e}", file.label))?;
+    // Festwertlisten: Listen-Entitaeten erzeugen und Atome im Speicher zu Lookups
+    // machen (vor dem Schema, damit die Spalten dort stehen).
+    ddic.apply_value_list_lookups().map_err(|e| {
+        anyhow::anyhow!("'{}': ungueltige Festwertliste: {e}", file.label)
+    })?;
+    info!(
+        "dictionary '{}': {} entities, {} apps",
+        file.label,
+        ddic.entities().len(),
+        ddic.apps().count()
+    );
+    Ok(ddic)
 }
 
 /// Schema entweder aus der Datei nehmen oder aus dem Dictionary ableiten.
@@ -322,7 +328,11 @@ fn schema_source(
                 "{}: Draft-Modus in Dictionary und Speicher-Schema stimmt nicht ueberein",
                 entity.name()
             );
-            let keys: Vec<&str> = set.key_columns().iter().map(|column| column.name.as_str()).collect();
+            let keys: Vec<&str> = set
+                .key_columns()
+                .iter()
+                .map(|column| column.name.as_str())
+                .collect();
             anyhow::ensure!(
                 keys == entity.key_names(),
                 "{}: Schluessel in Dictionary und Speicher-Schema stimmen nicht ueberein",
@@ -388,7 +398,7 @@ pub(crate) fn wrap_store(
     Ok(store)
 }
 
-fn router(state: AppState, config: &ServerConfig) -> Router {
+fn router(state: AppState, config: &ServerConfig, fiori: Arc<dyn file_repo::FileRepository>) -> Router {
     let identity_config = std::sync::Arc::new(config.clone());
     let mut app = Router::new()
         .nest("/Service/", batch::router(srv::router(), state.clone()))
@@ -407,7 +417,7 @@ fn router(state: AppState, config: &ServerConfig) -> Router {
     for ext in state.extensions.iter() {
         app = app.merge(ext.routes(state.clone()));
     }
-    app.fallback_service(ServeDir::new(&config.web_root))
+    app.fallback(crate::repo_serve::fallback(fiori))
         .layer(axum::middleware::from_fn_with_state(
             identity_config,
             crate::auth::identity,

@@ -15,6 +15,7 @@
     } ,
     { "name": "SceneTagMap", "list_views": [ {"name":"default", "columns": ["tag"]} ] },
     { "name": "Actor", "facets": [ {"facet": "General", "title": "Allgemein"},{ "facet": "_ActorSceneMap", "view": "reverse", "title": "Szenen" } ] },
-    { "name": "ActorSceneMap", "list_views": [ {"name":"default", "columns": ["actor"]},{"name":"reverse", "columns": ["scene"]} ] }
+    { "name": "ActorSceneMap", "list_views": [ {"name":"default", "columns": ["actor"]},{"name":"reverse", "columns": ["scene"]} ] },
+    { "name": "Scene", "list_views": [{"name":"default", "columns":["name", "_ActorSceneMap/actor/name", "_SceneTagMap/tag/name"]}] }
   ]
 }

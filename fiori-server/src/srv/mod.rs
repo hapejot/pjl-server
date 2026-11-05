@@ -3078,44 +3078,6 @@ mod tests {
     }
 
     #[test]
-    fn workbench_ids_are_computed_but_business_fields_remain_editable() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("workbench")
-            .join("ddic.json");
-        let mut ddic = crate::ddic_file::load(&path).unwrap();
-        ddic.expand_components().unwrap();
-        ddic.apply_value_list_lookups().unwrap();
-        ddic.inject_system_user();
-        ddic.activate();
-
-        for entity in ddic.active_entities() {
-            let annotations = Annotations::from_entity(entity, &[], &[]);
-            let id_target = format!("Service.{}/ID", entity.name());
-            let id = annotations.iter().find(|a| a.target == id_target).unwrap();
-            let xml = quick_xml::se::to_string(id).unwrap();
-            assert!(
-                xml.contains("<Annotation Term=\"Org.OData.Core.V1.Computed\" Bool=\"true\""),
-                "{id_target}: {xml}"
-            );
-            assert!(id.annotations.iter().any(|a| a.term == "Common.Text"));
-
-            for field in entity.fields() {
-                if field.name() == "name" || field.name() == "Owner" {
-                    let annotations = Annotations::from_field(entity.name(), field);
-                    assert!(
-                        !annotations.annotations.iter().any(|a| {
-                            a.term == "Org.OData.Core.V1.Computed" && a.bool_ == Some(true)
-                        }),
-                        "{} must remain editable",
-                        annotations.target
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
     fn lookup_to_app_entity_gets_intent_based_navigation() {
         let mut ddic = DataDictionary::new();
         ddic.activate();

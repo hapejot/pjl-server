@@ -157,7 +157,6 @@ pub fn config_json(config: &ServerConfig) -> Value {
         "ddic": config.ddic.as_ref().map(|p| p.display().to_string()),
         "ddic_overlay": config.ddic_overlay.as_ref().map(|p| p.display().to_string()),
         "schema": config.schema.as_ref().map(|p| p.display().to_string()),
-        "export_dir": config.export_dir.display().to_string(),
         "auth_user_header": config.auth_user_header,
         "auth_required": config.auth_required,
         "store": if config.store_pg_url.is_some() { "postgres" } else { "sqlite" },

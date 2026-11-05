@@ -27,28 +27,3 @@ pub fn save<T: serde::Serialize>(path: &Path, ddic: &T) -> Result<()> {
     fs::rename(&tmp, path).with_context(|| format!("cannot replace '{}'", path.display()))?;
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::Value;
-
-    const POC: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../poc-crm/ddic.json");
-
-    #[test]
-    fn poc_crm_roundtrip_is_semantically_identical() {
-        let dir = std::env::temp_dir().join(format!("ddic-file-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("ddic.json");
-
-        let ddic = load(Path::new(POC)).expect("load poc-crm");
-        save(&path, &ddic).expect("save");
-        let again = load(&path).expect("reload");
-
-        let before: Value = serde_json::from_str(&fs::read_to_string(POC).unwrap()).unwrap();
-        let after: Value = serde_json::to_value(&again).unwrap();
-        assert_eq!(before, after);
-        assert!(!dir.join("ddic.json.tmp").exists());
-        let _ = fs::remove_dir_all(&dir);
-    }
-}

@@ -5,7 +5,7 @@
 //! Tabellen an und stellt fuer die dort definierten Apps OData-Service,
 //! `$metadata` und Launchpad bereit.
 //!
-//!     cargo run --bin pjl-runtime -- --ddic export/ddic.json
+//!     cargo run --bin pjl-runtime -- --ddic ddic.json
 
 use fiori_server::config::{ServerConfig, ServerMode};
 use fiori_server::server;

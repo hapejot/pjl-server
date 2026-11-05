@@ -381,7 +381,7 @@ Der Einstieg ist jeweils `Annotations::from_entity` bzw. `from_field`.
 
 ### 8.6 Konfiguration und Deployment (`compose.yaml`, `Dockerfile`)
 
-* Umgebungsvariablen: `PORT`, `DATA_DIR`, `EXPORT_DIR`, `WEB_ROOT`, `DDIC`, `RUST_LOG`,
+* Umgebungsvariablen: `PORT`, `DATA_DIR`, `WEB_ROOT`, `DDIC`, `RUST_LOG`,
   zusätzlich für die Video-Erweiterung `THUMBNAIL_BASE_URL` (Default `http://nuc:9000/proxy`).
 * Authentifizierung: `AUTH_USER_HEADER` (Standard `X-Forwarded-User`) und `AUTH_REQUIRED`
   (Standard aus). Details in 10.12.

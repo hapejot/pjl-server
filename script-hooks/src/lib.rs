@@ -23,11 +23,12 @@
 use chrono::TimeZone;
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
+use file_repo::{DirRepository, FileRepository};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use odata::query::ODataQuery;
 use rhai::{Dynamic, Engine, EvalAltResult, Scope, AST};
@@ -66,7 +67,10 @@ struct Binding {
 
 struct Inner {
     engine: Engine,
-    dir: PathBuf,
+    /// Quelle der Skripte (Verzeichnis oder ZIP).
+    repo: Arc<dyn FileRepository>,
+    /// Anzeigename der Quelle fuer Fehler und Status.
+    label: String,
     scripts: RwLock<HashMap<String, Arc<Script>>>,
     /// Komponenten-Skripte, Schluessel `components/<name>`.
     components: RwLock<HashMap<String, Arc<Script>>>,
@@ -86,14 +90,13 @@ pub struct ScriptHooks {
 impl ScriptHooks {
     /// Laedt alle Skripte. Fehler beim Start brechen ab.
     pub fn load(dir: impl Into<PathBuf>) -> anyhow::Result<ScriptHooks> {
-        let inner = Arc::new(Inner::new(dir.into()));
+        let dir: PathBuf = dir.into();
+        let inner = Arc::new(Inner::new(
+            Arc::new(DirRepository::new(&dir)),
+            dir.display().to_string(),
+        ));
         inner.reload();
-        let errors = inner.errors.read().unwrap().clone();
-        if !errors.is_empty() {
-            let list: Vec<String> = errors.iter().map(|(f, e)| format!("{f}: {e}")).collect();
-            anyhow::bail!("script compile errors: {}", list.join("; "));
-        }
-        let dir = inner.dir.clone();
+        check_errors(&inner)?;
         // Debounce: Schreibvorgaenge (z. B. `fs::write` kuerzt die Datei zuerst)
         // erzeugen mehrere Ereignisse. Neu geladen wird erst nach einer Ruhephase,
         // sonst koennte eine leere Zwischenstufe als Skript gelten.
@@ -125,6 +128,19 @@ impl ScriptHooks {
         })
     }
 
+    /// Laedt Skripte aus einer beliebigen Quelle (z. B. ZIP im Speicher).
+    /// Ohne Beobachtung: Aenderungen gibt es nur per `reload()`.
+    pub fn load_from(repo: Arc<dyn FileRepository>, label: impl Into<String>) -> anyhow::Result<ScriptHooks> {
+        let inner = Arc::new(Inner::new(repo, label.into()));
+        inner.reload();
+        check_errors(&inner)?;
+        tracing::info!(source = %inner.label, "script hooks loaded");
+        Ok(ScriptHooks {
+            inner,
+            _watcher: None,
+        })
+    }
+
     /// Bindet ein Komponenten-Skript an eine Entitaetsmenge. Die Funktionen
     /// `before_create`/`before_patch` des Komponenten-Skripts laufen vor dem
     /// Entitaetsskript und bekommen `(ctx, config)`. Das Skript muss existieren.
@@ -136,8 +152,8 @@ impl ScriptHooks {
     ) -> Result<(), ScriptError> {
         if !self.inner.components.read().unwrap().contains_key(script) {
             return Err(ScriptError::Script(format!(
-                "komponenten-skript '{script}' fehlt im Verzeichnis '{}'",
-                self.inner.dir.display()
+                "komponenten-skript '{script}' fehlt in '{}'",
+                self.inner.label
             )));
         }
         self.inner
@@ -169,7 +185,7 @@ impl ScriptHooks {
             sets.insert(name.clone(), json!(fns));
         }
         json!({
-            "dir": self.inner.dir.display().to_string(),
+            "dir": self.inner.label,
             "sets": sets,
             "errors": *self.inner.errors.read().unwrap(),
             "reloads": self.inner.reloads.load(Ordering::Relaxed),
@@ -346,11 +362,21 @@ impl ScriptHooks {
     }
 }
 
+fn check_errors(inner: &Inner) -> anyhow::Result<()> {
+    let errors = inner.errors.read().unwrap().clone();
+    if !errors.is_empty() {
+        let list: Vec<String> = errors.iter().map(|(f, e)| format!("{f}: {e}")).collect();
+        anyhow::bail!("script compile errors: {}", list.join("; "));
+    }
+    Ok(())
+}
+
 impl Inner {
-    fn new(dir: PathBuf) -> Inner {
+    fn new(repo: Arc<dyn FileRepository>, label: String) -> Inner {
         Inner {
             engine: build_engine(),
-            dir,
+            repo,
+            label,
             scripts: RwLock::new(HashMap::new()),
             components: RwLock::new(HashMap::new()),
             bindings: RwLock::new(HashMap::new()),
@@ -365,59 +391,43 @@ impl Inner {
         let mut errors = BTreeMap::new();
         let old = self.scripts.read().unwrap().clone();
 
-        match std::fs::read_dir(&self.dir) {
-            Ok(entries) => {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().is_none_or(|e| e != "rhai") {
-                        continue;
-                    }
-                    let Some(set) = path
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .map(str::to_string)
-                    else {
-                        continue;
-                    };
-                    match compile(&self.engine, &path) {
+        match self.repo.list("") {
+            Ok(names) => {
+                for name in names {
+                    let Some(set) = rhai_stem(&name) else { continue };
+                    match self.compile(&name) {
                         Ok(script) => {
-                            next.insert(set, Arc::new(script));
+                            next.insert(set.to_string(), Arc::new(script));
                         }
                         Err(msg) => {
-                            errors.insert(file_name(&path), msg.clone());
-                            tracing::error!(file = %path.display(), "script not reloaded: {msg}");
-                            if let Some(prev) = old.get(&set) {
-                                next.insert(set, prev.clone());
+                            errors.insert(name.clone(), msg.clone());
+                            tracing::error!(file = %name, "script not reloaded: {msg}");
+                            if let Some(prev) = old.get(set) {
+                                next.insert(set.to_string(), prev.clone());
                             }
                         }
                     }
                 }
             }
             Err(e) => {
-                errors.insert(self.dir.display().to_string(), e.to_string());
+                errors.insert(self.label.clone(), e.to_string());
             }
         }
 
         let mut next_components: HashMap<String, Arc<Script>> = HashMap::new();
-        let components_dir = self.dir.join("components");
-        if let Ok(entries) = std::fs::read_dir(&components_dir) {
+        if let Ok(names) = self.repo.list("components") {
             let old_components = self.components.read().unwrap().clone();
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_none_or(|e| e != "rhai") {
-                    continue;
-                }
-                let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-                    continue;
-                };
+            for name in names {
+                let Some(stem) = rhai_stem(&name) else { continue };
                 let key = format!("components/{stem}");
-                match compile(&self.engine, &path) {
+                let rel = format!("components/{name}");
+                match self.compile(&rel) {
                     Ok(script) => {
                         next_components.insert(key, Arc::new(script));
                     }
                     Err(msg) => {
-                        errors.insert(format!("components/{}", file_name(&path)), msg.clone());
-                        tracing::error!(file = %path.display(), "component not reloaded: {msg}");
+                        errors.insert(rel.clone(), msg.clone());
+                        tracing::error!(file = %rel, "component not reloaded: {msg}");
                         if let Some(prev) = old_components.get(&key) {
                             next_components.insert(key, prev.clone());
                         }
@@ -431,22 +441,27 @@ impl Inner {
         *self.errors.write().unwrap() = errors;
         self.reloads.fetch_add(1, Ordering::Relaxed);
     }
+
+    /// Kompiliert die Datei `rel` aus der Quelle.
+    fn compile(&self, rel: &str) -> Result<Script, String> {
+        let bytes = self
+            .repo
+            .read(rel)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Datei nicht gefunden".to_string())?;
+        let src = String::from_utf8(bytes.to_vec()).map_err(|e| e.to_string())?;
+        let ast = self.engine.compile(&src).map_err(|e| e.to_string())?;
+        let functions = ast
+            .iter_functions()
+            .map(|f| f.name.to_string())
+            .collect::<HashSet<_>>();
+        Ok(Script { ast, functions })
+    }
 }
 
-fn compile(engine: &Engine, path: &Path) -> Result<Script, String> {
-    let src = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let ast = engine.compile(&src).map_err(|e| e.to_string())?;
-    let functions = ast
-        .iter_functions()
-        .map(|f| f.name.to_string())
-        .collect::<HashSet<_>>();
-    Ok(Script { ast, functions })
-}
-
-fn file_name(path: &Path) -> String {
-    path.file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default()
+/// Stamm eines `*.rhai`-Dateinamens; `None` fuer andere Dateien.
+fn rhai_stem(name: &str) -> Option<&str> {
+    name.strip_suffix(".rhai").filter(|s| !s.is_empty() && !s.contains('/'))
 }
 
 /// Schluessel der Query fuer Skripte: `$filter` heisst dort `filter` usw.

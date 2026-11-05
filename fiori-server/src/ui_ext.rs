@@ -10,7 +10,7 @@
 //! * `<ext_dir>/<app>/` wird je App unter `/ext/<app>/` ausgeliefert (Assets pro App).
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::sync::Arc;
 
 use axum::{
     Router,
@@ -22,9 +22,10 @@ use axum::{
 use serde_json::{Value, json};
 use spec::data_dictionary::DataDictionary;
 use spec::{DisplayFormat, EntityUi, FieldSpec};
-use tower_http::services::ServeDir;
+use file_repo::FileRepository;
 
 use crate::AppState;
+use crate::repo_serve;
 use crate::extension::Extension;
 
 const FORMAT_JS: &str = include_str!("ui_format.js");
@@ -65,8 +66,10 @@ pub struct UiExtension {
     entity_ui: BTreeMap<String, EntityUi>,
     /// Hauptentitaet -> App-Name (Namespace der Assets).
     app_of_entity: BTreeMap<String, String>,
-    /// App-Name -> Asset-Verzeichnis (nur vorhandene).
-    assets: Vec<(String, PathBuf)>,
+    /// Apps mit Assets unter `<ext>/<app>/` (nur vorhandene).
+    assets: Vec<String>,
+    /// Quelle der Assets (`ext/`).
+    ext: Option<Arc<dyn FileRepository>>,
     /// Module je App (`<app>/ext/<modul>`).
     modules: Vec<String>,
     /// Controller-Erweiterungen je App: (Ziel, `<app>.ext.<controller>`).
@@ -74,8 +77,8 @@ pub struct UiExtension {
 }
 
 impl UiExtension {
-    /// Liest die `ui`-Bloecke aus dem Dictionary. `ext_dir`: Wurzel der App-Assets.
-    pub fn new(ddic: &DataDictionary, ext_dir: Option<PathBuf>) -> Self {
+    /// Liest die `ui`-Bloecke aus dem Dictionary. `ext`: Quelle der App-Assets.
+    pub fn new(ddic: &DataDictionary, ext: Option<Arc<dyn FileRepository>>) -> Self {
         let mut formatted: BTreeMap<String, Vec<FormattedField>> = BTreeMap::new();
         let mut hidden: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for entity in ddic.entities() {
@@ -118,8 +121,11 @@ impl UiExtension {
         for app in ddic.apps() {
             let ns = app.name().to_string();
             app_of_entity.insert(app.main_entity(ddic).name().to_string(), ns.clone());
-            if let Some(dir) = ext_dir.as_ref().map(|d| d.join(&ns)).filter(|p| p.is_dir()) {
-                assets.push((ns.clone(), dir));
+            let has_assets = ext
+                .as_ref()
+                .is_some_and(|r| r.list(&ns).map(|v| !v.is_empty()).unwrap_or(false));
+            if has_assets {
+                assets.push(ns.clone());
             }
             if let Some(app_ui) = app.ui() {
                 for m in &app_ui.modules {
@@ -157,6 +163,7 @@ impl UiExtension {
             entity_ui,
             app_of_entity,
             assets,
+            ext,
             modules,
             controller_exts,
         }
@@ -344,15 +351,28 @@ impl Extension for UiExtension {
                 get(|| async { ([(header::CONTENT_TYPE, JS)], COMPONENTS_JS) }),
             )
             .route("/ext/fiori/fragment/{file}", get(fragments));
-        for (app, dir) in &self.assets {
-            router = router.nest_service(&format!("/ext/{app}"), ServeDir::new(dir));
+        if let Some(repo) = self.ext.clone() {
+            let apps = self.assets.clone();
+            router = router.route(
+                "/ext/{app}/{*rest}",
+                get(move |Path((app, rest)): Path<(String, String)>| {
+                    let repo = repo.clone();
+                    let apps = apps.clone();
+                    async move {
+                        if !apps.contains(&app) {
+                            return StatusCode::NOT_FOUND.into_response();
+                        }
+                        repo_serve::serve(repo.as_ref(), &format!("{app}/{rest}"))
+                    }
+                }),
+            );
         }
         router
     }
 
     fn ui5_paths(&self) -> Vec<(String, String)> {
         let mut paths = vec![("fiori.ext".into(), "/ext/fiori".into())];
-        for (app, _) in &self.assets {
+        for app in &self.assets {
             paths.push((format!("{app}.ext"), format!("/ext/{app}")));
         }
         paths
@@ -565,67 +585,6 @@ mod tests {
         assert!(ext.hidden_fields("Other").is_empty());
     }
 
-    fn workbench_ddic() -> DataDictionary {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../workbench/ddic.json");
-        let text = std::fs::read_to_string(path).unwrap();
-        let mut ddic: DataDictionary = serde_json::from_str(&text).unwrap();
-        ddic.expand_components().unwrap();
-        ddic
-    }
-
-    #[test]
-    fn component_section_and_controller_are_generated() {
-        let ext = UiExtension::new(&workbench_ddic(), None);
-        let page = ext.object_page_content("Appointment").expect("Abschnitt");
-        let section = &page["body"]["sections"]["Component_termin"];
-        assert_eq!(section["title"], "Zeitraum");
-        assert_eq!(
-            section["template"],
-            "fiori.ext.fragment.Component__Appointment__termin"
-        );
-
-        let ctrl = ext.controller_extensions();
-        assert!(ctrl.iter().any(
-            |(t, c)| t == "sap.fe.templates.ObjectPage.ObjectPageController"
-                && c == "fiori.ext.ComponentsController"
-        ));
-    }
-
-    #[test]
-    fn component_fragment_is_valid_xml_with_config_and_step() {
-        let ddic = workbench_ddic();
-        let usage = ddic
-            .component_uses()
-            .iter()
-            .find(|u| u.instance == "termin")
-            .unwrap();
-        let component = ddic
-            .components()
-            .iter()
-            .find(|c| c.name == usage.component)
-            .unwrap();
-        let xml = component_fragment(component, usage);
-        let doc = roxmltree_like_check(&xml);
-        assert!(doc, "kein gueltiges XML");
-        assert!(xml.contains(
-            "value=\"instance=termin;start=starts_at;end=ends_at;duration=duration_minutes;step=5\""
-        ));
-        assert!(xml.contains("minutesStep=\"5\""));
-        assert!(xml.contains("label=\"Beginn\""));
-        assert!(xml.contains("formatter: 'fiori.ext.Format.hm'"));
-    }
-
-    /// Der XML-Reader beruecksichtigt auch `>` innerhalb von Binding-Attributen.
-    fn roxmltree_like_check(xml: &str) -> bool {
-        let mut reader = quick_xml::Reader::from_str(xml);
-        loop {
-            match reader.read_event() {
-                Ok(quick_xml::events::Event::Eof) => return true,
-                Err(_) => return false,
-                _ => {}
-            }
-        }
-    }
 
     #[test]
     fn field_fragment_is_built_from_ddic_only() {

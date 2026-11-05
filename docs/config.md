@@ -32,7 +32,7 @@ Der Designer ist kein eigenes Programm, sondern der Laufzeitserver mit `--design
 
 **Ablauf**
 
-1. Der Designer öffnet `ddic.json` (`--ddic`, Standard `<export-dir>/ddic.json`). Fehlt die Datei, wird eine leere angelegt.
+1. Der Designer öffnet `ddic.json` (`--ddic`, Standard `ddic.json`). Fehlt die Datei, wird eine leere angelegt.
 2. Die Oberfläche zeigt das eincompilierte Metamodell (`DataDictionary::new()`) mit den Entitäten `Entity`, `Field`, `Relation`, `Value`, `ValueList`, `Package`, `App`.
 3. Jede Anlage, Änderung oder Löschung wird im `DdicStore` (`fiori-server/src/ddic_store.rs`) auf die Sets abgebildet, ins Dictionary übernommen, validiert und dann atomar geschrieben (Temp-Datei `ddic.json.tmp`, danach Rename). Scheitert die Validierung, bleibt die Datei unverändert und der Request bekommt einen Konflikt.
 4. Lesen greift nur auf den Speicherstand zu und schreibt nichts.
@@ -127,7 +127,7 @@ Der SQLite-Store läuft im Speicher und wird nur beim sauberen Beenden (SIGINT/S
 
 ## 4. Docker / Compose
 
-- `Dockerfile`: Setzt `PORT=8080`, `DATA_DIR=/app/data`, `EXPORT_DIR=/app/export`, `WEB_ROOT=/app/web`. Läuft als Nutzer `appuser`.
+- `Dockerfile`: Setzt `PORT=8080`, `DATA_DIR=/app/data`, `WEB_ROOT=/app/web`. Läuft als Nutzer `appuser`.
 - `compose.yaml`:
   - Designer: derselbe Laufzeit-Code mit `DESIGNER=1`, Port `3033:8080`, Volume `export` (schreibbar).
   - Runtime: Port `3034:8080`, Env `DDIC=/app/export/ddic.json`, Volume `export` **read-only**.
@@ -161,9 +161,8 @@ Der Austausch läuft über das gemeinsame Volume `export`. Der Runtime-Container
 | `--designer` | `DESIGNER` | aus | aus | Designer-Modus: schreibt `ddic.json` |
 | `--data-dir` | `DATA_DIR` | `rel-data` | `rel-data` | Verzeichnis für `data.sqlite` |
 | `--web-root` | `WEB_ROOT` | `web` | `web` | Statische UI5-Assets |
-| `--ddic` | `DDIC` | keiner | `<export-dir>/ddic.json` | Dictionary-Datei (Runtime Pflicht) |
+| `--ddic` | `DDIC` | keiner | `ddic.json` | Dictionary-Datei (Runtime Pflicht) |
 | `--schema` | `SCHEMA` | abgeleitet | abgeleitet | Feste Schemadatei (JSON) |
-| `--export-dir` | `EXPORT_DIR` | `export` | `export` | Verzeichnis, aus dem `ddic.json` gelesen wird |
 | `--scripts-dir` | `SCRIPTS_DIR` | – | – | Rhai-Skripte pro Set (Hooks) |
 | `--auth-user-header` | `AUTH_USER_HEADER` | `X-Forwarded-User` | `X-Forwarded-User` | Header des Auth-Proxys |
 | `--auth-required` | `AUTH_REQUIRED` | aus | aus | Ohne Header: 401 |
@@ -234,7 +233,6 @@ Nicht alles davon ist im Designer-Store abbildbar (siehe Auffälligkeit 2).
 |---|---|---|
 | `PORT` | Dockerfile | 8080 |
 | `DATA_DIR` | Dockerfile | `/app/data` |
-| `EXPORT_DIR` | Dockerfile | `/app/export` |
 | `WEB_ROOT` | Dockerfile | `/app/web` |
 | `DDIC` | compose (runtime, designer) | `/app/export/ddic.json` |
 | `DESIGNER` | compose (designer) | `1` |

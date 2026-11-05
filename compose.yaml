@@ -49,8 +49,17 @@ services:
       # Ohne Dictionary hat der Laufzeitserver nichts zu tun und beendet sich
       # mit einem Hinweis - bis der Designer einmal exportiert hat.
       DDIC: /app/export/ddic.json
+      # Alternative: alles aus ZIP-Dateien im Speicher (read-only), erzeugt mit
+      #   pjl-pack --src web --out fiori.zip
+      #   pjl-pack --src <modell-verzeichnis> --out model.zip   (ddic.json, scripts/, ext/)
+      # Dann die beiden Zeilen aktivieren und DDIC auf ddic.json relativ zur Quelle setzen:
+      # FIORI_ROOT: zip:///app/fiori.zip
+      # MODEL_ROOT: zip:///app/model.zip
+      # DDIC: ddic.json
     volumes:
       - runtime-data:/app/data
+      # - ./fiori.zip:/app/fiori.zip:ro
+      # - ./model.zip:/app/model.zip:ro
       - export:/app/export:ro
     depends_on:
       - designer

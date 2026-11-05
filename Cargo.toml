@@ -2,9 +2,11 @@
 resolver = "3"
 members = [
     "data-store",
+    "file-repo",
     "fiori-server",
     "odata",
     "odata-yaml-store",
+    "pjl-pack",
     "postgres-relational-store",
     "relational-core",
     "script-hooks",

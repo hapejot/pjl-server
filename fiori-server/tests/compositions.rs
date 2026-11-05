@@ -13,6 +13,7 @@ const ENTITY_ID: &str = "00000000-0000-0000-0000-000000000001";
 
 async fn app_state() -> (TempDir, AppState) {
     let dir = TempDir::new().unwrap();
+    // Metamodell: enthaelt EntitySet und FieldSet.
     let base = spec::data_dictionary::DataDictionary::new();
     let mut active = base.clone();
     active.activate();

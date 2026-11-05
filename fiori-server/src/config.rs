@@ -72,10 +72,6 @@ pub struct Cli {
     #[arg(long, env = "SCHEMA")]
     pub schema: Option<PathBuf>,
 
-    /// Verzeichnis mit `ddic.json`, falls `--ddic` nicht angegeben ist.
-    #[arg(long, env = "EXPORT_DIR", default_value = "export")]
-    pub export_dir: PathBuf,
-
     /// Designer-Modus: pflegt `ddic.json` ueber die Metamodell-Oberflaeche.
     /// Ohne Skripte und ohne Datenbank; jede Aenderung wird sofort geschrieben.
     #[arg(long, env = "DESIGNER", value_parser = clap::builder::BoolishValueParser::new())]
@@ -115,11 +111,27 @@ pub struct Cli {
     /// Ohne Angabe keine App-Assets.
     #[arg(long, env = "EXT_DIR")]
     pub ext_dir: Option<PathBuf>,
+
+    /// Quelle der statischen Web-Assets: `file://<pfad>` oder `zip://<pfad>`.
+    /// Ohne Angabe gilt `WEB_ROOT`.
+    #[arg(long, env = "FIORI_ROOT")]
+    pub fiori_root: Option<String>,
+
+    /// Quelle fuer Modell, Skripte und Extensions: `file://<pfad>` oder `zip://<pfad>`.
+    /// Layout: `ddic.json`, `scripts/`, `ext/` im Wurzelverzeichnis. `DDIC` und
+    /// `DDIC_OVERLAY` sind dann relativ zur Wurzel.
+    #[arg(long, env = "MODEL_ROOT")]
+    pub model_root: Option<String>,
+
+    /// Verzeichnis des Designers (nur `file://`). `DDIC` ist relativ dazu.
+    #[arg(long, env = "DESIGNER_ROOT")]
+    pub designer_root: Option<String>,
 }
 
 impl Cli {
     pub fn into_config(self, mode: ServerMode) -> ServerConfig {
         let (default_port, default_data_dir) = mode.defaults();
+        // Mit MODEL_ROOT liegt das Modell im Wurzelverzeichnis der Quelle.
         let ddic = self.ddic.or_else(|| Some(PathBuf::from("ddic.json")));
         // Overlay gilt nur fuer die Laufzeit; der Designer schreibt die Datei selbst.
         let ddic_overlay = if self.designer {
@@ -136,7 +148,6 @@ impl Cli {
             ddic,
             ddic_overlay,
             schema: self.schema,
-            export_dir: self.export_dir,
             designer: self.designer,
             auth_user_header: self.auth_user_header,
             auth_required: self.auth_required,
@@ -145,6 +156,9 @@ impl Cli {
             term3270_bind: self.term3270_bind,
             scripts_dir: self.scripts_dir,
             ext_dir: self.ext_dir,
+            fiori_root: self.fiori_root,
+            model_root: self.model_root,
+            designer_root: self.designer_root,
         }
     }
 }
@@ -162,7 +176,6 @@ pub struct ServerConfig {
     /// Overlay zur `ddic.json`; nur im Laufzeitmodus wirksam.
     pub ddic_overlay: Option<PathBuf>,
     pub schema: Option<PathBuf>,
-    pub export_dir: PathBuf,
     /// Designer-Modus (siehe `Cli::designer`).
     pub designer: bool,
     pub auth_user_header: String,
@@ -176,6 +189,12 @@ pub struct ServerConfig {
     pub scripts_dir: Option<PathBuf>,
     /// Asset-Verzeichnis je App (`<ext_dir>/<app>/`); `None` schaltet sie aus.
     pub ext_dir: Option<PathBuf>,
+    /// Quelle der Web-Assets (`file://` oder `zip://`); `None`: `web_root`.
+    pub fiori_root: Option<String>,
+    /// Quelle fuer Modell, Skripte und Extensions; `None`: Einzelpfade.
+    pub model_root: Option<String>,
+    /// Designer-Verzeichnis (nur `file://`).
+    pub designer_root: Option<String>,
 }
 
 impl ServerConfig {
@@ -199,7 +218,6 @@ impl ServerConfig {
             ddic: None,
             ddic_overlay: None,
             schema: None,
-            export_dir: "export".into(),
             designer: false,
             auth_user_header: "X-Forwarded-User".into(),
             auth_required: false,
@@ -208,6 +226,9 @@ impl ServerConfig {
             term3270_bind: IpAddr::from([127, 0, 0, 1]),
             scripts_dir: None,
             ext_dir: None,
+            fiori_root: None,
+            model_root: None,
+            designer_root: None,
         }
     }
 }
@@ -227,7 +248,7 @@ mod tests {
         let runtime = cli(&[]).into_config(ServerMode::Runtime);
         assert_eq!(runtime.port, 3034);
         assert_eq!(runtime.data_dir, PathBuf::from("rel-data"));
-        assert_eq!(runtime.ddic, Some(PathBuf::from("export/ddic.json")));
+        assert_eq!(runtime.ddic, Some(PathBuf::from("ddic.json")));
         assert!(!runtime.designer);
     }
 
@@ -247,8 +268,8 @@ mod tests {
     }
 
     #[test]
-    fn runtime_ddic_follows_the_export_dir() {
-        let c = cli(&["--export-dir", "dist"]).into_config(ServerMode::Runtime);
-        assert_eq!(c.ddic, Some(PathBuf::from("dist/ddic.json")));
+    fn runtime_ddic_default_is_ddic_json() {
+        let c = cli(&[]).into_config(ServerMode::Runtime);
+        assert_eq!(c.ddic, Some(PathBuf::from("ddic.json")));
     }
 }

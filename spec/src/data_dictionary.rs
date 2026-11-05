@@ -47,7 +47,9 @@ impl DataDictionary {
         let entity_ent = EntitySpec::new("Entity", core.name(), "Entities")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
             .field(FieldSpec::bool_field("draft_enabled", "Draft Enabled"))
-            .field(FieldSpec::atom("plural", "Plural", "Edm.String"));
+            .field(FieldSpec::atom("plural", "Plural", "Edm.String"))
+            .field(FieldSpec::atom("type_name", "Singular Label", "Edm.String"))
+            .field(FieldSpec::bool_field("audited", "Audited"));
 
         let field_ent = EntitySpec::new("Field", core.name(), "Fields")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
@@ -59,7 +61,18 @@ impl DataDictionary {
             .field(FieldSpec::atom("scale", "Scale", "Edm.Int64"))
             .field(FieldSpec::atom("computed", "Computed", "Edm.Boolean"))
             .field(FieldSpec::atom("immutable", "Immutable", "Edm.Boolean"))
-            .field(FieldSpec::atom("multiline", "Multiline", "Edm.Boolean"));
+            .field(FieldSpec::atom("multiline", "Multiline", "Edm.Boolean"))
+            .field(FieldSpec::atom("kind", "Field Kind", "Edm.String"))
+            .field(FieldSpec::atom("package", "Package", "Edm.String"))
+            .field(FieldSpec::atom("link", "Link", "Edm.Boolean"))
+            .field(FieldSpec::bool_field("prefer_dialog", "Prefer Dialog"))
+            .field(FieldSpec::atom("value_help_type", "Value Help Type", "Edm.String"))
+            .field(FieldSpec::atom("entity_set", "Target Entity Set", "Edm.String"))
+            .field(FieldSpec::atom("key_property", "Key Property", "Edm.String"))
+            .field(FieldSpec::atom("display_property", "Display Property", "Edm.String"))
+            .field(FieldSpec::atom("display_format", "Display Format", "Edm.String"))
+            .field(FieldSpec::atom("unit_field", "Unit or Currency Field", "Edm.String"))
+            .field(FieldSpec::atom("measure_kind", "Measure Kind", "Edm.String"));
 
         let relation_ent = EntitySpec::new("Relation", core.name(), "Relations")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
@@ -73,7 +86,10 @@ impl DataDictionary {
                 "target_field",
                 "Single Field",
                 "Edm.String",
-            ));
+            ))
+            .field(FieldSpec::atom("package", "Package", "Edm.String"))
+            .field(FieldSpec::atom("one_label", "Collection Label", "Edm.String"))
+            .field(FieldSpec::atom("many_label", "Single Label", "Edm.String"));
 
         // `name` ist Titel und Listenspalte (Annotationen verweisen darauf); es traegt den Code.
         let value_ent = EntitySpec::new("Value", core.name(), "Values")
@@ -97,6 +113,102 @@ impl DataDictionary {
             .field(FieldSpec::atom("title", "Title", "Edm.String"))
             .field(FieldSpec::atom("subtitle", "Subtitle", "Edm.String"))
             .field(FieldSpec::atom("icon", "Icon", "Edm.String"));
+
+        let component_ent = EntitySpec::new("Component", core.name(), "Components")
+            .field(FieldSpec::atom("name", "Name", "Edm.String"))
+            .field(FieldSpec::atom("kind", "Kind", "Edm.String"))
+            .field(FieldSpec::atom("script", "Script", "Edm.String"))
+            .field(FieldSpec::atom("unit", "Unit", "Edm.String"))
+            .field(FieldSpec::atom("step_minutes", "Step Minutes", "Edm.Int64"));
+
+        let component_use_ent = EntitySpec::new("ComponentUse", core.name(), "Component Uses")
+            .field(FieldSpec::atom("instance", "Instance", "Edm.String"))
+            .field(FieldSpec::atom("step_minutes", "Step Minutes", "Edm.Int64"))
+            .field(FieldSpec::atom("section_title", "Section Title", "Edm.String"));
+
+        let list_view_ent = EntitySpec::new("EntityListView", core.name(), "List Views")
+            .field(FieldSpec::atom("name", "Name", "Edm.String"))
+            .field(FieldSpec::atom("role", "Role", "Edm.String"))
+            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+            .without_audit();
+        let list_column_ent = EntitySpec::new("EntityListColumn", core.name(), "List Columns")
+            .field(FieldSpec::atom("field", "Field", "Edm.String"))
+            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+            .without_audit();
+        let filter_default_ent = EntitySpec::new("EntityFilterDefault", core.name(), "Filter Defaults")
+            .field(FieldSpec::atom("field", "Field", "Edm.String"))
+            .field(FieldSpec::atom("value", "Value", "Edm.String"))
+            .field(FieldSpec::bool_field("is_boolean", "Boolean Value"))
+            .without_audit();
+        let selection_field_ent = EntitySpec::new("EntitySelectionField", core.name(), "Selection Fields")
+            .field(FieldSpec::atom("field", "Field", "Edm.String"))
+            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+            .without_audit();
+        let facet_ent = EntitySpec::new("EntityFacet", core.name(), "Facets")
+            .field(FieldSpec::atom("facet", "Facet", "Edm.String"))
+            .field(FieldSpec::atom("view", "List View", "Edm.String"))
+            .field(FieldSpec::atom("title", "Title", "Edm.String"))
+            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+            .without_audit();
+        let facet_field_ent = EntitySpec::new("EntityFacetField", core.name(), "Facet Fields")
+            .field(FieldSpec::atom("field", "Field", "Edm.String"))
+            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+            .without_audit();
+        let hidden_field_ent = EntitySpec::new("EntityHiddenField", core.name(), "Hidden Fields")
+            .field(FieldSpec::atom("field", "Field", "Edm.String"))
+            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+            .without_audit();
+        let hidden_facet_ent = EntitySpec::new("EntityHiddenFacet", core.name(), "Hidden Facets")
+            .field(FieldSpec::atom("facet", "Facet", "Edm.String"))
+            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+            .without_audit();
+        let ui_section_ent = EntitySpec::new("EntityUiSection", core.name(), "Custom Sections")
+            .field(FieldSpec::atom("key", "Key", "Edm.String"))
+            .field(FieldSpec::atom("title", "Title", "Edm.String"))
+            .field(FieldSpec::atom("fragment", "Fragment", "Edm.String"))
+            .field(FieldSpec::atom("anchor", "Anchor", "Edm.String"))
+            .field(FieldSpec::atom("placement", "Placement", "Edm.String"))
+            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+            .without_audit();
+        let ui_column_ent = EntitySpec::new("EntityUiListColumn", core.name(), "Custom List Columns")
+            .field(FieldSpec::atom("key", "Key", "Edm.String"))
+            .field(FieldSpec::atom("header", "Header", "Edm.String"))
+            .field(FieldSpec::atom("fragment", "Fragment", "Edm.String"))
+            .field(FieldSpec::atom("anchor", "Anchor", "Edm.String"))
+            .field(FieldSpec::atom("placement", "Placement", "Edm.String"))
+            .field(FieldSpec::atom("width", "Width", "Edm.String"))
+            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+            .without_audit();
+        let ui_template_ent = EntitySpec::new("EntityUiListTemplate", core.name(), "List Templates")
+            .field(FieldSpec::atom("key", "Key", "Edm.String"))
+            .field(FieldSpec::atom("label", "Label", "Edm.String"))
+            .field(FieldSpec::atom("fragment", "Fragment", "Edm.String"))
+            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+            .without_audit();
+        let field_side_effect_ent = EntitySpec::new("FieldSideEffect", core.name(), "Side Effects")
+            .field(FieldSpec::atom("target", "Target Field", "Edm.String"))
+            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+            .without_audit();
+        let value_help_filter_ent = EntitySpec::new("ValueHelpFilter", core.name(), "Value Help Filters")
+            .field(FieldSpec::atom("local_property", "Local Field", "Edm.String"))
+            .field(FieldSpec::atom("target_property", "Target Field", "Edm.String"))
+            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+            .without_audit();
+        let app_module_ent = EntitySpec::new("AppModule", core.name(), "App Modules")
+            .field(FieldSpec::atom("module", "Module", "Edm.String"))
+            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+            .without_audit();
+        let app_extension_ent = EntitySpec::new("AppControllerExtension", core.name(), "Controller Extensions")
+            .field(FieldSpec::atom("target", "Target Controller", "Edm.String"))
+            .field(FieldSpec::atom("controller", "Extension Controller", "Edm.String"))
+            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+            .without_audit();
+        let component_role_ent = EntitySpec::new("ComponentUseRole", core.name(), "Component Roles")
+            .field(FieldSpec::atom("role", "Role", "Edm.String"))
+            .field(FieldSpec::atom("field", "Field", "Edm.String"))
+            .field(FieldSpec::atom("label", "Label", "Edm.String"))
+            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+            .without_audit();
 
         let rel = Relationship::new("entity_fields", core.name())
             .with_one("Entity", "_Fields")
@@ -123,6 +235,34 @@ impl DataDictionary {
         let r9 = Relationship::new("value_list_fields", core.name())
             .with_one("ValueList", "_Fields")
             .with_many("Field", "value_list");
+        let config_relationships = [
+            ("entity_list_views", "Entity", "_ListViews", "EntityListView", "entity"),
+            ("list_view_columns", "EntityListView", "_Columns", "EntityListColumn", "list_view"),
+            ("entity_filter_defaults", "Entity", "_FilterDefaults", "EntityFilterDefault", "entity"),
+            ("entity_selection_fields", "Entity", "_SelectionFields", "EntitySelectionField", "entity"),
+            ("entity_facets", "Entity", "_Facets", "EntityFacet", "entity"),
+            ("facet_fields", "EntityFacet", "_Fields", "EntityFacetField", "facet"),
+            ("entity_hidden_fields", "Entity", "_HiddenFields", "EntityHiddenField", "entity"),
+            ("entity_hidden_facets", "Entity", "_HiddenFacets", "EntityHiddenFacet", "entity"),
+            ("entity_ui_sections", "Entity", "_UiSections", "EntityUiSection", "entity"),
+            ("entity_ui_columns", "Entity", "_UiColumns", "EntityUiListColumn", "entity"),
+            ("entity_ui_templates", "Entity", "_UiTemplates", "EntityUiListTemplate", "entity"),
+            ("field_side_effects", "Field", "_SideEffects", "FieldSideEffect", "field"),
+            ("value_help_filters", "Field", "_ValueHelpFilters", "ValueHelpFilter", "field"),
+            ("app_modules", "App", "_Modules", "AppModule", "app"),
+            ("app_controller_extensions", "App", "_ControllerExtensions", "AppControllerExtension", "app"),
+            ("entity_component_uses", "Entity", "_ComponentUses", "ComponentUse", "entity"),
+            ("component_uses_component", "Component", "_Uses", "ComponentUse", "component"),
+            ("component_use_roles", "ComponentUse", "_Roles", "ComponentUseRole", "component_use"),
+        ]
+        .into_iter()
+        .map(|(name, one, one_field, many, many_property)| {
+            Relationship::new(name, core.name())
+                .with_one(one, one_field)
+                .with_many(many, many_property)
+                .owned()
+        })
+        .collect::<Vec<_>>();
         let r7 = Relationship::new("app_package", core.name())
             .with_one("Package", "_Apps")
             .with_many("App", "package");
@@ -174,6 +314,22 @@ impl DataDictionary {
             Some("sap-icon://world".into()),
             core.clone(),
         );
+        let a7 = App::new(
+            "components".into(),
+            "Components".into(),
+            "Component".into(),
+            Some("Maintain Components".into()),
+            Some("sap-icon://world".into()),
+            core.clone(),
+        );
+        let a8 = App::new(
+            "componentuses".into(),
+            "Component Uses".into(),
+            "ComponentUse".into(),
+            Some("Maintain Component Uses".into()),
+            Some("sap-icon://world".into()),
+            core.clone(),
+        );
 
         Self {
             packages: vec![core],
@@ -185,9 +341,30 @@ impl DataDictionary {
                 package_ent,
                 app_ent,
                 value_list_ent,
+                component_ent,
+                component_use_ent,
+                list_view_ent,
+                list_column_ent,
+                filter_default_ent,
+                selection_field_ent,
+                facet_ent,
+                facet_field_ent,
+                hidden_field_ent,
+                hidden_facet_ent,
+                ui_section_ent,
+                ui_column_ent,
+                ui_template_ent,
+                field_side_effect_ent,
+                value_help_filter_ent,
+                app_module_ent,
+                app_extension_ent,
+                component_role_ent,
             ],
-            relationships: vec![rel, r2, r3, r4, r5, r6, r7, r8, r9],
-            apps: vec![a1, a2, a3, a4, a5, a6],
+            relationships: vec![rel, r2, r3, r4, r5, r6, r7, r8, r9]
+                .into_iter()
+                .chain(config_relationships)
+                .collect(),
+            apps: vec![a1, a2, a3, a4, a5, a6, a7, a8],
             value_lists: Vec::new(),
             components: Vec::new(),
             component_uses: Vec::new(),

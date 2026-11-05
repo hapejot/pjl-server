@@ -63,7 +63,6 @@ impl DataDictionary {
             .field(FieldSpec::atom("immutable", "Immutable", "Edm.Boolean"))
             .field(FieldSpec::atom("multiline", "Multiline", "Edm.Boolean"))
             .field(FieldSpec::atom("kind", "Field Kind", "Edm.String"))
-            .field(FieldSpec::atom("package", "Package", "Edm.String"))
             .field(FieldSpec::atom("link", "Link", "Edm.Boolean"))
             .field(FieldSpec::bool_field("prefer_dialog", "Prefer Dialog"))
             .field(FieldSpec::atom("value_help_type", "Value Help Type", "Edm.String"))

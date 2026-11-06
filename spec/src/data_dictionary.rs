@@ -133,6 +133,8 @@ impl DataDictionary {
         let list_column_ent = EntitySpec::new("EntityListColumn", core.name(), "List Columns")
             .field(FieldSpec::atom("field", "Field", "Edm.String"))
             .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+            .field(FieldSpec::atom("width", "Width", "Edm.String"))
+            .field(FieldSpec::atom("priority", "Priority", "Edm.String"))
             .without_audit();
         let filter_default_ent = EntitySpec::new("EntityFilterDefault", core.name(), "Filter Defaults")
             .field(FieldSpec::atom("field", "Field", "Edm.String"))
@@ -833,13 +835,21 @@ impl DataDictionary {
                 }
 
                 let mut seen_cols: Vec<&str> = Vec::new();
-                for col in &view.columns {
-                    if seen_cols.contains(&col.as_str()) {
+                for column in &view.columns {
+                    let col = column.field.as_str();
+                    if seen_cols.contains(&col) {
                         return Err(format!("{ctx}: Spalte '{col}' doppelt"));
                     }
                     seen_cols.push(col);
                     check_list_column(&active, entity.name(), col)
                         .map_err(|e| format!("{ctx}: {e}"))?;
+                    if let Some(width) = &column.width {
+                        if !is_valid_css_width(width) {
+                            return Err(format!(
+                                "{ctx}: Breite '{width}' von Spalte '{col}' ungueltig (erwartet z. B. 120px, 15rem, 20% oder auto)"
+                            ));
+                        }
+                    }
                 }
             }
         }
@@ -994,6 +1004,22 @@ fn check_list_column(active: &DataDictionary, entity: &str, col: &str) -> Result
     }
 }
 
+/// Zulaessige Spaltenbreite: `auto` oder eine positive Zahl mit Einheit `px`, `rem`, `em` oder `%`.
+pub fn is_valid_css_width(width: &str) -> bool {
+    if width == "auto" {
+        return true;
+    }
+    let units = ["px", "rem", "em", "%"];
+    units.iter().any(|unit| {
+        width.strip_suffix(unit).is_some_and(|num| {
+            !num.is_empty()
+                && num.chars().all(|c| c.is_ascii_digit() || c == '.')
+                && num.chars().any(|c| c.is_ascii_digit())
+                && num.matches('.').count() <= 1
+        })
+    })
+}
+
 #[cfg(test)]
 mod list_view_tests {
     use super::*;
@@ -1078,6 +1104,26 @@ mod list_view_tests {
 
         let d = ddic(vec![ListView::new("x", &["name", "name"])]);
         assert!(d.validate_list_views().unwrap_err().contains("doppelt"));
+    }
+
+    #[test]
+    fn column_width_is_validated() {
+        use crate::{ListColumn, Priority};
+        for ok in ["120px", "15rem", "2.5em", "20%", "auto"] {
+            let d = ddic(vec![ListView::with_columns(
+                "default",
+                vec![ListColumn::new("name").width(ok).priority(Priority::Low)],
+            )]);
+            assert!(d.validate_list_views().is_ok(), "{ok}");
+        }
+        for bad in ["", "px", "12", "12pt", "abc", "1.2.3px", "-5px", "10 px"] {
+            let d = ddic(vec![ListView::with_columns(
+                "default",
+                vec![ListColumn::new("name").width(bad)],
+            )]);
+            let err = d.validate_list_views().unwrap_err();
+            assert!(err.contains("Breite"), "{bad}: {err}");
+        }
     }
 
     #[test]

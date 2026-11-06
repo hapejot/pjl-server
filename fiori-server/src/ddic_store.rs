@@ -249,10 +249,21 @@ fn project(base: &Value) -> Sets {
                 "entity_ID": entity_id,
             }));
             for (order, column) in items(view, "columns").iter().enumerate() {
-                let Some(column) = column.as_str() else { continue };
+                // Kurzform (Feldname als String) oder Objekt mit field/width/priority.
+                let (field, width, priority) = match column.as_str() {
+                    Some(field) => (Some(field), None, None),
+                    None => (text(column, "field"), text(column, "width"), text(column, "priority")),
+                };
+                let Some(field) = field else { continue };
                 push_record(&mut sets, "EntityListColumnSet",
                     id_for("EntityListColumnSet", &format!("{name}/{view_name}/{order}")),
-                    json!({ "field": column, "order": order, "list_view_ID": view_id }));
+                    json!({
+                        "field": field,
+                        "order": order,
+                        "width": width,
+                        "priority": priority,
+                        "list_view_ID": view_id,
+                    }));
             }
         }
         if let Some(defaults) = e.get("filter_defaults").and_then(Value::as_object) {
@@ -669,7 +680,18 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
                 let view_id = text(view, "ID").unwrap_or_default();
                 let columns: Vec<Value> = child_records(&list_column_recs, "list_view_ID", view_id)
                     .into_iter()
-                    .filter_map(|column| text(column, "field").map(|field| json!(field)))
+                    .filter_map(|column| {
+                        let field = text(column, "field")?;
+                        let mut value = json!({
+                            "field": field,
+                            "width": text(column, "width"),
+                            "priority": text(column, "priority"),
+                        });
+                        if let Some(fields) = value.as_object_mut() {
+                            fields.retain(|_, value| !value.is_null());
+                        }
+                        Some(value)
+                    })
                     .collect();
                 let mut value = json!({
                     "name": text(view, "name"),

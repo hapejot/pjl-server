@@ -657,6 +657,23 @@ fn list_control_configuration_with_extensions(
     entity: &str,
 ) -> Value {
     let mut config = list_control_configuration(state, app_id);
+    if let Some(Value::Object(widths)) = crate::srv::list_column_widths(&state.ddic(), entity) {
+        let root = config.as_object_mut().expect("controlConfiguration ist ein Objekt");
+        for (key, section) in widths {
+            let target = root.entry(key).or_insert_with(|| json!({}));
+            let Some(target) = target.as_object_mut() else { continue };
+            let Some(Value::Object(cols)) = section.get("columns") else { continue };
+            let existing = target.entry("columns").or_insert_with(|| json!({}));
+            if let Some(existing) = existing.as_object_mut() {
+                for (col, settings) in cols {
+                    let slot = existing.entry(col.clone()).or_insert_with(|| json!({}));
+                    if let (Some(slot), Some(settings)) = (slot.as_object_mut(), settings.as_object()) {
+                        slot.extend(settings.clone());
+                    }
+                }
+            }
+        }
+    }
     if let Some(columns) = crate::extension::list_columns(&state.extensions, entity) {
         let line_item = config
             .as_object_mut()

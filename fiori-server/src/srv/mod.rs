@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use spec::{
     app::App, data_dictionary::DataDictionary, package::Package, AtomValueList, EntitySpec,
-    FieldSpec, MeasureKind, Relationship,
+    FieldSpec, ListColumn, MeasureKind, Relationship,
 };
 use tracing::*;
 
@@ -637,15 +637,15 @@ impl Annotations {
 fn line_item_annotations(x: &EntitySpec, app_entities: &[String]) -> Vec<Annotation> {
     let views = x.list_views();
     if views.is_empty() {
-        return vec![line_item(None, &[default_line_item_column(x)], x, app_entities)];
+        return vec![line_item(None, &[ListColumn::new(default_line_item_column(x))], x, app_entities)];
     }
 
     let mut out = Vec::new();
-    let default_cols: Vec<String> = views
+    let default_cols: Vec<ListColumn> = views
         .iter()
         .find(|v| v.is_default())
         .map(|v| v.columns.clone())
-        .unwrap_or_else(|| vec![default_line_item_column(x)]);
+        .unwrap_or_else(|| vec![ListColumn::new(default_line_item_column(x))]);
     out.push(line_item(None, &default_cols, x, app_entities));
 
     for view in views {
@@ -682,15 +682,17 @@ fn default_line_item_column(entity: &EntitySpec) -> String {
 }
 
 /// Ein `UI.LineItem`. Spalten sind Atome (`Value = name`) oder einwertige
-/// Navigationen (`Value = nav/name`, Anzeige des Zieltextes).
+/// Navigationen (`Value = nav/name`, Anzeige des Zieltextes). Eine Prioritaet
+/// wird als `UI.Importance` am Datenfeld vermerkt.
 fn line_item(
     qualifier: Option<&str>,
-    columns: &[String],
+    columns: &[ListColumn],
     x: &EntitySpec,
     app_entities: &[String],
 ) -> Annotation {
     let mut coll = Collection::new();
-    for col in columns {
+    for column in columns {
+        let col = column.field.as_str();
         let lookup = x.fields().find_map(|f| match f {
             spec::FieldSpec::Lookup { name, entity, collection: false, .. } if name == col => {
                 Some(entity.as_str())
@@ -715,11 +717,71 @@ fn line_item(
             }
             None => data_field(col, is_link_atom(x, col)),
         };
+        let record = match column.priority {
+            Some(priority) => record.annotation(
+                Annotation::new("UI.Importance").enum_member(priority.importance_member()),
+            ),
+            None => record,
+        };
         coll = coll.add_record(record);
     }
     let mut ann = Annotation::new("UI.LineItem").collection(coll);
     ann.qualifier = qualifier.map(str::to_string);
     ann
+}
+
+/// Spaltenbreiten der Listenansichten fuer die `controlConfiguration` des ListReport.
+///
+/// Breiten sind keine Annotation. Fiori Elements erwartet sie unter
+/// `@UI.LineItem[#<ansicht>]` -> `columns` -> Schluessel der Spalte (`<RecordTyp>::<Pfad>`).
+/// Liefert `None`, wenn keine Spalte eine Breite hat.
+pub(crate) fn list_column_widths(ddic: &DataDictionary, entity: &str) -> Option<Value> {
+    let x = ddic.active_entity(entity)?;
+    let app_entities = app_entity_names(ddic);
+    let mut out = serde_json::Map::new();
+    for view in x.list_views() {
+        let mut columns = serde_json::Map::new();
+        for column in &view.columns {
+            if let Some(width) = &column.width {
+                columns.insert(
+                    column_record_key(x, &column.field, &app_entities),
+                    json!({ "width": width }),
+                );
+            }
+        }
+        if columns.is_empty() {
+            continue;
+        }
+        let key = if view.is_default() {
+            "@com.sap.vocabularies.UI.v1.LineItem".to_string()
+        } else {
+            format!("@com.sap.vocabularies.UI.v1.LineItem#{}", view.name)
+        };
+        out.insert(key, json!({ "columns": columns }));
+    }
+    (!out.is_empty()).then(|| Value::Object(out))
+}
+
+/// Schluessel einer Spalte in der Fiori-Elements-Konfiguration. Entspricht dem Record-Typ,
+/// den `line_item` fuer diese Spalte erzeugt.
+fn column_record_key(x: &EntitySpec, col: &str, app_entities: &[String]) -> String {
+    let lookup = x.fields().find_map(|f| match f {
+        spec::FieldSpec::Lookup { name, entity, collection: false, .. } if name == col => {
+            Some(entity.as_str())
+        }
+        _ => None,
+    });
+    match lookup {
+        Some(entity) if app_entities.iter().any(|a| a == entity) => {
+            format!("DataFieldWithIntentBasedNavigation::{col}/name")
+        }
+        Some(_) => format!("DataField::{col}/name"),
+        None if col == "name" && app_entities.iter().any(|a| a == x.name()) => {
+            "DataFieldWithIntentBasedNavigation::name".to_string()
+        }
+        None if is_link_atom(x, col) => format!("DataFieldWithUrl::{col}"),
+        None => format!("DataField::{col}"),
+    }
 }
 
 /// Semantischer Sprung (`DataFieldWithIntentBasedNavigation`) fuer den Wert `value`,
@@ -3523,6 +3585,43 @@ mod list_view_annotation_tests {
             .field(FieldSpec::atom("order", "Position", "Edm.Int64"));
         let annotations = line_item_annotations(&entity, &[]);
         assert_eq!(datafield_paths(&annotations[0]), vec!["field"]);
+    }
+
+    #[test]
+    fn column_priority_becomes_importance_and_width_goes_to_config() {
+        use spec::{ListColumn, Priority};
+        let e = active_video(vec![ListView::with_columns(
+            "default",
+            vec![
+                ListColumn::new("name").width("20%").priority(Priority::High),
+                ListColumn::new("title"),
+            ],
+        )]);
+        let anns = line_item_annotations(&e, &[]);
+        let default = find(&anns, "UI.LineItem", None);
+        let records = &default.collection.as_ref().unwrap().records;
+        assert_eq!(
+            records[0].annotations[0].term, "UI.Importance",
+            "Prioritaet am Datenfeld"
+        );
+        assert_eq!(
+            records[0].annotations[0].enum_member.as_deref(),
+            Some("UI.ImportanceType/High")
+        );
+        assert!(records[1].annotations.is_empty());
+
+        let mut ddic = spec::data_dictionary::DataDictionary::empty();
+        ddic.add_package(spec::package::Package::new("core"));
+        ddic.add_entity(e);
+        ddic.activate();
+        let widths = list_column_widths(&ddic, "Video").expect("Breiten");
+        assert_eq!(
+            widths["@com.sap.vocabularies.UI.v1.LineItem"]["columns"]["DataField::name"]["width"],
+            "20%"
+        );
+        assert!(widths["@com.sap.vocabularies.UI.v1.LineItem"]["columns"]
+            .get("DataField::title")
+            .is_none());
     }
 
     #[test]

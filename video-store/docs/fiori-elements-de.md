@@ -221,8 +221,14 @@ Das Manifest ist eine Fiori-Elements-V4-App mit Flexible Column Layout:
 Die Spalten der Liste sind explizit und benannt an der Entität definiert:
 
 * `EntitySpec.list_views: Vec<ListView>` mit `name`, optional `role` (noch ohne Wirkung), geordneten `columns`.
-* Spalten sind Atome (`file_size`) oder einwertige Navigationen (`scene` -> Anzeige `scene/name`).
-  Sammelnavigationen sind nicht zulässig.
+* Jede Spalte ist ein `ListColumn` mit `field`, optional `width` und `priority`:
+  * `field`: Atom (`file_size`) oder einwertige Navigation (`scene` -> Anzeige `scene/name`).
+    Sammelnavigationen sind nicht zulässig.
+  * `width`: CSS-Breite `120px`, `15rem`, `2.5em`, `20%` oder `auto`. Wird in die
+    `controlConfiguration` geschrieben (`@UI.LineItem[#ansicht]` -> `columns` -> `<RecordTyp>::<Pfad>`), nicht als Annotation.
+  * `priority`: `high`, `medium` oder `low`. Wird als `UI.Importance` (`UI.ImportanceType/High` usw.) am Datenfeld annotiert.
+  * JSON-Kurzform: ein blosser String (`"file_size"`) ist eine Spalte ohne Breite und Priorität.
+    Beispiel: `{"field": "name", "width": "20%", "priority": "high"}`.
 * `default` ist die Standardansicht (unqualifiziertes `UI.LineItem`). Jede weitere Ansicht
   erzeugt `UI.LineItem#<name>` und `UI.PresentationVariant#<name>`.
 * Mehr als eine Ansicht: ListReport zeigt eine View-Leiste (`options.settings.views.paths`).

@@ -537,24 +537,122 @@ pub struct ListView {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
-    /// Geordnete Spalten. Eintraege sind Feldnamen: Atome (`file_size`) oder
-    /// einwertige Navigationen (`agent`, dargestellt als `agent/name`).
-    pub columns: Vec<String>,
+    /// Geordnete Spalten. Siehe `ListColumn`.
+    pub columns: Vec<ListColumn>,
 }
 
 impl ListView {
     pub const DEFAULT: &'static str = "default";
 
+    /// Ansicht aus reinen Feldnamen (ohne Breite und Prioritaet).
     pub fn new(name: impl Into<String>, columns: &[&str]) -> Self {
         Self {
             name: name.into(),
             role: None,
-            columns: columns.iter().map(|c| c.to_string()).collect(),
+            columns: columns.iter().map(|c| ListColumn::new(*c)).collect(),
+        }
+    }
+
+    /// Ansicht aus fertig konfigurierten Spalten.
+    pub fn with_columns(name: impl Into<String>, columns: Vec<ListColumn>) -> Self {
+        Self {
+            name: name.into(),
+            role: None,
+            columns,
         }
     }
 
     pub fn is_default(&self) -> bool {
         self.name == Self::DEFAULT
+    }
+}
+
+/// Wichtigkeit einer Listenspalte. Wird als `UI.Importance` an das Feld geschrieben;
+/// Fiori Elements blendet Spalten mit niedriger Prioritaet bei schmalen Bildschirmen zuerst aus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Priority {
+    High,
+    Medium,
+    Low,
+}
+
+impl Priority {
+    /// Name des Enum-Members in `UI.ImportanceType`.
+    pub fn importance_member(self) -> &'static str {
+        match self {
+            Priority::High => "UI.ImportanceType/High",
+            Priority::Medium => "UI.ImportanceType/Medium",
+            Priority::Low => "UI.ImportanceType/Low",
+        }
+    }
+}
+
+/// Eine Spalte einer Listenansicht.
+///
+/// * `field`: Atom (`file_size`) oder einwertige Navigation (`agent`, Anzeige `agent/name`).
+/// * `width`: CSS-Breite wie `120px`, `15rem`, `20%` oder `auto`. Ohne Angabe: Standardbreite.
+/// * `priority`: `high`, `medium` oder `low`. Ohne Angabe: keine Annotation (Standard).
+///
+/// In `ddic.json` akzeptiert die Struktur auch die Kurzform eines blossen Feldnamens.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "ListColumnInput")]
+pub struct ListColumn {
+    pub field: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<Priority>,
+}
+
+impl ListColumn {
+    pub fn new(field: impl Into<String>) -> Self {
+        Self {
+            field: field.into(),
+            width: None,
+            priority: None,
+        }
+    }
+
+    pub fn width(mut self, width: impl Into<String>) -> Self {
+        self.width = Some(width.into());
+        self
+    }
+
+    pub fn priority(mut self, priority: Priority) -> Self {
+        self.priority = Some(priority);
+        self
+    }
+}
+
+/// Eingabeform einer Listenspalte: Feldname oder Objekt.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ListColumnInput {
+    Field(String),
+    Detailed {
+        field: String,
+        #[serde(default)]
+        width: Option<String>,
+        #[serde(default)]
+        priority: Option<Priority>,
+    },
+}
+
+impl From<ListColumnInput> for ListColumn {
+    fn from(input: ListColumnInput) -> Self {
+        match input {
+            ListColumnInput::Field(field) => ListColumn::new(field),
+            ListColumnInput::Detailed {
+                field,
+                width,
+                priority,
+            } => ListColumn {
+                field,
+                width,
+                priority,
+            },
+        }
     }
 }
 

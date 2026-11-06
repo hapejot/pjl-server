@@ -360,10 +360,32 @@ mod tests {
         let views = views.list_views();
         assert_eq!(views.len(), 3);
         let default = views.iter().find(|v| v.name == "default").unwrap();
-        assert_eq!(default.columns, vec!["file_size"]);
+        assert_eq!(names(&default.columns), vec!["file_size"]);
         let review = views.iter().find(|v| v.name == "review").unwrap();
-        assert_eq!(review.columns, vec!["name"]);
+        assert_eq!(names(&review.columns), vec!["name"]);
         assert!(views.iter().any(|v| v.name == "archive"));
+    }
+
+    #[test]
+    fn list_view_columns_accept_width_and_priority() {
+        let overlay = parse(
+            r#"{"entities":[{"name":"Video","list_views":[
+                {"name":"default","columns":[
+                    {"field":"name","width":"20%","priority":"high"},
+                    "file_size"]}]}]}"#,
+        )
+        .unwrap();
+        let d = apply(base(), &overlay).unwrap();
+        let views = video(&d);
+        let default = views.list_views().iter().find(|v| v.name == "default").unwrap();
+        assert_eq!(default.columns[0].width.as_deref(), Some("20%"));
+        assert_eq!(default.columns[0].priority, Some(spec::Priority::High));
+        assert_eq!(default.columns[1].width, None);
+        assert_eq!(default.columns[1].priority, None);
+    }
+
+    fn names(columns: &[spec::ListColumn]) -> Vec<&str> {
+        columns.iter().map(|c| c.field.as_str()).collect()
     }
 
     #[test]

@@ -214,7 +214,11 @@ Nicht alles davon ist im Designer-Store abbildbar (siehe Auffälligkeit 2).
 - `EntityRef { entity_set, key_property, display_property, filters, prefer_dialog }`: Wertehilfe aus einer anderen EntitySet, optional gefiltert über `ValueListFilter { local_property, target_property }`
 
 **ListView**
-- `name` (`default` ist die Standardansicht), `role` (heute ohne Wirkung), `columns` (Feldnamen; einwertige Navigation als `nav/feld`)
+- `name` (`default` ist die Standardansicht), `role` (heute ohne Wirkung), `columns` (Liste von `ListColumn`)
+
+**ListColumn**
+- `field` (Atom oder einwertige Navigation als `nav/feld`), optional `width` (CSS: `px`, `rem`, `em`, `%`, `auto`), optional `priority` (`high`, `medium`, `low` -> `UI.Importance`)
+- In `ddic.json` genügt ein blosser Feldname als String
 
 **Relationship**
 - `name`, `one`, `one_field`, `many`, `many_property`, `owned` (Komposition mit Draft-Mitnahme, sonst Assoziation), `package`

@@ -50,11 +50,11 @@ services:
       db:
         condition: service_healthy
     environment:
-      DDIC: /app/model/ddic.json
       # Optionales Overlay (Listenansichten, ausgeblendete ObjectPage-Felder).
-      DDIC_OVERLAY: /app/overlay/ddic.overlay.json
+      # Relativ zur MODEL_ROOT-Quelle, ohne Overlay fehlt die Standard-Listenansicht des Videos.
+      DDIC_OVERLAY: overlay/ddic.overlay.json
       # App-Assets (Fragmente, Module, Controller): <EXT_DIR>/<app>/ unter /ext/<app>/.
-      EXT_DIR: /app/ext
+      MODEL_ROOT: zip:///app/app.zip
       STORE_PG_URL: postgres://video:video@db:5432/video
       PORT: "8080"
       RUST_LOG: info
@@ -62,9 +62,7 @@ services:
       - "3035:8080"
       - "3271:3270"
     volumes:
-      - ./ddic.json:/app/model/ddic.json:ro
-      - ./overlay/ddic.overlay.json:/app/overlay/ddic.overlay.json:ro
-      - ./ext:/app/ext:ro
+      - ../video-store.zip:/app/app.zip:ro
       - ./dump:/app/dump
     entrypoint: ["/app/video-runtime"]
     restart: unless-stopped

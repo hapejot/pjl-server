@@ -15,6 +15,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use bytes::Bytes;
+use tracing::info;
 
 /// Fehler beim Oeffnen oder Lesen eines Repositories.
 #[derive(Debug, thiserror::Error)]
@@ -164,8 +165,8 @@ impl ZipRepository {
                 limits.max_archive_bytes
             )));
         }
-        let mut archive = zip::ZipArchive::new(Cursor::new(data))
-            .map_err(|e| RepoError::Zip(e.to_string()))?;
+        let mut archive =
+            zip::ZipArchive::new(Cursor::new(data)).map_err(|e| RepoError::Zip(e.to_string()))?;
         if archive.len() > limits.max_entries {
             return Err(RepoError::LimitExceeded(format!(
                 "{} Eintraege, erlaubt sind {}",
@@ -275,6 +276,7 @@ pub fn open(uri: &str, limits: &Limits) -> Result<Box<dyn FileRepository>, RepoE
         return Err(RepoError::InvalidUri(uri.to_string()));
     }
     if let Some(rest) = uri.strip_prefix("zip://") {
+        info!("using zip file: {}", rest);
         if rest.is_empty() {
             return Err(RepoError::InvalidUri(uri.to_string()));
         }
@@ -293,6 +295,7 @@ pub fn open(uri: &str, limits: &Limits) -> Result<Box<dyn FileRepository>, RepoE
     if path.is_empty() {
         return Err(RepoError::InvalidUri(uri.to_string()));
     }
+    info!("using path: {}", path);
     Ok(Box::new(DirRepository::new(path)))
 }
 
@@ -303,7 +306,10 @@ pub struct Scoped {
 }
 
 /// Begrenzt `inner` auf das Unterverzeichnis `prefix`.
-pub fn scoped(inner: Arc<dyn FileRepository>, prefix: &str) -> Result<Arc<dyn FileRepository>, RepoError> {
+pub fn scoped(
+    inner: Arc<dyn FileRepository>,
+    prefix: &str,
+) -> Result<Arc<dyn FileRepository>, RepoError> {
     Ok(Arc::new(Scoped {
         inner,
         prefix: normalize(prefix)?,
@@ -331,7 +337,9 @@ impl FileRepository for Scoped {
     }
 
     fn exists(&self, path: &str) -> bool {
-        self.join(path).map(|p| self.inner.exists(&p)).unwrap_or(false)
+        self.join(path)
+            .map(|p| self.inner.exists(&p))
+            .unwrap_or(false)
     }
 }
 
@@ -383,7 +391,11 @@ mod tests {
     }
 
     /// Dasselbe Dateilayout als Verzeichnis und als ZIP.
-    fn both() -> (tempfile::TempDir, Box<dyn FileRepository>, Box<dyn FileRepository>) {
+    fn both() -> (
+        tempfile::TempDir,
+        Box<dyn FileRepository>,
+        Box<dyn FileRepository>,
+    ) {
         let dir = tempfile::tempdir().unwrap();
         for (name, data) in fixtures() {
             let p = dir.path().join(name);
@@ -399,7 +411,10 @@ mod tests {
     fn conformance_read_list_exists() {
         let (_dir, d, z) = both();
         for repo in [&d, &z] {
-            assert_eq!(repo.read("ddic.json").unwrap().unwrap(), Bytes::from_static(b"{}"));
+            assert_eq!(
+                repo.read("ddic.json").unwrap().unwrap(),
+                Bytes::from_static(b"{}")
+            );
             assert!(repo.read("missing.json").unwrap().is_none());
             assert_eq!(
                 repo.read("./scripts//CustomerSet.rhai").unwrap().unwrap(),
@@ -421,9 +436,18 @@ mod tests {
     fn rejects_unsafe_paths() {
         let (_dir, d, z) = both();
         for repo in [&d, &z] {
-            assert!(matches!(repo.read("../etc/passwd"), Err(RepoError::UnsafePath(_))));
-            assert!(matches!(repo.read("/etc/passwd"), Err(RepoError::UnsafePath(_))));
-            assert!(matches!(repo.read("a\\..\\b"), Err(RepoError::UnsafePath(_))));
+            assert!(matches!(
+                repo.read("../etc/passwd"),
+                Err(RepoError::UnsafePath(_))
+            ));
+            assert!(matches!(
+                repo.read("/etc/passwd"),
+                Err(RepoError::UnsafePath(_))
+            ));
+            assert!(matches!(
+                repo.read("a\\..\\b"),
+                Err(RepoError::UnsafePath(_))
+            ));
             assert!(matches!(repo.read("C:x"), Err(RepoError::UnsafePath(_))));
         }
     }
@@ -438,30 +462,54 @@ mod tests {
     #[test]
     fn limit_archive_bytes() {
         let data = make_zip(&fixtures());
-        let limits = Limits { max_archive_bytes: 10, ..Limits::default() };
-        assert!(matches!(ZipRepository::from_bytes(data, &limits), Err(RepoError::LimitExceeded(_))));
+        let limits = Limits {
+            max_archive_bytes: 10,
+            ..Limits::default()
+        };
+        assert!(matches!(
+            ZipRepository::from_bytes(data, &limits),
+            Err(RepoError::LimitExceeded(_))
+        ));
     }
 
     #[test]
     fn limit_entries() {
         let data = make_zip(&fixtures());
-        let limits = Limits { max_entries: 2, ..Limits::default() };
-        assert!(matches!(ZipRepository::from_bytes(data, &limits), Err(RepoError::LimitExceeded(_))));
+        let limits = Limits {
+            max_entries: 2,
+            ..Limits::default()
+        };
+        assert!(matches!(
+            ZipRepository::from_bytes(data, &limits),
+            Err(RepoError::LimitExceeded(_))
+        ));
     }
 
     #[test]
     fn limit_uncompressed_total() {
         let data = make_zip(&fixtures());
-        let limits = Limits { max_uncompressed_bytes: 5, ..Limits::default() };
-        assert!(matches!(ZipRepository::from_bytes(data, &limits), Err(RepoError::LimitExceeded(_))));
+        let limits = Limits {
+            max_uncompressed_bytes: 5,
+            ..Limits::default()
+        };
+        assert!(matches!(
+            ZipRepository::from_bytes(data, &limits),
+            Err(RepoError::LimitExceeded(_))
+        ));
     }
 
     #[test]
     fn limit_ratio_on_large_entries() {
         let big = vec![b'a'; (RATIO_CHECK_MIN_BYTES as usize) + 1024];
         let data = make_zip(&[("big.txt", &big)]);
-        let limits = Limits { max_ratio: 2, ..Limits::default() };
-        assert!(matches!(ZipRepository::from_bytes(data, &limits), Err(RepoError::LimitExceeded(_))));
+        let limits = Limits {
+            max_ratio: 2,
+            ..Limits::default()
+        };
+        assert!(matches!(
+            ZipRepository::from_bytes(data, &limits),
+            Err(RepoError::LimitExceeded(_))
+        ));
         // Auch mit Standardgrenze (100:1) ist 1 MiB gleicher Bytes eine Zip-Bombe.
         assert!(matches!(
             ZipRepository::from_bytes(make_zip(&[("big.txt", &big)]), &Limits::default()),
@@ -472,7 +520,10 @@ mod tests {
     #[test]
     fn small_entries_skip_ratio_check() {
         let small = vec![b'a'; 64 * 1024];
-        let limits = Limits { max_ratio: 2, ..Limits::default() };
+        let limits = Limits {
+            max_ratio: 2,
+            ..Limits::default()
+        };
         assert!(ZipRepository::from_bytes(make_zip(&[("s.txt", &small)]), &limits).is_ok());
     }
 
@@ -490,7 +541,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn uri_parsing() {
         let dir = tempfile::tempdir().unwrap();
@@ -499,8 +549,14 @@ mod tests {
         assert!(open(&format!("file://{p}"), &limits).unwrap().exists(""));
         assert!(open(&p, &limits).unwrap().exists(""));
         assert!(matches!(open("", &limits), Err(RepoError::InvalidUri(_))));
-        assert!(matches!(open("zip://", &limits), Err(RepoError::InvalidUri(_))));
-        assert!(matches!(open("zip:///nonexistent.zip", &limits), Err(RepoError::Io(_))));
+        assert!(matches!(
+            open("zip://", &limits),
+            Err(RepoError::InvalidUri(_))
+        ));
+        assert!(matches!(
+            open("zip:///nonexistent.zip", &limits),
+            Err(RepoError::Io(_))
+        ));
         assert!(is_file_uri("file:///x"));
         assert!(!is_file_uri("zip:///x.zip"));
     }
@@ -508,12 +564,22 @@ mod tests {
     #[test]
     fn scoped_view_prefixes_paths() {
         let data = make_zip(&fixtures());
-        let z: Arc<dyn FileRepository> = Arc::new(ZipRepository::from_bytes(data, &Limits::default()).unwrap());
+        let z: Arc<dyn FileRepository> =
+            Arc::new(ZipRepository::from_bytes(data, &Limits::default()).unwrap());
         let sc = scoped(z, "scripts").unwrap();
-        assert_eq!(sc.read("CustomerSet.rhai").unwrap().unwrap(), Bytes::from_static(b"// x"));
-        assert_eq!(sc.list("").unwrap(), vec!["CustomerSet.rhai".to_string(), "components".to_string()]);
+        assert_eq!(
+            sc.read("CustomerSet.rhai").unwrap().unwrap(),
+            Bytes::from_static(b"// x")
+        );
+        assert_eq!(
+            sc.list("").unwrap(),
+            vec!["CustomerSet.rhai".to_string(), "components".to_string()]
+        );
         assert!(sc.exists("components"));
-        assert!(matches!(sc.read("../ddic.json"), Err(RepoError::UnsafePath(_))));
+        assert!(matches!(
+            sc.read("../ddic.json"),
+            Err(RepoError::UnsafePath(_))
+        ));
         assert!(file_path("zip:///x.zip").is_none());
         assert_eq!(file_path("file:///tmp/x"), Some(PathBuf::from("/tmp/x")));
     }

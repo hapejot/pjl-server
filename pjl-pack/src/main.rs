@@ -8,16 +8,18 @@ use std::fs;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use clap::Parser;
 use file_repo::{Limits, ZipRepository};
 
 #[derive(Debug, Parser)]
 #[command(about = "Packt ein Verzeichnis in ein ZIP fuer zip:// Quellen")]
 struct Args {
-    /// Quellverzeichnis; dessen Inhalt wird im ZIP-Wurzelverzeichnis abgelegt.
+    /// Wurzelverzeichnis für die relative Einordung der Files
     #[arg(long)]
-    src: PathBuf,
+    root: PathBuf,
+    /// Quellverzeichnis; dessen Inhalt wird im ZIP-Wurzelverzeichnis abgelegt.
+    src: Vec<PathBuf>,
     /// Zieldatei (.zip). Wird ueberschrieben.
     #[arg(long)]
     out: PathBuf,
@@ -27,26 +29,26 @@ struct Args {
 }
 
 fn collect(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) -> Result<()> {
-    let mut entries: Vec<_> = fs::read_dir(dir)?.collect::<std::io::Result<_>>()?;
-    entries.sort_by_key(|e| e.file_name());
-    for e in entries {
-        let path = e.path();
-        let ft = e.file_type()?;
-        if ft.is_symlink() {
-            bail!("Symlinks werden nicht gepackt: {}", path.display());
-        }
-        if ft.is_dir() {
-            collect(root, &path, out)?;
-        } else if ft.is_file() {
-            let rel = path.strip_prefix(root)?;
-            let name = rel
-                .components()
-                .map(|c| c.as_os_str().to_string_lossy().into_owned())
-                .collect::<Vec<_>>()
-                .join("/");
-            out.push((name, path));
+    if dir.is_dir() {
+        let mut entries: Vec<_> = fs::read_dir(dir)?.collect::<std::io::Result<_>>()?;
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            collect(root, &e.path(), out)?;
         }
     }
+    if dir.is_file() {
+        let rel = dir.strip_prefix(root)?;
+        let name = rel
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/");
+        out.push((name, dir.into()));
+    }
+    if dir.is_symlink() {
+        eprintln!("überspringe symlink {}", dir.display());
+    }
+
     Ok(())
 }
 
@@ -57,22 +59,28 @@ fn main() -> Result<()> {
         limits.max_archive_bytes = mib * 1024 * 1024;
     }
 
-    if !args.src.is_dir() {
-        bail!("Quelle ist kein Verzeichnis: {}", args.src.display());
-    }
     let mut files = Vec::new();
-    collect(&args.src, &args.src, &mut files)?;
-
+    for dir in args.src {
+        collect(&args.root, &dir, &mut files)?;
+    }
     // Vorab-Pruefung der Anzahl und Summe, bevor etwas geschrieben wird.
     if files.len() > limits.max_entries {
-        bail!("{} Dateien, erlaubt sind {}", files.len(), limits.max_entries);
+        bail!(
+            "{} Dateien, erlaubt sind {}",
+            files.len(),
+            limits.max_entries
+        );
     }
     let mut total = 0u64;
     for (_, p) in &files {
         total += fs::metadata(p)?.len();
     }
     if total > limits.max_uncompressed_bytes {
-        bail!("Summe {} Bytes ueberschreitet {}", total, limits.max_uncompressed_bytes);
+        bail!(
+            "Summe {} Bytes ueberschreitet {}",
+            total,
+            limits.max_uncompressed_bytes
+        );
     }
 
     let mut buf = Cursor::new(Vec::new());
@@ -126,6 +134,9 @@ mod tests {
         let mut files = Vec::new();
         collect(src.path(), src.path(), &mut files).unwrap();
         let names: Vec<_> = files.iter().map(|(n, _)| n.clone()).collect();
-        assert_eq!(names, vec!["ddic.json", "scripts/components/TimeRange.rhai"]);
+        assert_eq!(
+            names,
+            vec!["ddic.json", "scripts/components/TimeRange.rhai"]
+        );
     }
 }

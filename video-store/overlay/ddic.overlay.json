@@ -4,7 +4,7 @@
       "name": "Video",
       "selection_fields": ["name", "is_reviewed", "is_streamable", "agent"],
       "list_views": [
-        { "name": "default", "columns": ["name", "scene", "agent"] }
+        { "name": "default", "columns": ["name", "scene", {"field":"agent", "width": "15em"}] }
       ]
     },
     { "name": "VideoTag",

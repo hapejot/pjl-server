@@ -773,15 +773,26 @@ fn column_record_key(x: &EntitySpec, col: &str, app_entities: &[String]) -> Stri
     });
     match lookup {
         Some(entity) if app_entities.iter().any(|a| a == entity) => {
-            format!("DataFieldWithIntentBasedNavigation::{col}/name")
+            stable_column_key("DataFieldWithIntentBasedNavigation", &format!("{col}/name"), Some((entity, "Detail")))
         }
-        Some(_) => format!("DataField::{col}/name"),
+        Some(_) => stable_column_key("DataField", &format!("{col}/name"), None),
         None if col == "name" && app_entities.iter().any(|a| a == x.name()) => {
-            "DataFieldWithIntentBasedNavigation::name".to_string()
+            stable_column_key("DataFieldWithIntentBasedNavigation", "name", Some((x.name(), "Detail")))
         }
         None if is_link_atom(x, col) => format!("DataFieldWithUrl::{col}"),
         None => format!("DataField::{col}"),
     }
+}
+
+/// Stabiler Spaltenschluessel wie ihn Fiori Elements (UI5 1.153) bildet: Pfad-Separatoren `/`
+/// werden zu `::`, da nur `A-Za-z0-9_-:.` als Schluessel zulaessig ist. Mit `intent` wird
+/// der Semantic-Object-/Action-Anteil angehaengt.
+fn stable_column_key(record: &str, path: &str, intent: Option<(&str, &str)>) -> String {
+    let mut key = format!("{record}::{}", path.replace('/', "::"));
+    if let Some((entity, action)) = intent {
+        key.push_str(&format!("::{entity}::{action}"));
+    }
+    key
 }
 
 /// Semantischer Sprung (`DataFieldWithIntentBasedNavigation`) fuer den Wert `value`,

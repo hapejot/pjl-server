@@ -110,6 +110,7 @@ pub async fn run_with(
 
     if !config.designer {
         seed_value_lists(store.as_ref(), &base).await?;
+        seed_entities(store.as_ref(), &base).await?;
     }
     let mut state = AppState::new(store, config.clone(), base).with_extensions(extensions);
     if let Some(store) = designer_store {
@@ -169,6 +170,42 @@ async fn shutdown_signal() {
 /// Fremdschluesseln bleiben also ueber Neustarts gueltig. Vorhandene Eintraege
 /// werden aktualisiert statt geloescht; geloescht wird nur, was nicht mehr in der
 /// Liste steht.
+/// Stammdaten-Startzeilen (`EntitySpec.seed`) einspielen.
+///
+/// Nur wenn das EntitySet leer ist: vorhandene Daten bleiben unangetastet. Die Zeilen
+/// werden als aktive Saetze angelegt (Entwurf + Aktivierung wie bei den Festwertlisten).
+async fn seed_entities(store: &dyn DraftDataStore, ddic: &DataDictionary) -> anyhow::Result<()> {
+    use data_store::EntityKey;
+    use odata::query::ODataQuery;
+
+    for entity in ddic.entities() {
+        if entity.seed.is_empty() {
+            continue;
+        }
+        let set = entity.setname();
+        let existing = store
+            .get_collection(&set, &ODataQuery::new())
+            .await
+            .map_err(|e| anyhow::anyhow!("cannot read {set}: {e}"))?;
+        if !existing.is_empty() {
+            continue;
+        }
+        for row in &entity.seed {
+            let data = serde_json::to_value(row)?;
+            let created = store
+                .create_entity(&set, &data)
+                .await
+                .map_err(|e| anyhow::anyhow!("cannot seed {set}: {e}"))?;
+            store
+                .draft_activate(&set, &EntityKey::new(created.id(), false))
+                .await
+                .map_err(|e| anyhow::anyhow!("cannot activate {set}: {e}"))?;
+        }
+        info!("{} seed rows loaded into {set}", entity.seed.len());
+    }
+    Ok(())
+}
+
 async fn seed_value_lists(store: &dyn DraftDataStore, ddic: &DataDictionary) -> anyhow::Result<()> {
     use data_store::EntityKey;
     use odata::query::ODataQuery;

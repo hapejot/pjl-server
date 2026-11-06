@@ -102,11 +102,29 @@
         },
         {
           "Atom": {
+            "name": "currency_code",
+            "label": "Währung",
+            "edm_type": "Edm.String",
+            "max_length": 3,
+            "value_list": {
+              "EntityRef": {
+                "entity_set": "CurrencySet",
+                "key_property": "code",
+                "display_property": "name",
+                "filters": [],
+                "prefer_dialog": false
+              }
+            }
+          }
+        },
+        {
+          "Measure": {
             "name": "amount",
             "label": "Betrag",
-            "edm_type": "Edm.Decimal",
             "precision": 15,
-            "scale": 2
+            "scale": 2,
+            "unit_field": "currency_code",
+            "kind": "Currency"
           }
         },
         {
@@ -129,6 +147,95 @@
               }
             }
           }
+        }
+      ]
+    },
+    {
+      "name": "Currency",
+      "package": "crm",
+      "type_name": "Währung",
+      "type_name_plural": "Währungen",
+      "fields": [
+        {
+          "Atom": {
+            "name": "code",
+            "label": "Code",
+            "edm_type": "Edm.String",
+            "max_length": 3,
+            "unit_scale_field": "decimal_places"
+          }
+        },
+        {
+          "Atom": {
+            "name": "name",
+            "label": "Bezeichnung",
+            "edm_type": "Edm.String",
+            "max_length": 50
+          }
+        },
+        {
+          "Atom": {
+            "name": "decimal_places",
+            "label": "Nachkommastellen",
+            "edm_type": "Edm.Byte"
+          }
+        }
+      ],
+      "seed": [
+        {
+          "code": "EUR",
+          "decimal_places": 2,
+          "name": "Euro"
+        },
+        {
+          "code": "USD",
+          "decimal_places": 2,
+          "name": "US-Dollar"
+        },
+        {
+          "code": "GBP",
+          "decimal_places": 2,
+          "name": "Pfund Sterling"
+        },
+        {
+          "code": "CHF",
+          "decimal_places": 2,
+          "name": "Schweizer Franken"
+        },
+        {
+          "code": "SEK",
+          "decimal_places": 2,
+          "name": "Schwedische Krone"
+        },
+        {
+          "code": "PLN",
+          "decimal_places": 2,
+          "name": "Zloty"
+        },
+        {
+          "code": "CZK",
+          "decimal_places": 2,
+          "name": "Tschechische Krone"
+        },
+        {
+          "code": "JPY",
+          "decimal_places": 0,
+          "name": "Yen"
+        },
+        {
+          "code": "KRW",
+          "decimal_places": 0,
+          "name": "Won"
+        },
+        {
+          "code": "BHD",
+          "decimal_places": 3,
+          "name": "Bahrain-Dinar"
+        },
+        {
+          "code": "KWD",
+          "decimal_places": 3,
+          "name": "Kuwait-Dinar"
         }
       ]
     }

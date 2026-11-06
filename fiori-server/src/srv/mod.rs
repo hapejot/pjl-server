@@ -512,6 +512,7 @@ impl Annotations {
                 computed: true,
                 immutable: false,
                 value_list: None,
+                unit_scale_field: None,
                 link: false,
                 multiline: false,
                 side_effects: Vec::new(),
@@ -586,10 +587,14 @@ impl Annotations {
                 computed,
                 immutable,
                 value_list,
+                unit_scale_field,
                 ..
             } => {
                 if *computed || spec::system_user::is_read_only_audit_field(name) {
                     annotations.push(Annotation::new("Org.OData.Core.V1.Computed").boolean(true));
+                }
+                if let Some(scale) = unit_scale_field {
+                    annotations.push(Annotation::new("Common.UnitSpecificScale").path(scale));
                 }
                 if *immutable {
                     annotations.push(Annotation::new("Org.OData.Core.V1.Immutable").boolean(true));
@@ -3426,6 +3431,7 @@ mod list_view_annotation_tests {
             computed: false,
             immutable: false,
             value_list: None,
+            unit_scale_field: None,
             link: false,
             multiline: false,
             side_effects: Vec::new(),

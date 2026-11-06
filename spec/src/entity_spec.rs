@@ -235,6 +235,10 @@ pub enum FieldSpec {
         /// Optional value help (dropdown/dialog).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         value_list: Option<AtomValueList>,
+        /// Schluessel einer Einheit/Waehrung: Feld der Nachkommastellen im selben Entity
+        /// (`Common.UnitSpecificScale`). Nur fuer den Code-Schluessel einer Stammdaten-Entity.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unit_scale_field: Option<String>,
         /// Wert ist eine URL: wird als anklickbarer Link dargestellt (`UI.DataFieldWithUrl`).
         #[serde(default, skip_serializing_if = "is_false")]
         link: bool,
@@ -298,6 +302,7 @@ impl FieldSpec {
             computed: false,
             immutable: false,
             value_list: None,
+            unit_scale_field: None,
             link: false,
             multiline: false,
             side_effects: Vec::new(),
@@ -317,6 +322,7 @@ impl FieldSpec {
             computed: false,
             immutable: false,
             value_list: None,
+            unit_scale_field: None,
             link: false,
             multiline: false,
             side_effects: Vec::new(),
@@ -344,6 +350,7 @@ impl FieldSpec {
             computed: false,
             immutable: false,
             value_list: None,
+            unit_scale_field: None,
             link: false,
             multiline: false,
             side_effects: Vec::new(),
@@ -446,6 +453,11 @@ pub struct EntitySpec {
     pub draft_enabled: bool,
     /// Entity name (e.g. "Orders"). Must match the entity name used in Relationships.
     pub name: String,
+
+    /// Stammdaten-Startzeilen (Feldname -> Wert). Werden beim Start eingespielt, sofern
+    /// die Entity noch keine Zeile mit gleichem Schluessel hat (siehe `seed_entities`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub seed: Vec<BTreeMap<String, serde_json::Value>>,
 
     /// Logical package grouping (e.g. "itil", "asset_management").
     pub package: String,
@@ -682,6 +694,7 @@ impl EntitySpec {
         Self {
             draft_enabled: true,
             name: name.into(),
+            seed: vec![],
             package: package.into(),
             type_name: None,
             type_name_plural: type_name_plural.into(),

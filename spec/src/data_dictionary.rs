@@ -1038,6 +1038,7 @@ mod list_view_tests {
             computed: false,
             immutable: false,
             value_list: None,
+            unit_scale_field: None,
             link: false,
             multiline: false,
             side_effects: Vec::new(),

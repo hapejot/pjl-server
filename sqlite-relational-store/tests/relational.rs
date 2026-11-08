@@ -451,7 +451,8 @@ async fn decimals_keep_their_precision() {
     let read = store
         .read_entity("MoneySet", &active(1), &ODataQuery::new()).await
         .unwrap();
-    assert_eq!(read["Amount"], json!(1234.56));
+    // Dezimalzahlen gehen exakt als JSON-String hinaus (siehe data-store/src/sql_value.rs).
+    assert_eq!(read["Amount"], json!("1234.56"));
 }
 
 #[tokio::test]

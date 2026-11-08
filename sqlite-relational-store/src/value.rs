@@ -72,6 +72,7 @@ mod tests {
         };
         let param = json_to_param(&json!(123.456), &ty, "Amount").unwrap();
         assert_eq!(to_sqlite(&param), SqlValue::Text("123.456".into()));
-        assert_eq!(param_to_json(&from_sqlite(ValueRef::Text(b"123.456")), &ty), json!(123.456));
+        // Dezimalzahlen gehen als JSON-String hinaus (exakt, siehe data-store/src/sql_value.rs).
+        assert_eq!(param_to_json(&from_sqlite(ValueRef::Text(b"123.456")), &ty), json!("123.456"));
     }
 }

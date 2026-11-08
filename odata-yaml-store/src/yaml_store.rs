@@ -165,7 +165,7 @@ impl YamlStore {
             result.extend(
                 candidates
                     .iter()
-                    .filter(|rec| references(rec, &link.to_field, key.id))
+                    .filter(|rec| references(rec, &link.to_field, &key.id))
                     .map(|rec| (link.to_set.clone(), EntityKey::from(rec))),
             );
         }
@@ -198,7 +198,7 @@ impl YamlStore {
         link: &NavLink,
     ) -> Result<(), StoreError> {
         if !link.single {
-            let q = ODataQuery::new().filter(Expr::equals_guid(row.id(), &link.to_field));
+            let q = ODataQuery::new().filter(row.id().equals_filter(&link.to_field));
             row[field] = json!(self
                 .get_collection(&link.to_set, &q)
                 .await?
@@ -271,11 +271,10 @@ impl YamlStore {
     }
 }
 
-fn references(rec: &DataRecord, field: &str, parent: Uuid) -> bool {
+fn references(rec: &DataRecord, field: &str, parent: &data_store::key::KeyValue) -> bool {
     rec.get(field)
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .and_then(|s| Uuid::parse_str(&s).ok())
-        == Some(parent)
+        .and_then(|v| v.as_str().map(data_store::key::KeyValue::parse))
+        .is_some_and(|s| &s == parent)
 }
 
 fn load_record_from_file(path: &Path) -> Result<DataRecord, StoreError> {

@@ -1,10 +1,11 @@
-# PoC CRM: eigenstaendiger Start, unabhaengig vom video-store.
+# PoC CRM: Eigenständiges Beispiel mit wenigen Komponenten
 #
 #   cp poc-crm/.env.example poc-crm/.env   # Passwort setzen
 #   docker compose -f poc-crm/compose.yaml up -d --build
 #   OData      -> http://localhost:8090/Service/$metadata
 #   Launchpad  -> http://localhost:8090/   (App-Manifest: /apps/<Entitaet>/manifest.json, z. B. Account)
 #   Daten neu  -> docker compose -f poc-crm/compose.yaml down -v
+#   Testdaten  -> python3 poc-crm/seed-testdata.py   (OData, Standard: http://localhost:8090/Service)
 #
 # Store: PostgreSQL (Dienst db). Das Schema wird beim Start aus poc-crm/ddic.json angelegt.
 # Das Modell liegt in poc-crm/ddic.json (read-only eingebunden).

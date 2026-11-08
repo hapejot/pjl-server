@@ -5,6 +5,7 @@ members = [
     "file-repo",
     "fiori-server",
     "odata",
+    "odata-export",
     "odata-yaml-store",
     "pjl-pack",
     "postgres-relational-store",

@@ -83,7 +83,7 @@ fn entity_set(
     entity: &EntitySpec,
     ownership: &HashMap<(String, String), Ownership>,
 ) -> Result<EntitySet, SchemaError> {
-    let mut set = EntitySet::new(entity.setname(), entity.name());
+    let mut set = EntitySet::new(entity.setname(), entity.name()).with_key_type(key_data_type(entity));
     if entity.draft_enabled {
         set = set.drafts();
     }
@@ -105,8 +105,9 @@ fn entity_set(
                     atom_data_type(edm_type, *max_length, *precision, *scale),
                 );
                 // spec kennt keine Nullability: alles ausser dem Schluessel ist
-                // optional. Bewusste Festlegung, nicht Ableitung.
-                column.nullable = true;
+                // optional. Bewusste Festlegung, nicht Ableitung. Der eigene
+                // Primaerschluessel ist Pflicht.
+                column.nullable = entity.primary_key.as_deref() != Some(name.as_str());
                 if *computed {
                     column = column.computed();
                 }
@@ -171,21 +172,20 @@ fn entity_set(
                 );
                 continue;
             };
+            let column = ddic.fk_column(entity.name(), &fk);
             set = set.association(Association {
                 name: name.clone(),
                 target_set,
                 cardinality: Cardinality::ToMany,
                 ownership,
-                foreign_key: ForeignKeySide::There {
-                    column: format!("{fk}{ID_SUFFIX}"),
-                },
+                foreign_key: ForeignKeySide::There { column },
                 reverse: Some(fk),
             });
         } else {
             // to-one: der Fremdschluessel liegt im eigenen Set.
-            let column = format!("{name}{ID_SUFFIX}");
+            let column = ddic.fk_column(target.as_str(), name);
             if !set.has_column(&column) {
-                let mut fk = Column::foreign_key(&column, &target_set);
+                let mut fk = Column::foreign_key_typed(&column, &target_set, key_type_of(ddic, target.as_str()));
                 // Verweise auf Benutzer zeigen im Zweifel auf den Default User; das
                 // ist zugleich der DEFAULT fuer Spalten, die nachtraeglich entstehen.
                 if target.as_str() == spec::system_user::SYSTEM_USER {
@@ -209,6 +209,29 @@ fn entity_set(
 
 /// EDM-Typ auf [`DataType`]. Unbekannte Typen werden als String behandelt und
 /// gemeldet - lieber eine breite Spalte als ein Abbruch beim Start.
+/// Datentyp des Primaerschluessels einer Entitaet (`Guid` ohne eigenen Schluessel).
+fn key_data_type(entity: &EntitySpec) -> DataType {
+    let Some(pk) = entity.primary_key.as_deref() else {
+        return DataType::Guid;
+    };
+    entity
+        .fields()
+        .find_map(|f| match f {
+            FieldSpec::Atom { name, edm_type, max_length, precision, scale, .. } if name == pk => {
+                Some(atom_data_type(edm_type, *max_length, *precision, *scale))
+            }
+            _ => None,
+        })
+        .unwrap_or(DataType::Guid)
+}
+
+/// Datentyp des Schluessels einer Ziel-Entitaet (fuer Fremdschluessel).
+fn key_type_of(ddic: &DataDictionary, entity_name: &str) -> DataType {
+    ddic.active_entity(entity_name)
+        .map(key_data_type)
+        .unwrap_or(DataType::Guid)
+}
+
 fn atom_data_type(
     edm_type: &str,
     max_length: Option<u32>,

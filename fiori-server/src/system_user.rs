@@ -63,7 +63,7 @@ async fn create_user(
         data["ID"] = json!(id.to_string());
     }
     let created = raw.create_entity(SYSTEM_USER_SET, &data).await?;
-    let id = created.id();
+    let id = uuid_of(&created.id());
     raw.draft_activate(SYSTEM_USER_SET, &EntityKey::new(id, false))
         .await?;
     Ok(id)
@@ -81,7 +81,7 @@ pub async fn resolve_actor(raw: &dyn DraftDataStore) -> Result<Uuid, HookError> 
                     "Benutzer '{username}' ist inaktiv"
                 ))));
             }
-            Ok(record.id())
+            Ok(uuid_of(&record.id()))
         }
         None => Ok(create_user(raw, &username, None, true, None).await?),
     }
@@ -191,7 +191,7 @@ async fn check_user(
         }
         Operation::Patch => {
             let Some(key) = key else { return Ok(()) };
-            if key.id == default_user_id() {
+            if key.id == data_store::key::KeyValue::from(default_user_id()) {
                 if value.get(su::ACTIVE) == Some(&json!(false)) {
                     return Err(HookError::Store(StoreError::Forbidden(
                         "Der Default User kann nicht deaktiviert werden".into(),
@@ -204,12 +204,17 @@ async fn check_user(
                 }
             }
             match value.get(su::USERNAME).and_then(Value::as_str) {
-                Some(name) => ensure_unique(raw, name.trim(), Some(key.id)).await,
+                Some(name) => ensure_unique(raw, name.trim(), Some(uuid_of(&key.id))).await,
                 None => Ok(()),
             }
         }
         _ => Ok(()),
     }
+}
+
+/// Benutzer-Entitaet ist UUID-basiert (`ID`); anderer Schluesseltyp ist ein Fehler.
+fn uuid_of(key: &data_store::key::KeyValue) -> Uuid {
+    key.as_uuid().expect("SystemUser hat einen UUID-Schluessel")
 }
 
 async fn ensure_unique(
@@ -218,7 +223,7 @@ async fn ensure_unique(
     except: Option<Uuid>,
 ) -> Result<(), HookError> {
     match find_user(raw, username).await? {
-        Some(rec) if Some(rec.id()) != except => Err(HookError::Store(StoreError::Conflict(
+        Some(rec) if Some(uuid_of(&rec.id())) != except => Err(HookError::Store(StoreError::Conflict(
             format!("Benutzername '{username}' ist bereits vergeben"),
         ))),
         _ => Ok(()),

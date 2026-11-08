@@ -1,7 +1,7 @@
 use std::ops::{Index, IndexMut};
 
 use crate::error::StoreError;
-use crate::key::EntityKey;
+use crate::key::{EntityKey, KeyValue};
 use odata::query::ODataQuery;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -63,8 +63,10 @@ pub struct DraftMessage {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DataRecord {
+    /// Primaerschluessel. Der Store fuehrt ihn immer unter `ID`; der fachliche
+    /// Schluesselname (z. B. `code`) wird in der Service-Schicht abgebildet.
     #[serde(rename = "ID")]
-    id: Uuid,
+    id: KeyValue,
     #[serde(rename = "IsActiveEntity")]
     is_active_entity: bool,
     #[serde(rename = "HasActiveEntity", default)]
@@ -91,7 +93,8 @@ impl DataRecord {
         Ok(record)
     }
 
-    pub fn new(id: Uuid, is_active_entity: bool) -> Self {
+    pub fn new(id: impl Into<KeyValue>, is_active_entity: bool) -> Self {
+        let id = id.into();
         let has_active_entity: bool = false;
         let has_draft_entity: bool = false;
         let draft_admin_data = None;
@@ -117,14 +120,13 @@ impl DataRecord {
         // Fehlt die ID (Neuanlage), wird eine UUID vergeben. Eine vorhandene,
         // aber ungueltige ID ist ein Fehler: frueher wurde sie stillschweigend
         // durch eine zufaellige UUID ersetzt, bei jedem Lesen eine andere.
+        // Eigene Schluessel (Text) werden als Zeichenkette uebernommen.
         let id = match fields.remove("ID") {
-            None | Some(Value::Null) => Uuid::new_v4(),
-            Some(Value::String(s)) => Uuid::parse_str(&s).map_err(|_| {
-                StoreError::Serialize(format!("ID '{s}' ist keine gueltige UUID"))
-            })?,
+            None | Some(Value::Null) => KeyValue::Uuid(Uuid::new_v4()),
+            Some(Value::String(s)) => KeyValue::parse(&s),
             Some(other) => {
                 return Err(StoreError::Serialize(format!(
-                    "ID muss eine UUID-Zeichenkette sein, erhalten: {other}"
+                    "ID muss eine Zeichenkette sein, erhalten: {other}"
                 )))
             }
         };
@@ -197,8 +199,8 @@ impl DataRecord {
         }
     }
 
-    pub fn id(&self) -> Uuid {
-        self.id
+    pub fn id(&self) -> KeyValue {
+        self.id.clone()
     }
 
     pub fn is_active_entity(&self) -> bool {
@@ -292,7 +294,7 @@ impl DataRecord {
 
 impl From<&DataRecord> for EntityKey {
     fn from(value: &DataRecord) -> Self {
-        EntityKey::new(value.id, value.is_active_entity)
+        EntityKey::new(value.id.clone(), value.is_active_entity)
     }
 }
 impl Index<&str> for DataRecord {
@@ -519,8 +521,14 @@ mod from_json_id_tests {
     }
 
     #[test]
-    fn invalid_id_is_rejected_not_replaced() {
-        let err = DataRecord::from_json(&json!({ "ID": "3963451", "IsActiveEntity": true }));
+    fn text_id_is_kept_as_text() {
+        let r = DataRecord::from_json(&json!({ "ID": "active", "IsActiveEntity": true })).unwrap();
+        assert_eq!(r.id(), KeyValue::Text("active".into()));
+    }
+
+    #[test]
+    fn non_string_id_is_rejected_not_replaced() {
+        let err = DataRecord::from_json(&json!({ "ID": 3963451, "IsActiveEntity": true }));
         assert!(matches!(err, Err(StoreError::Serialize(_))));
     }
 

@@ -140,11 +140,20 @@ impl Column {
     }
 
     pub fn foreign_key(name: impl Into<String>, target_set: impl Into<String>) -> Self {
+        Self::foreign_key_typed(name, target_set, DataType::Guid)
+    }
+
+    /// Fremdschluessel mit dem Typ des Zielschluessels (z. B. Text bei Code-Schluesseln).
+    pub fn foreign_key_typed(
+        name: impl Into<String>,
+        target_set: impl Into<String>,
+        data_type: DataType,
+    ) -> Self {
         Self {
             role: ColumnRole::ForeignKey {
                 target_set: target_set.into(),
             },
-            ..Self::new(name, DataType::Guid)
+            ..Self::new(name, data_type)
         }
     }
 
@@ -297,6 +306,14 @@ impl EntitySet {
             associations: IndexMap::new(),
             legacy_value_columns: Vec::new(),
         }
+    }
+
+    /// Typ der Schluesselspalte `ID` (Standard Guid). Eigene Primaerschluessel
+    /// (z. B. Code) setzen hier ihren Datentyp.
+    pub fn with_key_type(mut self, data_type: DataType) -> Self {
+        self.columns
+            .insert(ID_COLUMN.to_string(), Column::key(ID_COLUMN, data_type));
+        self
     }
 
     /// Aktiviert den Draft-Flow und ergaenzt die Schluesselspalte.

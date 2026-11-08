@@ -1,0 +1,23 @@
+[package]
+name = "odata-export"
+version = "0.1.0"
+edition = "2024"
+description = "Exportiert die aktiven Daten eines OData-Services in ein Verzeichnis (fuer Container ohne Python)."
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+quick-xml = "0.41"
+serde_json = "1.0"
+
+[[bin]]
+name = "odata-export"
+path = "src/main.rs"
+
+[lib]
+name = "odata_export"
+path = "src/lib.rs"
+
+[[bin]]
+name = "odata-import"
+path = "src/bin/odata-import.rs"

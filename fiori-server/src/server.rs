@@ -44,6 +44,7 @@ pub async fn run_with(
         if config.designer { " (designer)" } else { "" }
     );
 
+    // nur eine Prüfung für den Designer-Modus durchführen
     if config.designer {
         if let Some(uri) = &config.model_root {
             anyhow::ensure!(
@@ -52,6 +53,9 @@ pub async fn run_with(
             );
         }
     }
+
+
+
     let sources = crate::sources::resolve(&config).context("cannot resolve sources")?;
     let base = load_dictionary(&config, &sources)?;
 
@@ -174,6 +178,9 @@ async fn shutdown_signal() {
 ///
 /// Nur wenn das EntitySet leer ist: vorhandene Daten bleiben unangetastet. Die Zeilen
 /// werden als aktive Saetze angelegt (Entwurf + Aktivierung wie bei den Festwertlisten).
+///
+/// TODO: Handle updates to existing value lists instead of only seeding when empty.
+///
 async fn seed_entities(store: &dyn DraftDataStore, ddic: &DataDictionary) -> anyhow::Result<()> {
     use data_store::EntityKey;
     use odata::query::ODataQuery;
@@ -196,21 +203,24 @@ async fn seed_entities(store: &dyn DraftDataStore, ddic: &DataDictionary) -> any
                 .create_entity(&set, &data)
                 .await
                 .map_err(|e| anyhow::anyhow!("cannot seed {set}: {e}"))?;
-            store
-                .draft_activate(&set, &EntityKey::new(created.id(), false))
-                .await
-                .map_err(|e| anyhow::anyhow!("cannot activate {set}: {e}"))?;
+            // Nicht draft-faehige Entitaeten (Stammdaten) sind mit dem Anlegen aktiv.
+            if entity.draft_enabled {
+                store
+                    .draft_activate(&set, &EntityKey::new(created.id(), false))
+                    .await
+                    .map_err(|e| anyhow::anyhow!("cannot activate {set}: {e}"))?;
+            }
         }
         info!("{} seed rows loaded into {set}", entity.seed.len());
     }
     Ok(())
 }
 
-async fn seed_value_lists(store: &dyn DraftDataStore, ddic: &DataDictionary) -> anyhow::Result<()> {
+pub async fn seed_value_lists(store: &dyn DraftDataStore, ddic: &DataDictionary) -> anyhow::Result<()> {
     use data_store::EntityKey;
     use odata::query::ODataQuery;
     use serde_json::json;
-    use spec::value_list::{CODE_FIELD, LABEL_FIELD, SORT_FIELD, entry_id};
+    use spec::value_list::{CODE_FIELD, LABEL_FIELD, SORT_FIELD};
     use std::collections::{HashMap, HashSet};
 
     if ddic.value_lists().is_empty() {
@@ -225,13 +235,13 @@ async fn seed_value_lists(store: &dyn DraftDataStore, ddic: &DataDictionary) -> 
             .get_collection(&set, &ODataQuery::new())
             .await
             .map_err(|e| anyhow::anyhow!("cannot read {set}: {e}"))?;
-        let wanted: HashSet<uuid::Uuid> = list
+        let wanted: HashSet<data_store::key::KeyValue> = list
             .values
             .iter()
-            .map(|v| entry_id(&list.id, &v.code))
+            .map(|v| entry_key(list, &v.code))
             .collect();
         // Alle Saetze je ID (aktiv und Entwurf).
-        let mut by_id: HashMap<uuid::Uuid, Vec<_>> = HashMap::new();
+        let mut by_id: HashMap<data_store::key::KeyValue, Vec<_>> = HashMap::new();
         for r in existing {
             by_id.entry(r.id()).or_default().push(r);
         }
@@ -247,7 +257,7 @@ async fn seed_value_lists(store: &dyn DraftDataStore, ddic: &DataDictionary) -> 
             }
         }
         for v in &list.values {
-            let id = entry_id(&list.id, &v.code);
+            let id = entry_key(list, &v.code);
             let rows = by_id.get(&id).map(Vec::as_slice).unwrap_or(&[]);
             let active = rows.iter().find(|r| r.is_active_entity());
             let wanted_data = json!({LABEL_FIELD: v.label, CODE_FIELD: v.code, SORT_FIELD: v.sort});
@@ -277,10 +287,14 @@ async fn seed_value_lists(store: &dyn DraftDataStore, ddic: &DataDictionary) -> 
                         .create_entity(&set, &data)
                         .await
                         .map_err(|e| anyhow::anyhow!("cannot seed {set}: {e}"))?;
-                    store
-                        .draft_activate(&set, &EntityKey::new(created.id(), false))
-                        .await
-                        .map_err(|e| anyhow::anyhow!("cannot activate {set}: {e}"))?;
+                    // Listen mit eigenem Code-Schluessel haben keine Entwuerfe (Validierung in
+                    // spec); alle anderen werden wie bisher als Entwurf angelegt und aktiviert.
+                    if !list.code_key {
+                        store
+                            .draft_activate(&set, &EntityKey::new(created.id(), false))
+                            .await
+                            .map_err(|e| anyhow::anyhow!("cannot activate {set}: {e}"))?;
+                    }
                 }
             }
             count += 1;
@@ -290,12 +304,24 @@ async fn seed_value_lists(store: &dyn DraftDataStore, ddic: &DataDictionary) -> 
     Ok(())
 }
 
+/// Schluessel eines Festwerts: der Code bei Code-Listen, sonst die stabile UUID.
+fn entry_key(list: &spec::ValueList, code: &str) -> data_store::key::KeyValue {
+    if list.code_key {
+        data_store::key::KeyValue::Text(code.to_string())
+    } else {
+        data_store::key::KeyValue::Uuid(spec::value_list::entry_id(&list.id, code))
+    }
+}
+
 /// Ausgangs-Dictionary bestimmen.
 ///
 /// Der Designer kennt sein Modell selbst. Die Laufzeit hat ohne Exportdatei
 /// nichts zu tun und bricht deshalb mit einem Hinweis ab, statt mit einem
 /// leeren Launchpad zu starten.
-fn load_dictionary(config: &ServerConfig, sources: &crate::sources::Sources) -> anyhow::Result<DataDictionary> {
+fn load_dictionary(
+    config: &ServerConfig,
+    sources: &crate::sources::Sources,
+) -> anyhow::Result<DataDictionary> {
     if config.designer {
         // Der Designer zeigt sein eincompiliertes Metamodell; die Daten liegen im Store.
         let mut ddic = DataDictionary::new();
@@ -333,15 +359,19 @@ fn load_dictionary(config: &ServerConfig, sources: &crate::sources::Sources) -> 
         .map_err(|e| anyhow::anyhow!("'{}': ungueltige Komponente: {e}", file.label))?;
     // Festwertlisten: Listen-Entitaeten erzeugen und Atome im Speicher zu Lookups
     // machen (vor dem Schema, damit die Spalten dort stehen).
-    ddic.apply_value_list_lookups().map_err(|e| {
-        anyhow::anyhow!("'{}': ungueltige Festwertliste: {e}", file.label)
-    })?;
+    ddic.apply_value_list_lookups()
+        .map_err(|e| anyhow::anyhow!("'{}': ungueltige Festwertliste: {e}", file.label))?;
     info!(
         "dictionary '{}': {} entities, {} apps",
         file.label,
         ddic.entities().len(),
         ddic.apps().count()
     );
+    {
+        // Write the active data dictionary to a JSON file for debugging purposes.
+        let f = std::fs::File::create("active-ddic.json")?;
+        serde_json::to_writer_pretty(f, &ddic)?;
+    }
     Ok(ddic)
 }
 
@@ -435,7 +465,11 @@ pub(crate) fn wrap_store(
     Ok(store)
 }
 
-fn router(state: AppState, config: &ServerConfig, fiori: Arc<dyn file_repo::FileRepository>) -> Router {
+fn router(
+    state: AppState,
+    config: &ServerConfig,
+    fiori: Arc<dyn file_repo::FileRepository>,
+) -> Router {
     let identity_config = std::sync::Arc::new(config.clone());
     let mut app = Router::new()
         .nest("/Service/", batch::router(srv::router(), state.clone()))

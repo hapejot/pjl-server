@@ -37,11 +37,14 @@ pub struct EntityType {
 }
 
 impl EntityType {
-    pub fn from_entity(x: &EntitySpec) -> Self {
+    pub fn from_entity(ddic: &DataDictionary, x: &EntitySpec) -> Self {
         let mut properties = Vec::new();
         let mut navigation_properties = Vec::new();
 
-        properties.push(Property::new("ID", "Edm.Guid").nullable(false));
+        // Eigener Primaerschluessel: das Atom ist der Schluessel, kein separates ID-Feld.
+        if x.primary_key.is_none() {
+            properties.push(Property::new("ID", "Edm.Guid").nullable(false));
+        }
         if x.draft_enabled {
             properties.push(Property::new("IsActiveEntity", "Edm.Boolean").nullable(false));
             properties.push(Property::new("HasActiveEntity", "Edm.Boolean").nullable(false));
@@ -64,10 +67,11 @@ impl EntityType {
                             None,
                         )
                     } else {
-                        let ref_name = format!("{}_ID", name);
-                        properties.push(Property::new(&ref_name, "Edm.Guid"));
+                        let ref_name = ddic.fk_column(entity, name);
+                        let (target_key, target_type) = target_key_of(ddic, entity);
+                        properties.push(Property::new(&ref_name, target_type.as_str()));
                         NavigationProperty::new(name, format!("Service.{}", entity), None)
-                            .ref_constraing(ref_name.as_str(), "ID")
+                            .ref_constraing(ref_name.as_str(), target_key.as_str())
                     };
                     navigation_properties.push(p);
                 }
@@ -77,9 +81,15 @@ impl EntityType {
                     max_length,
                     precision,
                     scale,
+                    unit_scale_field,
                     ..
                 } => {
                     let mut property = Property::new(name, edm_type);
+                    // Code einer Code-Liste (Einheit/Waehrung) ist nicht nullable: ValueListHelper._enrichPath
+                    // uebernimmt einen ValueListParameterOut nur fuer nicht nullable Eigenschaften als Schluessel.
+                    if unit_scale_field.is_some() || x.primary_key.as_deref() == Some(name.as_str()) {
+                        property = property.nullable(false);
+                    }
                     if let Some(max_length) = max_length {
                         property = property.max_length(*max_length);
                     }
@@ -97,17 +107,12 @@ impl EntityType {
                     properties.push(property);
                 }
                 FieldSpec::Measure {
-                    name,
-                    precision,
-                    scale,
-                    ..
+                    name, precision, ..
                 } => {
-                    let mut property = Property::new(name, "Edm.Decimal");
+                    // Measures: Nachkommastellen je Einheit/Waehrung (SAP-Konvention).
+                    let mut property = Property::new(name, "Edm.Decimal").scale_variable();
                     if let Some(precision) = precision {
                         property = property.precision(*precision);
-                    }
-                    if let Some(scale) = scale {
-                        property = property.scale(*scale);
                     }
                     properties.push(property);
                 }
@@ -127,7 +132,7 @@ impl EntityType {
         }
         Self {
             name: x.name().into(),
-            key: Key::new(x.key_names()),
+            key: Key::new(&x.key_fields()),
             properties,
             navigation_properties,
         }
@@ -196,7 +201,7 @@ pub struct Property {
     pub precision: Option<u32>,
 
     #[serde(rename = "@Scale", skip_serializing_if = "Option::is_none")]
-    pub scale: Option<u32>,
+    pub scale: Option<String>,
 
     #[serde(rename = "@DefaultValue", skip_serializing_if = "Option::is_none")]
     pub default_value: Option<String>,
@@ -231,7 +236,13 @@ impl Property {
     }
 
     pub fn scale(mut self, scale: u32) -> Self {
-        self.scale = Some(scale);
+        self.scale = Some(scale.to_string());
+        self
+    }
+
+    /// `Scale="variable"`: Nachkommastellen kommen von der Einheit (`Common.UnitSpecificScale`).
+    pub fn scale_variable(mut self) -> Self {
+        self.scale = Some("variable".into());
         self
     }
 }
@@ -339,6 +350,42 @@ impl EntitySet {
     }
 }
 
+/// Code-Listen-Annotationen fuer Einheiten/Waehrungen (SAP CodeList.v1).
+///
+/// Die Runtime (UI5 `ODataMetaModel.requestCodeList`) laedt die Nachkommastellen nur,
+/// wenn der Container `CodeList.v1.<term>` auf ein EntitySet zeigt und der Schluessel
+/// ueber einen Alternativschluessel (`Core.AlternateKeys`) mit `Common.UnitSpecificScale`
+/// und `Common.Text` erreichbar ist. Ohne diese Annotationen greift fuer `Scale="variable"`
+/// der Standardwert, und alle Einheiten erscheinen mit gleicher Stellenzahl.
+fn code_list_annotations(entity: &EntitySpec) -> Vec<String> {
+    let Some((code, scale, term)) = entity.fields().find_map(|f| match f {
+        FieldSpec::Atom {
+            name,
+            unit_scale_field: Some(scale),
+            code_list: Some(term),
+            ..
+        } => Some((name.clone(), scale.clone(), term.clone())),
+        _ => None,
+    }) else {
+        return vec![];
+    };
+    let entity_name = entity.name();
+    let set = entity.setname();
+    // UI5 liest UnitSpecificScale am Primaerschluessel ($Key, hier ID), nicht am
+    // Alternativschluessel. Der Code selbst ist ueber AlternateKeys angebunden.
+    vec![
+        format!(
+            r#"<Annotations Target="Service.{entity_name}/ID"><Annotation Term="Common.UnitSpecificScale" Path="{scale}"/></Annotations>"#
+        ),
+        format!(
+            r#"<Annotations Target="Service.{entity_name}"><Annotation Term="Org.OData.Core.V1.AlternateKeys"><Collection><Record><PropertyValue Property="Key"><Collection><Record><PropertyValue Property="Name" PropertyPath="{code}"/><PropertyValue Property="Alias" String="{code}"/></Record></Collection></PropertyValue></Record></Collection></Annotation></Annotations>"#
+        ),
+        format!(
+            r#"<Annotations Target="Service.EntityContainer"><Annotation Term="CodeList.{term}"><Record><PropertyValue Property="CollectionPath" String="{set}"/><PropertyValue Property="Url" String="."/></Record></Annotation></Annotations>"#
+        ),
+    ]
+}
+
 fn capability_annotations_for_entity(ddic: &DataDictionary, entity: &EntitySpec) -> Vec<String> {
     let entity_name = entity.name();
     let set_name = entity.setname();
@@ -416,7 +463,7 @@ pub struct Annotations {
 impl Annotations {
     /// `app_entities`: Namen der Hauptentitaeten aller Apps. Ein Verweis auf eine
     /// dieser Entitaeten wird als semantische Verlinkung (Intent) ausgegeben.
-    fn from_entity(x: &EntitySpec, hidden: &[String], app_entities: &[String]) -> Vec<Annotations> {
+    fn from_entity(ddic: &DataDictionary, x: &EntitySpec, hidden: &[String], app_entities: &[String]) -> Vec<Annotations> {
         let mut annotations = Vec::new();
         let mut main_annotations = Annotations {
             target: format!("Service.{}", x.name()),
@@ -434,13 +481,13 @@ impl Annotations {
             ),
         );
 
-        main_annotations.annotations.extend(line_item_annotations(x, app_entities));
+        main_annotations.annotations.extend(line_item_annotations(ddic, x, app_entities));
         // Nur App-Hauptentitaeten sind Sprungziele. Bei Join-Entitaeten (M:N ohne eigenen
         // Inhalt) wuerde der Schluessel-Fallback die ID der Zwischenzeile statt des Ziels senden.
         if app_entities.iter().any(|a| a == x.name()) {
             main_annotations.annotations.push(
                 Annotation::new("Common.SemanticKey")
-                    .collection(Collection::new().add_property_path("ID")),
+                    .collection(Collection::new().add_property_path(x.primary_key_name())),
             );
         }
         if !x.selection_fields().is_empty() {
@@ -450,7 +497,13 @@ impl Annotations {
                 let is_to_one = x.fields().any(|f| {
                     matches!(f, FieldSpec::Lookup { name, collection: false, .. } if name == field)
                 });
-                let path = if is_to_one { format!("{field}_ID") } else { field.clone() };
+                let path = match x.fields().find_map(|f| match f {
+                    FieldSpec::Lookup { name, entity, collection: false, .. } if name == field => Some(entity.as_str()),
+                    _ => None,
+                }) {
+                    Some(target) if is_to_one => ddic.fk_column(target, field),
+                    _ => field.clone(),
+                };
                 paths = paths.add_property_path(path);
             }
             main_annotations
@@ -462,7 +515,7 @@ impl Annotations {
         // "does not point to a property" ausloesen.
 
         // Object-Page-Abschnitte: Feldgruppen und Listen, siehe `object_page_sections`.
-        let (sections, groups) = object_page_sections(x, hidden, app_entities);
+        let (sections, groups) = object_page_sections(ddic, x, hidden, app_entities);
         let mut facets = Collection::new();
         for record in sections {
             facets = facets.add_record(record);
@@ -500,6 +553,7 @@ impl Annotations {
         annotations.push(main_annotations);
 
         annotations.push(Self::from_field(
+            ddic,
             x.name(),
             &FieldSpec::Atom {
                 name: "ID".into(),
@@ -513,6 +567,7 @@ impl Annotations {
                 immutable: false,
                 value_list: None,
                 unit_scale_field: None,
+                code_list: None,
                 link: false,
                 multiline: false,
                 side_effects: Vec::new(),
@@ -520,7 +575,19 @@ impl Annotations {
             },
         ));
         for f in x.fields() {
-            annotations.push(Self::from_field(x.name(), f));
+            annotations.push(Self::from_field(ddic, x.name(), f));
+            // Begleitfeld einer Measure: SAP kennzeichnet es mit IsUnit bzw. IsCurrency,
+            // sonst wird es in der Measure-Darstellung nicht als bearbeitbare Einheit behandelt.
+            if let FieldSpec::Measure { unit_field, kind, .. } = f {
+                let term = match kind {
+                    MeasureKind::Currency => "Common.IsCurrency",
+                    MeasureKind::Unit => "Common.IsUnit",
+                };
+                annotations.push(Annotations {
+                    target: format!("Service.{}/{}", x.name(), unit_field),
+                    annotations: vec![Annotation::new(term)],
+                });
+            }
         }
         for (field, value) in x.filter_defaults() {
             let annotation = match value {
@@ -532,10 +599,10 @@ impl Annotations {
                 annotations: vec![annotation],
             });
         }
-        annotations
+        merge_by_target(annotations)
     }
 
-    fn from_field(service_name: &str, f: &spec::FieldSpec) -> Annotations {
+    fn from_field(ddic: &DataDictionary, service_name: &str, f: &spec::FieldSpec) -> Annotations {
         let mut target = format!("Service.{}/{}", service_name, f.name());
         let mut annotations = vec![Annotation::new("Common.Label").string(f.label())];
         if matches!(f, FieldSpec::Atom { multiline: true, .. }) {
@@ -553,7 +620,7 @@ impl Annotations {
                     if spec::system_user::is_read_only_audit_field(f.name()) {
                         annotations.push(Annotation::new("Org.OData.Core.V1.Computed").boolean(true));
                     }
-                    let name = format!("{}_ID", name);
+                    let name = ddic.fk_column(entity, name);
                     target = format!("Service.{}/{}", service_name, name);
                     annotations.push(
                         Annotation::new("Common.Text")
@@ -573,7 +640,7 @@ impl Annotations {
                                     .add(
                                         PropertyValue::new("LocalDataProperty").property_path(name),
                                     )
-                                    .add(PropertyValue::new("ValueListProperty").string("ID")),
+                                    .add(PropertyValue::new("ValueListProperty").string(target_key_of(ddic, entity).0)),
                             )
                             .add_record(
                                 Record::new("Common.ValueListParameterDisplayOnly")
@@ -629,7 +696,21 @@ impl Annotations {
     }
 }
 
-/// Listenannotationen einer Entitaet.
+/// Fasst `<Annotations>`-Blöcke mit gleichem Target zusammen (Reihenfolge bleibt erhalten).
+/// Sonst entstehen z. B. für ein Begleitfeld einer Measure zwei Blöcke (Feld-Annotationen
+/// und `Common.IsCurrency`/`IsUnit`).
+fn merge_by_target(blocks: Vec<Annotations>) -> Vec<Annotations> {
+    let mut out: Vec<Annotations> = Vec::new();
+    for block in blocks {
+        match out.iter_mut().find(|b| b.target == block.target) {
+            Some(existing) => existing.annotations.extend(block.annotations),
+            None => out.push(block),
+        }
+    }
+    out
+}
+
+/// Listenannotationen einer Entität.
 ///
 /// * Ohne `list_views`: unqualifiziertes `UI.LineItem` mit `name`, ersatzweise dem ersten
 ///   darstellbaren Feld.
@@ -639,10 +720,10 @@ impl Annotations {
 ///   sind die Auswahlpunkte in der ListReport-Ansicht (siehe `flp.rs`).
 /// * Eine fehlende `default`-Ansicht wird durch dieselbe Fallback-Spalte ersetzt, weil
 ///   Fiori Elements ein unqualifiziertes LineItem fuer die Standardtabelle braucht.
-fn line_item_annotations(x: &EntitySpec, app_entities: &[String]) -> Vec<Annotation> {
+fn line_item_annotations(ddic: &DataDictionary, x: &EntitySpec, app_entities: &[String]) -> Vec<Annotation> {
     let views = x.list_views();
     if views.is_empty() {
-        return vec![line_item(None, &[ListColumn::new(default_line_item_column(x))], x, app_entities)];
+        return vec![line_item(ddic, None, &[ListColumn::new(default_line_item_column(x))], x, app_entities)];
     }
 
     let mut out = Vec::new();
@@ -651,11 +732,11 @@ fn line_item_annotations(x: &EntitySpec, app_entities: &[String]) -> Vec<Annotat
         .find(|v| v.is_default())
         .map(|v| v.columns.clone())
         .unwrap_or_else(|| vec![ListColumn::new(default_line_item_column(x))]);
-    out.push(line_item(None, &default_cols, x, app_entities));
+    out.push(line_item(ddic, None, &default_cols, x, app_entities));
 
     for view in views {
         if !view.is_default() {
-            out.push(line_item(Some(&view.name), &view.columns, x, app_entities));
+            out.push(line_item(ddic, Some(&view.name), &view.columns, x, app_entities));
         }
         out.push(presentation_variant(&view.name));
     }
@@ -690,6 +771,7 @@ fn default_line_item_column(entity: &EntitySpec) -> String {
 /// Navigationen (`Value = nav/name`, Anzeige des Zieltextes). Eine Prioritaet
 /// wird als `UI.Importance` am Datenfeld vermerkt.
 fn line_item(
+    ddic: &DataDictionary,
     qualifier: Option<&str>,
     columns: &[ListColumn],
     x: &EntitySpec,
@@ -711,14 +793,14 @@ fn line_item(
                 // ID der Zeile zurueck. Die Spalte ist ausgeblendet (UI.Hidden).
                 coll = coll.add_record(
                     Record::new("UI.DataField")
-                        .add(PropertyValue::new("Value").path(format!("{col}_ID")))
+                        .add(PropertyValue::new("Value").path(ddic.fk_column(entity, col)))
                         .annotation(Annotation::new("UI.Hidden")),
                 );
-                intent_link_record(&format!("{col}/name"), &format!("{col}_ID"), entity)
+                intent_link_record(&format!("{col}/name"), &ddic.fk_column(entity, col), entity, &target_key_of(ddic, entity).0)
             }
             Some(_) => data_field(&format!("{col}/name"), false),
             None if col == "name" && app_entities.iter().any(|a| a == x.name()) => {
-                intent_link_record("name", "ID", x.name())
+                intent_link_record("name", x.primary_key_name(), x.name(), x.primary_key_name())
             }
             None => data_field(col, is_link_atom(x, col)),
         };
@@ -802,7 +884,7 @@ fn stable_column_key(record: &str, path: &str, intent: Option<(&str, &str)>) -> 
 
 /// Semantischer Sprung (`DataFieldWithIntentBasedNavigation`) fuer den Wert `value`,
 /// Schluessel `local_key` der Zeile wird auf `ID` der Zielentitaet gemappt.
-fn intent_link_record(value: &str, local_key: &str, entity: &str) -> Record {
+fn intent_link_record(value: &str, local_key: &str, entity: &str, target_key: &str) -> Record {
     Record::new("UI.DataFieldWithIntentBasedNavigation")
         .add(PropertyValue::new("Value").path(value))
         .add(PropertyValue::new("SemanticObject").string(entity))
@@ -810,7 +892,7 @@ fn intent_link_record(value: &str, local_key: &str, entity: &str) -> Record {
         .add(PropertyValue::new("Mapping").collection(Collection::new().add_record(
             Record::new("Common.SemanticObjectMappingType")
                 .add(PropertyValue::new("LocalProperty").property_path(local_key))
-                .add(PropertyValue::new("SemanticObjectProperty").string("ID")),
+                .add(PropertyValue::new("SemanticObjectProperty").string(target_key)),
         )))
 }
 
@@ -833,6 +915,7 @@ fn data_field(path: &str, link: bool) -> Record {
 /// `UI.PresentationVariant` fuer eine Listenansicht. Die Ansicht `default`
 /// ist unqualifiziert, alle anderen tragen `#<name>`.
 fn presentation_variant(view_name: &str) -> Annotation {
+    info!("presentation_variant: view_name={}", view_name);
     let (qualifier, line_item_path) = if view_name == spec::ListView::DEFAULT {
         (None, "@UI.LineItem".to_string())
     } else {
@@ -859,6 +942,7 @@ pub const DEFAULT_FACET: &str = "Default";
 /// Pfad des LineItems fuer eine Navigations-Facette. Ohne Facetten-Einstellung
 /// (oder mit Ansicht `default`) das unqualifizierte LineItem, sonst `#<ansicht>`.
 fn facet_target_path(x: &EntitySpec, nav: &str) -> String {
+    info!("facet_target_path: entity={}, nav={}", x.name(), nav);
     match x.facet(nav).and_then(|f| f.view.as_deref()) {
         Some(view) if view != spec::ListView::DEFAULT => format!("{nav}/@UI.LineItem#{view}"),
         _ => format!("{nav}/@UI.LineItem"),
@@ -891,6 +975,7 @@ fn facet_title(x: &EntitySpec, key: &str) -> String {
 ///
 /// Liefert die Facetten-Records und die zugehoerigen FieldGroups.
 fn object_page_sections(
+    ddic: &DataDictionary,
     x: &EntitySpec,
     hidden: &[String],
     app_entities: &[String],
@@ -955,7 +1040,7 @@ fn object_page_sections(
             continue;
         }
         if let Some(long) = key.strip_suffix(LONG_TEXT_SUFFIX) {
-            groups.push(field_group(key, x, Some(&[long.to_string()]), hidden, app_entities));
+            groups.push(field_group(ddic, key, x, Some(&[long.to_string()]), hidden, app_entities));
             records.push(
                 Record::new("UI.ReferenceFacet")
                     .add(PropertyValue::new("Label").string(facet_title(x, long)))
@@ -979,7 +1064,7 @@ fn object_page_sections(
         } else {
             (x.facet(key).map(|f| f.fields.clone()), key.as_str())
         };
-        groups.push(field_group(qualifier, x, selected.as_deref(), hidden, app_entities));
+        groups.push(field_group(ddic, qualifier, x, selected.as_deref(), hidden, app_entities));
 
         if key == GENERAL_FACET {
             records.push(
@@ -1021,8 +1106,9 @@ fn list_facet_record(x: &EntitySpec, nav: &str) -> Record {
 /// Einzel-Verweis auf eine App-Entitaet als semantische Verlinkung:
 /// `UI.DataFieldWithIntentBasedNavigation` mit Intent `<Entitaet>-display`,
 /// Parameter `ID` aus dem Fremdschluessel.
-fn lookup_intent_field(name: &str, entity: &str) -> Record {
-    let fk = format!("{name}_ID");
+fn lookup_intent_field(ddic: &DataDictionary, name: &str, entity: &str) -> Record {
+    let fk = ddic.fk_column(entity, name);
+    let target_key = target_key_of(ddic, entity).0;
     Record::new("UI.DataFieldWithIntentBasedNavigation")
         .add(PropertyValue::new("Value").path(&fk))
         .add(PropertyValue::new("SemanticObject").string(entity))
@@ -1030,13 +1116,14 @@ fn lookup_intent_field(name: &str, entity: &str) -> Record {
         .add(PropertyValue::new("Mapping").collection(Collection::new().add_record(
             Record::new("Common.SemanticObjectMappingType")
                 .add(PropertyValue::new("LocalProperty").property_path(&fk))
-                .add(PropertyValue::new("SemanticObjectProperty").string("ID")),
+                .add(PropertyValue::new("SemanticObjectProperty").string(target_key)),
         )))
 }
 
 /// FieldGroup mit dem Qualifier `qualifier`. `selected`: Felder in Anzeigereihenfolge,
 /// `None` = alle Felder der Entitaet.
 fn field_group(
+    ddic: &DataDictionary,
     qualifier: &str,
     x: &EntitySpec,
     selected: Option<&[String]>,
@@ -1050,10 +1137,20 @@ fn field_group(
             .collect(),
         None => x.fields().collect(),
     };
+    // Begleitfelder (Waehrung/Einheit) einer Measure werden vom Measure-Feld mit angezeigt
+    // und daher nicht separat in der FieldGroup gefuehrt. Das Feld bleibt im Modell erhalten.
+    let companions: Vec<&str> = x
+        .fields()
+        .filter_map(|f| match f {
+            FieldSpec::Measure { unit_field, .. } => Some(unit_field.as_str()),
+            _ => None,
+        })
+        .collect();
     let mut data = Collection::new();
     for record in fields
         .into_iter()
-        .filter_map(|f| field_record(f, hidden, app_entities))
+        .filter(|f| !(matches!(f, FieldSpec::Atom { .. }) && companions.contains(&f.name())))
+        .filter_map(|f| field_record(ddic, f, hidden, app_entities))
     {
         data = data.add_record(record);
     }
@@ -1062,18 +1159,26 @@ fn field_group(
     ann.record(Record::new("UI.FieldGroupType").add(PropertyValue::new("Data").collection(data)))
 }
 
+/// Primaerschluessel eines Ziels: Name und EDM-Typ (`ID`/Edm.Guid ohne eigenen Schluessel).
+fn target_key_of(ddic: &DataDictionary, entity: &str) -> (String, String) {
+    match ddic.active_entity(entity) {
+        Some(e) => (e.primary_key_name().to_string(), e.primary_key_type().to_string()),
+        None => ("ID".to_string(), "Edm.Guid".to_string()),
+    }
+}
+
 /// Ein `UI.DataField` fuer ein Feld. `None` fuer Felder ohne Zeile in der FieldGroup.
-fn field_record(f: &FieldSpec, hidden: &[String], app_entities: &[String]) -> Option<Record> {
+fn field_record(ddic: &DataDictionary, f: &FieldSpec, hidden: &[String], app_entities: &[String]) -> Option<Record> {
     match f {
         FieldSpec::Lookup { name, entity, collection, .. } => {
             if *collection {
                 None
             } else if app_entities.iter().any(|a| a == entity) {
-                Some(lookup_intent_field(name, entity))
+                Some(lookup_intent_field(ddic, name, entity))
             } else {
                 Some(
                     Record::new("UI.DataField")
-                        .add(PropertyValue::new("Value").path(format!("{name}_ID"))),
+                        .add(PropertyValue::new("Value").path(ddic.fk_column(entity, name))),
                 )
             }
         }
@@ -1125,6 +1230,7 @@ fn annotations_for_atom_value_list(name: &str, value_list: &AtomValueList) -> Ve
             key_property,
             display_property,
             filters,
+            constant_filters,
             prefer_dialog,
         } => {
             let mut parameters = Collection::new().add_record(
@@ -1148,6 +1254,13 @@ fn annotations_for_atom_value_list(name: &str, value_list: &AtomValueList) -> Ve
                         .add(
                             PropertyValue::new("ValueListProperty").string(&filter.target_property),
                         ),
+                );
+            }
+            for filter in constant_filters {
+                parameters = parameters.add_record(
+                    Record::new("Common.ValueListParameterConstant")
+                        .add(PropertyValue::new("ValueListProperty").string(&filter.target_property))
+                        .add(PropertyValue::new("Constant").string(&filter.value)),
                 );
             }
             value_list_annotations(entity_set, *prefer_dialog, parameters)
@@ -2062,6 +2175,10 @@ fn entity_json(state: &AppState, spec: &EntitySpec, mut value: Value) -> Value {
                 object.remove(*name);
             }
         }
+        // Der Store fuehrt den Schluessel unter `ID`; ein eigener Schluessel steht schon als Atom im Objekt.
+        if spec.primary_key.is_some() {
+            object.remove("ID");
+        }
         let ddic = state.ddic();
         for field in spec.fields() {
             if let FieldSpec::Lookup { name, entity, .. } = field {
@@ -2074,9 +2191,26 @@ fn entity_json(state: &AppState, spec: &EntitySpec, mut value: Value) -> Value {
     value
 }
 
+/// Schreibt den eigenen Primaerschluessel auch nach `ID`, damit der Store ihn kennt.
+/// Ohne eigenen Schluessel passiert nichts.
+fn to_store_body(spec: &EntitySpec, body: &mut Value) {
+    if let (Some(pk), Some(object)) = (spec.primary_key.as_deref(), body.as_object_mut()) {
+        if let Some(value) = object.get(pk).cloned().filter(|v| !v.is_null()) {
+            object.insert("ID".into(), value);
+        }
+    }
+}
+
 fn validate_write(spec: &EntitySpec, body: &Value) -> Result<(), ODataError> {
     if !body.is_object() {
         return Err(ODataError::bad_request("Expected an entity object"));
+    }
+    if let Some(pk) = spec.primary_key.as_deref() {
+        if body.get("ID").is_some() {
+            return Err(ODataError::bad_request(format!(
+                "'ID' ist kein Feld von '{}', Schluessel ist '{pk}'", spec.name()
+            )));
+        }
     }
     if !spec.draft_enabled {
         if let Some(name) = DRAFT_PROPERTIES.iter().find(|name| body.get(**name).is_some()) {
@@ -2186,7 +2320,7 @@ async fn follow_to_one(
     parent: &DataRecord,
     query: &ODataQuery,
 ) -> Result<Cursor, ODataError> {
-    let foreign_key = format!("{name}_ID");
+    let foreign_key = state.ddic().fk_column(target.name(), name);
     let Some(id) = parent.get(&foreign_key).filter(|v| !v.is_null()) else {
         return Ok(Cursor::Empty);
     };
@@ -2230,7 +2364,7 @@ async fn follow_to_many(
     let foreign_key = state
         .ddic()
         .foreign_key_field(spec, field)
-        .map(|f| format!("{f}_ID"))
+        .map(|f| state.ddic().fk_column(spec.name(), &f))
         .ok_or_else(|| {
             ODataError::not_found(format!(
                 "No foreign key for navigation '{}' of '{}'",
@@ -2277,6 +2411,19 @@ fn and_filter(existing: Option<Expr>, additional: Expr) -> Expr {
 }
 
 fn entity_key(spec: &EntitySpec, segment: &PathSegment) -> Result<EntityKey, ODataError> {
+    // Eigener Primaerschluessel: genau ein Wert, Name `pk` oder unbenannt.
+    if let Some(pk) = spec.primary_key.as_deref() {
+        let [key] = segment.keys.as_slice() else {
+            return Err(ODataError::bad_request(format!(
+                "Expected key '{pk}' for '{}'", spec.name()
+            )));
+        };
+        if key.name.as_deref().is_some_and(|n| n != pk) {
+            return Err(ODataError::bad_request(format!("Unknown key for '{}'", spec.name())));
+        }
+        let value = data_store::key::KeyValue::parse(&key.value.to_string_value());
+        return Ok(EntityKey::new(value, true));
+    }
     if segment.keys.len() != spec.key_names().len() {
         return Err(ODataError::bad_request(format!(
             "Expected keys {} for '{}'", spec.key_names().join(", "), spec.name()
@@ -2505,8 +2652,9 @@ async fn post_handler(
             if !spec.draft_enabled {
                 body["IsActiveEntity"] = json!(true);
             }
+            to_store_body(&spec, &mut body);
             match state.store.create_entity(&entity.name, &body).await {
-                Ok(r) => created_response(entity_json(&state, &spec, json!(r)), &path),
+                Ok(r) => created_response(entity_json(&state, &spec, json!(r)), &path, spec.primary_key.as_deref()),
                 Err(e) => ODataError::from_store(e).into_response(),
             }
         },
@@ -2538,7 +2686,7 @@ async fn post_handler(
         }
         segments if segments.len() > 1 => {
             match create_in_navigation(&state, segments, body).await {
-                Ok(r) => created_response(r, &path),
+                Ok((r, pk)) => created_response(r, &path, pk.as_deref()),
                 Err(e) => e.into_response(),
             }
         }
@@ -2546,11 +2694,17 @@ async fn post_handler(
     }
 }
 
-fn created_response(body: Value, path: &str) -> Response {
-    let id = body["ID"].as_str().expect("created entity ID");
-    let key = match body.get("IsActiveEntity").and_then(Value::as_bool) {
-        Some(active) => format!("ID={id},IsActiveEntity={active}"),
-        None => id.to_string(),
+fn created_response(body: Value, path: &str, pk: Option<&str>) -> Response {
+    // Eigener Schluessel: Location als `pk='wert'`, sonst GUID als `ID=...`.
+    let key = match pk {
+        Some(pk) => format!("{pk}='{}'", body[pk].as_str().expect("created entity key")),
+        None => {
+            let id = body["ID"].as_str().expect("created entity ID");
+            match body.get("IsActiveEntity").and_then(Value::as_bool) {
+                Some(active) => format!("ID={id},IsActiveEntity={active}"),
+                None => id.to_string(),
+            }
+        }
     };
     (
         StatusCode::CREATED,
@@ -2580,7 +2734,7 @@ async fn draft_action(
                 .await
                 .map_err(ODataError::from_store)?;
             for (child_set, foreign_key) in owned_children_of(state, set) {
-                for child in children_of(state, &child_set, &foreign_key, key.id).await? {
+                for child in children_of(state, &child_set, &foreign_key, &key.id).await? {
                     if child.is_active_entity() {
                         state
                             .store
@@ -2617,7 +2771,7 @@ async fn create_in_navigation(
     state: &AppState,
     segments: &[PathSegment],
     mut body: Value,
-) -> Result<Value, ODataError> {
+) -> Result<(Value, Option<String>), ODataError> {
     let (parent_segments, navigation) = segments.split_at(segments.len() - 1);
     let navigation = &navigation[0];
     if !navigation.keys.is_empty() {
@@ -2662,7 +2816,7 @@ async fn create_in_navigation(
     validate_write(target, &body)?;
     let foreign_key = ddic
         .foreign_key_field(&spec, &field)
-        .map(|f| format!("{f}{}", spec::ID_SUFFIX))
+        .map(|f| ddic.fk_column(spec.name(), &f))
         .ok_or_else(|| {
             ODataError::not_found(format!(
                 "No foreign key for navigation '{}'",
@@ -2678,7 +2832,7 @@ async fn create_in_navigation(
         .create_entity(&target.setname(), &body)
         .await
         .map_err(ODataError::from_store)?;
-    Ok(entity_json(state, target, json!(created)))
+    Ok((entity_json(state, target, json!(created)), target.primary_key.clone()))
 }
 
 /// Zielset und FK-Feld aller Compositions unterhalb von `set`.
@@ -2692,7 +2846,7 @@ fn owned_children_of(state: &AppState, set: &str) -> Vec<(String, String)> {
             let child = ddic.active_entity(relationship.many())?;
             Some((
                 child.setname(),
-                format!("{}{}", relationship.many_property(), spec::ID_SUFFIX),
+                ddic.fk_column(parent.name(), relationship.many_property()),
             ))
         })
         .collect()
@@ -2702,9 +2856,9 @@ async fn children_of(
     state: &AppState,
     set: &str,
     foreign_key: &str,
-    parent: uuid::Uuid,
+    parent: &data_store::key::KeyValue,
 ) -> Result<Vec<DataRecord>, ODataError> {
-    let query = ODataQuery::new().filter(Expr::equals_guid(parent.to_string(), foreign_key));
+    let query = ODataQuery::new().filter(parent.equals_filter(foreign_key));
     state
         .store
         .get_collection(set, &query)
@@ -2745,6 +2899,14 @@ async fn patch_handler(
         Ok(key) => key,
         Err(e) => return e.into_response(),
     };
+    // Der Schluessel ist unveraenderlich.
+    if let Some(pk) = spec.primary_key.as_deref() {
+        if body.get(pk).is_some_and(|v| v.as_str().map(|s| data_store::key::KeyValue::parse(s)) != Some(ekey.id.clone())) {
+            return ODataError::bad_request(format!("Schluessel '{pk}' ist nicht aenderbar")).into_response();
+        }
+    }
+    let mut body = body;
+    to_store_body(&spec, &mut body);
     match state.store.patch_entity(&key.name, &ekey, &body).await {
         Ok(_) => (StatusCode::NO_CONTENT, [odata_version()]).into_response(),
         Err(e) => ODataError::from_store(e).into_response(),
@@ -2830,7 +2992,7 @@ async fn delete_owned_children(
     parent: &EntityKey,
 ) -> Result<(), ODataError> {
     for (child_set, foreign_key) in owned_children_of(state, set) {
-        for child in children_of(state, &child_set, &foreign_key, parent.id).await? {
+        for child in children_of(state, &child_set, &foreign_key, &parent.id).await? {
             if !parent.is_active_entity && !child.is_active_entity() {
                 // Parent is draft, child is also draft: delete it WITHOUT deleting active sibling
                 state
@@ -2906,7 +3068,7 @@ async fn metadata(State(state): State<AppState>) -> Response {
     let ddic = state.ddic();
     let entity_lst: Vec<EntityType> = ddic
         .active_entities()
-        .map(|x| EntityType::from_entity(x))
+        .map(|x| EntityType::from_entity(&ddic, x))
         .collect();
     let entity_set_lst: Vec<EntitySet> = ddic
         .active_entities()
@@ -2915,7 +3077,7 @@ async fn metadata(State(state): State<AppState>) -> Response {
     let app_entities = app_entity_names(&ddic);
     let annotation_lst: Vec<Annotations> = ddic
         .active_entities()
-        .map(|x| Annotations::from_entity(x, &crate::extension::hidden_fields(&state.extensions, x.name()), &app_entities))
+        .map(|x| Annotations::from_entity(&ddic, x, &crate::extension::hidden_fields(&state.extensions, x.name()), &app_entities))
         .flatten()
         .collect();
     // let _sample_entity = sample::sample_entity();
@@ -2941,6 +3103,9 @@ async fn metadata(State(state): State<AppState>) -> Response {
     }
     for x in ddic.active_entities() {
         annotations.extend(capability_annotations_for_entity(&ddic, x));
+    }
+    for x in ddic.active_entities() {
+        annotations.extend(code_list_annotations(x));
     }
 
     let mut actions = vec![];
@@ -3094,6 +3259,7 @@ fn edmx_template(drafts: bool) -> String {
  <edmx:Reference Uri="https://oasis-tcs.github.io/odata-vocabularies/vocabularies/Org.OData.Capabilities.V1.xml"> <edmx:Include Alias="Capabilities" Namespace="Org.OData.Capabilities.V1"/> </edmx:Reference>
  <edmx:Reference Uri="https://sap.github.io/odata-vocabularies/vocabularies/Common.xml"> <edmx:Include Alias="Common" Namespace="com.sap.vocabularies.Common.v1"/> </edmx:Reference>
  <edmx:Reference Uri="https://sap.github.io/odata-vocabularies/vocabularies/Session.xml"> <edmx:Include Alias="Session" Namespace="com.sap.vocabularies.Session.v1"/> </edmx:Reference>
+<edmx:Reference Uri="https://sap.github.io/odata-vocabularies/vocabularies/CodeList.xml"> <edmx:Include Alias="CodeList" Namespace="com.sap.vocabularies.CodeList.v1"/> </edmx:Reference>
  <edmx:Reference Uri="https://oasis-tcs.github.io/odata-vocabularies/vocabularies/Org.OData.Core.V1.xml"> <edmx:Include Alias="Core" Namespace="Org.OData.Core.V1"/> </edmx:Reference>
  <edmx:Reference Uri="https://sap.github.io/odata-vocabularies/vocabularies/Hierarchy.xml"> <edmx:Include Alias="Hierarchy" Namespace="com.sap.vocabularies.Hierarchy.v1"/> </edmx:Reference>
  <edmx:Reference Uri="https://oasis-tcs.github.io/odata-vocabularies/vocabularies/Org.OData.Measures.V1.xml"> <edmx:Include Alias="Measures" Namespace="Org.OData.Measures.V1"/> </edmx:Reference>
@@ -3147,7 +3313,7 @@ mod tests {
         ddic.activate();
         let entity = ddic.active_entity("Entity").unwrap();
 
-        let entity_type = EntityType::from_entity(entity);
+        let entity_type = EntityType::from_entity(&ddic, entity);
         dbg!(&entity_type);
         assert!(entity_type
             .properties
@@ -3175,12 +3341,12 @@ mod tests {
             .expect("ein Einzel-Lookup im Standard-Dictionary");
         let fk = format!("{name}_ID");
 
-        let linked = Annotations::from_entity(&entity, &[], std::slice::from_ref(&target));
+        let linked = Annotations::from_entity(&DataDictionary::new(), &entity, &[], std::slice::from_ref(&target));
         let xml = format!("{linked:?}");
         assert!(xml.contains("UI.DataFieldWithIntentBasedNavigation"));
         assert!(xml.contains(&target));
 
-        let plain = Annotations::from_entity(&entity, &[], &[]);
+        let plain = Annotations::from_entity(&DataDictionary::new(), &entity, &[], &[]);
         let xml = format!("{plain:?}");
         assert!(!xml.contains("UI.DataFieldWithIntentBasedNavigation"));
         assert!(xml.contains(&fk));
@@ -3229,7 +3395,7 @@ mod tests {
         // "Entity" has to-many lookups _Fields, _Many, _One after activation.
         let entity = ddic.active_entity("Entity").unwrap();
 
-        let annotations = Annotations::from_entity(entity, &[], &[]);
+        let annotations = Annotations::from_entity(&DataDictionary::new(), entity, &[], &[]);
         let main = annotations
             .iter()
             .find(|a| a.target == "Service.Entity")
@@ -3272,7 +3438,7 @@ mod tests {
             .computed()
             .immutable()
             .with_value_list(AtomValueList::entity_ref("PackageSet", "ID", Some("name")));
-        let value_list_annotations = Annotations::from_field("Invoice", &value_list_field);
+        let value_list_annotations = Annotations::from_field(&DataDictionary::new(), "Invoice", &value_list_field);
 
         assert!(value_list_annotations.annotations.iter().any(|annotation| {
             annotation.term == "Common.Label" && annotation.string.as_deref() == Some("Code")
@@ -3303,7 +3469,7 @@ mod tests {
             unit_field: "currency".into(),
             kind: MeasureKind::Currency,
         };
-        let measure_annotations = Annotations::from_field("Invoice", &measure);
+        let measure_annotations = Annotations::from_field(&DataDictionary::new(), "Invoice", &measure);
 
         assert!(measure_annotations.annotations.iter().any(|annotation| {
             annotation.term == "Org.OData.Measures.V1.ISOCurrency"
@@ -3323,11 +3489,11 @@ mod tests {
                 unit_field: "unit".into(),
                 kind,
             };
-            let rec = field_record(&measure, &[], &[]).expect("Measure ist sichtbar");
+            let rec = field_record(&DataDictionary::new(), &measure, &[], &[]).expect("Measure ist sichtbar");
             let json = serde_json::to_string(&rec).unwrap();
             assert!(json.contains("UI.DataField"));
             assert!(json.contains("amount"));
-            assert!(field_record(&measure, &["amount".to_string()], &[]).is_none());
+            assert!(field_record(&DataDictionary::new(), &measure, &["amount".to_string()], &[]).is_none());
         }
     }
 
@@ -3432,6 +3598,7 @@ mod list_view_annotation_tests {
             immutable: false,
             value_list: None,
             unit_scale_field: None,
+            code_list: None,
             link: false,
             multiline: false,
             side_effects: Vec::new(),
@@ -3449,19 +3616,19 @@ mod list_view_annotation_tests {
                 }
             }
         }
-        let fg = serde_json::to_string(&field_group("Main", &e, None, &[], &[])).unwrap();
+        let fg = serde_json::to_string(&field_group(&DataDictionary::new(), "Main", &e, None, &[], &[])).unwrap();
         assert!(fg.contains("UI.DataFieldWithUrl"), "link-Atom wird DataFieldWithUrl");
-        let anns = line_item_annotations(&e, &[]);
+        let anns = line_item_annotations(&DataDictionary::new(), &e, &[]);
         let li = serde_json::to_string(&anns[0]).unwrap();
         assert!(li.contains("UI.DataFieldWithUrl"));
-        assert!(!serde_json::to_string(&field_group("Main", &active_video(vec![]), None, &[], &[])).unwrap().contains("DataFieldWithUrl"));
+        assert!(!serde_json::to_string(&field_group(&DataDictionary::new(), "Main", &active_video(vec![]), None, &[], &[])).unwrap().contains("DataFieldWithUrl"));
     }
 
     #[test]
     fn header_type_names_are_display_texts_not_technical_names() {
         let mut e = active_video(vec![]);
         let header = |e: &spec::EntitySpec| {
-            let anns = Annotations::from_entity(e, &[], &[]);
+            let anns = Annotations::from_entity(&DataDictionary::new(), e, &[], &[]);
             let main = anns.iter().find(|a| a.target == "Service.Video").unwrap();
             serde_json::to_string(main.annotations.iter().find(|a| a.term == "UI.HeaderInfo").unwrap()).unwrap()
         };
@@ -3519,7 +3686,7 @@ mod list_view_annotation_tests {
     fn selection_fields_become_ui_selection_fields() {
         let mut e = active_video(vec![]);
         e.selection_fields = vec!["title".into(), "name".into()];
-        let anns = Annotations::from_entity(&e, &[], &[]);
+        let anns = Annotations::from_entity(&DataDictionary::new(), &e, &[], &[]);
         let main = anns.iter().find(|a| a.target == "Service.Video").unwrap();
         let sel = main
             .annotations
@@ -3538,7 +3705,7 @@ mod list_view_annotation_tests {
         let mut e = active_video(vec![]);
         e.filter_defaults.insert("name".into(), spec::FilterDefault::Text("Demo".into()));
         e.filter_defaults.insert("title".into(), spec::FilterDefault::Flag(true));
-        let anns = Annotations::from_entity(&e, &[], &[]);
+        let anns = Annotations::from_entity(&DataDictionary::new(), &e, &[], &[]);
         let on = |target: &str| {
             anns.iter()
                 .filter(|a| a.target == target)
@@ -3554,7 +3721,7 @@ mod list_view_annotation_tests {
     fn general_facet_with_fields_restricts_the_main_group() {
         let mut e = active_video(vec![]);
         e.facets.push(spec::FacetSpec { facet: "General".into(), view: None, title: None, fields: vec!["name".into()] });
-        let (_, groups) = object_page_sections(&e, &[], &[]);
+        let (_, groups) = object_page_sections(&DataDictionary::new(), &e, &[], &[]);
         let main = serde_json::to_string(&groups[0]).unwrap();
         assert!(main.contains("\"name\""));
         assert!(!main.contains("\"title\""));
@@ -3565,7 +3732,7 @@ mod list_view_annotation_tests {
         let mut e = active_video(vec![]);
         e.facets.push(spec::FacetSpec { facet: "General".into(), view: None, title: None, fields: vec!["name".into()] });
         e.facets.push(spec::FacetSpec { facet: "Default".into(), view: None, title: Some("Weitere".into()), fields: vec![] });
-        let (records, groups) = object_page_sections(&e, &[], &[]);
+        let (records, groups) = object_page_sections(&DataDictionary::new(), &e, &[], &[]);
         let rest = groups.iter().find(|g| g.qualifier.as_deref() == Some("Default")).unwrap();
         let rest = serde_json::to_string(rest).unwrap();
         assert!(rest.contains("\"title\""));
@@ -3578,7 +3745,7 @@ mod list_view_annotation_tests {
     fn custom_facet_gets_its_own_field_group() {
         let mut e = active_video(vec![]);
         e.facets.push(spec::FacetSpec { facet: "Meta".into(), view: None, title: Some("Meta".into()), fields: vec!["title".into()] });
-        let (_, groups) = object_page_sections(&e, &[], &[]);
+        let (_, groups) = object_page_sections(&DataDictionary::new(), &e, &[], &[]);
         let meta = groups.iter().find(|g| g.qualifier.as_deref() == Some("Meta")).unwrap();
         assert!(serde_json::to_string(meta).unwrap().contains("\"title\""));
         // Ohne General-Konfiguration bleibt der Hauptabschnitt mit allen Feldern erhalten.
@@ -3589,7 +3756,7 @@ mod list_view_annotation_tests {
     #[test]
     fn without_views_line_item_shows_name_only() {
         let e = active_video(vec![]);
-        let anns = line_item_annotations(&e, &[]);
+        let anns = line_item_annotations(&DataDictionary::new(), &e, &[]);
         assert_eq!(anns.len(), 1);
         assert_eq!(anns[0].qualifier, None);
         assert_eq!(datafield_paths(&anns[0]), vec!["name"]);
@@ -3600,7 +3767,7 @@ mod list_view_annotation_tests {
         let entity = EntitySpec::new("ListColumn", "core", "List Columns")
             .field(FieldSpec::atom("field", "Field", "Edm.String"))
             .field(FieldSpec::atom("order", "Position", "Edm.Int64"));
-        let annotations = line_item_annotations(&entity, &[]);
+        let annotations = line_item_annotations(&DataDictionary::new(), &entity, &[]);
         assert_eq!(datafield_paths(&annotations[0]), vec!["field"]);
     }
 
@@ -3614,7 +3781,7 @@ mod list_view_annotation_tests {
                 ListColumn::new("title"),
             ],
         )]);
-        let anns = line_item_annotations(&e, &[]);
+        let anns = line_item_annotations(&DataDictionary::new(), &e, &[]);
         let default = find(&anns, "UI.LineItem", None);
         let records = &default.collection.as_ref().unwrap().records;
         assert_eq!(
@@ -3647,7 +3814,7 @@ mod list_view_annotation_tests {
             ListView::new("default", &["name", "agent", "title"]),
             ListView::new("review", &["title"]),
         ]);
-        let anns = line_item_annotations(&e, &[]);
+        let anns = line_item_annotations(&DataDictionary::new(), &e, &[]);
 
         let default = find(&anns, "UI.LineItem", None);
         assert_eq!(datafield_paths(default), vec!["name", "agent/name", "title"]);

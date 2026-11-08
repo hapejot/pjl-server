@@ -44,7 +44,13 @@
             "link": true
           }
         }
-      ]
+      ],
+      "list_views":[
+        { "name":"default",
+          "columns": ["name",
+                      {"field":"industry", "width":"15em"},
+                      {"field":"city", "width":"15em"},
+                      "_Contacts/name"]}]
     },
     {
       "name": "Contact",
@@ -76,6 +82,12 @@
             "max_length": 50
           }
         }
+      ],
+      "list_views": [
+        {"name":"default", "columns":[
+          {"field": "name"},
+          {"field": "account"}
+        ]}
       ]
     },
     {
@@ -129,9 +141,69 @@
         },
         {
           "Atom": {
+            "name": "duration_unit",
+            "label": "Dauereinheit",
+            "edm_type": "Edm.String",
+            "max_length": 3,
+            "value_list": {
+              "EntityRef": {
+                "entity_set": "UnitOfMeasureSet",
+                "key_property": "code",
+                "display_property": "name",
+                "filters": [],
+                "constant_filters": [
+                  {
+                    "target_property": "dimension",
+                    "value": "time"
+                  }
+                ],
+                "prefer_dialog": false
+              }
+            }
+          }
+        },
+        {
+          "Measure": {
+            "name": "duration",
+            "label": "Dauer",
+            "precision": 10,
+            "scale": 0,
+            "unit_field": "duration_unit",
+            "kind": "Unit"
+          }
+        },
+        {
+          "Atom": {
             "name": "close_date",
             "label": "Abschlussdatum",
             "edm_type": "Edm.Date"
+          }
+        },
+        {
+          "Atom": {
+            "name": "unit_code",
+            "label": "Mengeneinheit",
+            "edm_type": "Edm.String",
+            "max_length": 3,
+            "value_list": {
+              "EntityRef": {
+                "entity_set": "UnitOfMeasureSet",
+                "key_property": "code",
+                "display_property": "name",
+                "filters": [],
+                "prefer_dialog": false
+              }
+            }
+          }
+        },
+        {
+          "Measure": {
+            "name": "quantity",
+            "label": "Menge",
+            "precision": 15,
+            "scale": 3,
+            "unit_field": "unit_code",
+            "kind": "Unit"
           }
         },
         {
@@ -155,6 +227,7 @@
       "package": "crm",
       "type_name": "Währung",
       "type_name_plural": "Währungen",
+      "audited": false,
       "fields": [
         {
           "Atom": {
@@ -237,7 +310,125 @@
           "decimal_places": 3,
           "name": "Kuwait-Dinar"
         }
-      ]
+      ],
+      "draft_enabled": false
+    },
+    {
+      "name": "UnitOfMeasure",
+      "package": "crm",
+      "type_name": "Mengeneinheit",
+      "type_name_plural": "Mengeneinheiten",
+      "fields": [
+        {
+          "Atom": {
+            "name": "code",
+            "label": "Code",
+            "edm_type": "Edm.String",
+            "max_length": 3,
+            "unit_scale_field": "decimal_places",
+            "code_list": "UnitsOfMeasure"
+          }
+        },
+        {
+          "Atom": {
+            "name": "name",
+            "label": "Bezeichnung",
+            "edm_type": "Edm.String",
+            "max_length": 50
+          }
+        },
+        {
+          "Atom": {
+            "name": "decimal_places",
+            "label": "Nachkommastellen",
+            "edm_type": "Edm.Byte"
+          }
+        },
+        {
+          "Atom": {
+            "name": "dimension",
+            "label": "Dimension",
+            "edm_type": "Edm.String",
+            "max_length": 20
+          }
+        }
+      ],
+      "seed": [
+        {
+          "code": "PCS",
+          "name": "Stueck",
+          "decimal_places": 0,
+          "dimension": "count"
+        },
+        {
+          "code": "KG",
+          "name": "Kilogramm",
+          "decimal_places": 3,
+          "dimension": "mass"
+        },
+        {
+          "code": "G",
+          "name": "Gramm",
+          "decimal_places": 0,
+          "dimension": "mass"
+        },
+        {
+          "code": "L",
+          "name": "Liter",
+          "decimal_places": 3,
+          "dimension": "volume"
+        },
+        {
+          "code": "M",
+          "name": "Meter",
+          "decimal_places": 2,
+          "dimension": "length"
+        },
+        {
+          "code": "H87",
+          "name": "Stueck (H87)",
+          "decimal_places": 0,
+          "dimension": "count"
+        },
+        {
+          "code": "KWH",
+          "name": "Kilowattstunde",
+          "decimal_places": 2,
+          "dimension": "energy"
+        },
+        {
+          "code": "TO",
+          "name": "Tonne",
+          "decimal_places": 3,
+          "dimension": "mass"
+        },
+        {
+          "code": "H",
+          "name": "Stunde",
+          "decimal_places": 0,
+          "dimension": "time"
+        },
+        {
+          "code": "MIN",
+          "name": "Minute",
+          "decimal_places": 0,
+          "dimension": "time"
+        },
+        {
+          "code": "S",
+          "name": "Sekunde",
+          "decimal_places": 0,
+          "dimension": "time"
+        },
+        {
+          "code": "D",
+          "name": "Tag",
+          "decimal_places": 0,
+          "dimension": "time"
+        }
+      ],
+      "audited": false,
+      "draft_enabled": false
     }
   ],
   "relationships": [

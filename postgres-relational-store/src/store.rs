@@ -28,7 +28,6 @@ use serde_json::{json, Map, Value};
 use tokio_postgres::types::ToSql;
 use tokio_postgres::NoTls;
 use tracing::{debug, trace};
-use uuid::Uuid;
 
 use crate::catalog::PostgresCatalog;
 use crate::sqltrace;
@@ -530,7 +529,7 @@ impl PostgresStore {
                 .map_err(|e| sql_err!(Metadata, pg(&e)))?;
             for row in rows {
                 let id: String = row.get(0);
-                let uuid = Uuid::parse_str(&id).map_err(|e| StoreError::Conflict(e.to_string()))?;
+                let uuid = data_store::key::KeyValue::parse(&id);
                 result.push((
                     child.name.clone(),
                     EntityKey::new(uuid, key.is_active_entity),
@@ -927,9 +926,10 @@ impl PostgresStore {
                     .get(fk)
                     .and_then(|v| v.as_str().map(str::to_string))
                     .ok_or_else(|| StoreError::PropertyNotFound(format!("{set_name}.{fk}")))?;
-                let parent_uuid =
-                    Uuid::parse_str(&parent_id).map_err(|e| StoreError::Conflict(e.to_string()))?;
-                let parent_key = EntityKey::new(parent_uuid, record.is_active_entity());
+                let parent_key = EntityKey::new(
+                    data_store::key::KeyValue::parse(&parent_id),
+                    record.is_active_entity(),
+                );
                 let parent_record = self.load_one(&tx, parent_set, &parent_key).await?;
 
                 match (record.is_active_entity(), parent_record.draft_admin_data()) {
@@ -1052,7 +1052,7 @@ impl DataStore for PostgresStore {
         }
         // Wie beim SQLite-Store: ohne die Draft-Verwaltungsspalte fehlt bei
         // einem $select die Zuordnung zu DraftAdministrativeData.
-        if !sql.select_is_empty() {
+        if set.draft_enabled && !sql.select_is_empty() {
             sql = sql.select(DRAFT_ADMIN_COLUMN);
         }
         if let Some(filter) = &query.filter {
@@ -1250,10 +1250,12 @@ impl DraftDataStore for PostgresStore {
                     .get(fk)
                     .and_then(|v| v.as_str().map(str::to_string))
                     .ok_or_else(|| StoreError::PropertyNotFound(format!("{set_name}.{fk}")))?;
-                let parent_uuid =
-                    Uuid::parse_str(&parent_id).map_err(|e| StoreError::Conflict(e.to_string()))?;
                 if self
-                    .load_one(&tx, parent_set, &EntityKey::new(parent_uuid, false))
+                    .load_one(
+                        &tx,
+                        parent_set,
+                        &EntityKey::new(data_store::key::KeyValue::parse(&parent_id), false),
+                    )
                     .await
                     .is_err()
                 {

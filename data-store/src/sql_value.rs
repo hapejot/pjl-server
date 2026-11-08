@@ -124,15 +124,10 @@ pub fn param_to_json(value: &SqlParam, data_type: &DataType) -> Value {
             .map(Value::Number)
             .unwrap_or(Value::Null),
         SqlParam::Text(text) => match data_type {
-            // Dezimalzahlen liegen als Text vor; als Zahl herausgeben,
-            // damit Vergleiche und Sortierung wie im Dokumentenstore
-            // funktionieren.
-            DataType::Decimal { .. } => text
-                .parse::<f64>()
-                .ok()
-                .and_then(Number::from_f64)
-                .map(Value::Number)
-                .unwrap_or_else(|| Value::String(text.clone())),
+            // Dezimalzahlen liegen exakt als Text vor und gehen als JSON-String
+            // hinaus (OData V4 mit IEEE754Compatible). Eine JSON-Zahl wuerde
+            // UI5 beim Validieren von Einheiten-Measures als falschen Typ melden.
+            DataType::Decimal { .. } => Value::String(text.clone()),
             DataType::Bool => Value::Bool(!text.is_empty() && text != "0" && text != "false"),
             // Leere Zeitstempel (z. B. aus frueheren Schreibvorgaengen) sind null.
             DataType::DateTimeOffset if text.trim().is_empty() => Value::Null,
@@ -155,7 +150,8 @@ mod tests {
         };
         let param = json_to_param(&json!(123.456), &ty, "Amount").unwrap();
         assert_eq!(param, SqlParam::Text("123.456".into()));
-        assert_eq!(param_to_json(&param, &ty), json!(123.456));
+        // Ausgabe als String: exakt, ohne Gleitkomma-Darstellung.
+        assert_eq!(param_to_json(&param, &ty), json!("123.456"));
     }
 
     /// Der Wahrheitswert bleibt bis zur Treibergrenze erhalten. Ob er als 0/1

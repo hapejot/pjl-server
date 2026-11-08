@@ -96,7 +96,7 @@ struct Session {
     touched: Instant,
     baseline: Snapshot,
     working: Arc<DdicStore>,
-    root: Option<(String, Uuid)>,
+    root: Option<(String, data_store::key::KeyValue)>,
 }
 
 pub struct StickySessions {
@@ -194,7 +194,7 @@ impl StickySessions {
                 touched: Instant::now(),
                 baseline: self.original.snapshot(),
                 working: Arc::new(self.original.fork()),
-                root: root.as_ref().map(|(set, key)| (set.clone(), key.id)),
+                root: root.as_ref().map(|(set, key)| (set.clone(), key.id.clone())),
             }
         };
         if let Some((set, key)) = root {

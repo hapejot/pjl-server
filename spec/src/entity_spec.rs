@@ -21,6 +21,16 @@ pub struct ValueListFilter {
     pub target_property: String,
 }
 
+/// Fester Filter auf der Value-Help-Entitaet, unabhaengig vom Datensatz.
+/// Generates a `Common.ValueListParameterConstant` (z. B. `dimension = "time"`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConstantFilter {
+    /// Property on the value list target entity (e.g. "dimension")
+    pub target_property: String,
+    /// Fester Vergleichswert
+    pub value: String,
+}
+
 /// Value help configuration for an Atom field.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AtomValueList {
@@ -44,6 +54,9 @@ pub enum AtomValueList {
         /// Context filters — each generates a `Common.ValueListParameterIn`.
         /// Empty = unfiltered lookup.
         filters: Vec<ValueListFilter>,
+        /// Feste Filter (z. B. nur Einheiten einer Dimension). Leer = keine Einschraenkung.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        constant_filters: Vec<ConstantFilter>,
         /// `false` = dropdown, `true` = search dialog
         prefer_dialog: bool,
     },
@@ -61,6 +74,7 @@ impl AtomValueList {
             key_property: key_property.into(),
             display_property: display_property.map(Into::into),
             filters: vec![],
+            constant_filters: vec![],
             prefer_dialog: false,
         }
     }
@@ -83,6 +97,7 @@ impl AtomValueList {
                 local_property: shared_fk.into(),
                 target_property: shared_fk.into(),
             }],
+            constant_filters: vec![],
             prefer_dialog: false,
         }
     }
@@ -239,6 +254,10 @@ pub enum FieldSpec {
         /// (`Common.UnitSpecificScale`). Nur fuer den Code-Schluessel einer Stammdaten-Entity.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         unit_scale_field: Option<String>,
+        /// Code-Liste fuer Einheiten/Waehrungen (`UnitsOfMeasure` oder `CurrencyCodes`).
+        /// Die Runtime laedt darueber die Nachkommastellen (`CodeList.v1`-Container-Annotation).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code_list: Option<String>,
         /// Wert ist eine URL: wird als anklickbarer Link dargestellt (`UI.DataFieldWithUrl`).
         #[serde(default, skip_serializing_if = "is_false")]
         link: bool,
@@ -303,6 +322,7 @@ impl FieldSpec {
             immutable: false,
             value_list: None,
             unit_scale_field: None,
+            code_list: None,
             link: false,
             multiline: false,
             side_effects: Vec::new(),
@@ -323,6 +343,7 @@ impl FieldSpec {
             immutable: false,
             value_list: None,
             unit_scale_field: None,
+            code_list: None,
             link: false,
             multiline: false,
             side_effects: Vec::new(),
@@ -351,6 +372,7 @@ impl FieldSpec {
             immutable: false,
             value_list: None,
             unit_scale_field: None,
+            code_list: None,
             link: false,
             multiline: false,
             side_effects: Vec::new(),
@@ -499,6 +521,12 @@ pub struct EntitySpec {
     /// Anzeige-Einstellungen der Entitaet (`ui`-Block in `ddic.json`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ui: Option<EntityUi>,
+
+    /// Einzelnes Feld als Primaerschluessel (Name eines Atoms). Fehlt es, gilt `ID` (Edm.Guid).
+    /// Typ und Laenge kommen aus dem Atom. Nur ohne Drafts zulaessig, sonst wuerde
+    /// `IsActiveEntity` Teil des Schluessels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_key: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -705,6 +733,30 @@ impl EntitySpec {
             facets: vec![],
             audited: true,
             ui: None,
+            primary_key: None,
+        }
+    }
+
+    /// Macht ein Atom-Feld zum Primaerschluessel (siehe `EntitySpec::primary_key`).
+    pub fn with_primary_key(mut self, field: impl Into<String>) -> Self {
+        self.primary_key = Some(field.into());
+        self
+    }
+
+    /// Name des Primaerschluessel-Feldes; ohne Angabe `ID`.
+    pub fn primary_key_name(&self) -> &str {
+        self.primary_key.as_deref().unwrap_or("ID")
+    }
+
+    /// EDM-Typ des Primaerschluessels. Ohne eigenes Feld `Edm.Guid`.
+    pub fn primary_key_type(&self) -> &str {
+        match &self.primary_key {
+            None => "Edm.Guid",
+            Some(name) => self
+                .fields()
+                .find(|f| f.name() == name)
+                .map(|f| f.edm_type())
+                .unwrap_or("Edm.Guid"),
         }
     }
 
@@ -717,6 +769,15 @@ impl EntitySpec {
     pub fn without_drafts(mut self) -> Self {
         self.draft_enabled = false;
         self
+    }
+
+    /// Schluesselfelder fuer OData und Pfadsegmente: eigener Primaerschluessel oder
+    /// `ID` (+ `IsActiveEntity` bei Drafts).
+    pub fn key_fields(&self) -> Vec<&str> {
+        match &self.primary_key {
+            Some(pk) => vec![pk.as_str()],
+            None => self.key_names().to_vec(),
+        }
     }
 
     pub fn key_names(&self) -> &[&str] {

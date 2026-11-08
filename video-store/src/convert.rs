@@ -29,7 +29,7 @@ impl ActionHandler for ConvertHandler {
     async fn invoke(&self, state: &AppState, key: &EntityKey) -> Result<Value, ActionError> {
         // Jobs haengen am aktiven Video. Ein Entwurf ohne Aktivierung ist dort
         // noch nicht vorhanden, daher immer die aktive Version lesen.
-        let active = EntityKey::new(key.id, true);
+        let active = EntityKey::new(key.id.clone(), true);
         let video = state
             .store
             .read_entity(VIDEO_SET, &active, &ODataQuery::default())

@@ -34,6 +34,14 @@ pub struct ValueList {
     pub name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<ValueEntry>,
+    /// `true`: der Code ist der Primaerschluessel der Listen-Entitaet (kein GUID, keine
+    /// Drafts). Verweise auf die Liste tragen dann den Code selbst.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub code_key: bool,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

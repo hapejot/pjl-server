@@ -1,10 +1,16 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
 use crate::value_list::{self, ValueList, CODE_FIELD, LABEL_FIELD, SORT_FIELD};
 use crate::{AtomValueList, EntitySpec, FieldSpec, Relationship, app::App, package::Package};
 use tracing::*;
+
+/// Suffix der Fremdschluessel-Spalte auf Ziele mit eigenem Primaerschluessel.
+pub const CODE_FK_SUFFIX: &str = "_code";
+
+/// EDM-Typen, die als Primaerschluessel eines Atoms zulaessig sind.
+pub const PRIMARY_KEY_TYPES: [&str; 4] = ["Edm.String", "Edm.Guid", "Edm.Int32", "Edm.Int64"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataDictionary {
@@ -419,6 +425,42 @@ impl DataDictionary {
         &self.value_lists
     }
 
+    /// Primaerschluessel pruefen: genau ein Atom des Entitaet, nicht berechnet, ohne
+    /// Wertehilfe, mit einem Typ aus [`PRIMARY_KEY_TYPES`]. Ohne Drafts, da sonst
+    /// `IsActiveEntity` in den Schluessel gehoeren wuerde.
+    pub fn validate_primary_keys(&self) -> Result<(), String> {
+        for entity in &self.entities {
+            let Some(key) = entity.primary_key.as_deref() else {
+                continue;
+            };
+            let ctx = format!("{}.primary_key '{}'", entity.name(), key);
+            if entity.draft_enabled {
+                return Err(format!("{ctx}: eigener Schluessel nur ohne Drafts"));
+            }
+            let field = entity
+                .fields()
+                .find(|f| f.name() == key)
+                .ok_or_else(|| format!("{ctx}: Feld existiert nicht"))?;
+            match field {
+                FieldSpec::Atom { computed, value_list, edm_type, .. } => {
+                    if *computed {
+                        return Err(format!("{ctx}: berechnetes Feld kann kein Schluessel sein"));
+                    }
+                    if value_list.is_some() {
+                        return Err(format!("{ctx}: Schluessel darf keine Wertehilfe haben"));
+                    }
+                    if !PRIMARY_KEY_TYPES.contains(&edm_type.as_str()) {
+                        return Err(format!(
+                            "{ctx}: Typ '{edm_type}' nicht als Schluessel zulaessig"
+                        ));
+                    }
+                }
+                _ => return Err(format!("{ctx}: Schluessel muss ein Atom sein")),
+            }
+        }
+        Ok(())
+    }
+
     /// Festwertlisten pruefen (siehe [`value_list::validate`]).
     pub fn validate_value_lists(&self) -> Result<(), String> {
         value_list::validate(&self.value_lists)
@@ -430,13 +472,43 @@ impl DataDictionary {
         self.value_lists
             .iter()
             .map(|list| {
-                EntitySpec::new(&list.name, "core", &list.name)
+                let code = if list.code_key {
+                    FieldSpec::string(CODE_FIELD, "Wert", 50)
+                } else {
+                    FieldSpec::atom(CODE_FIELD, "Wert", "Edm.String")
+                };
+                let entity = EntitySpec::new(&list.name, "core", &list.name)
                     .field(FieldSpec::atom(LABEL_FIELD, "Bezeichnung", "Edm.String"))
-                    .field(FieldSpec::atom(CODE_FIELD, "Wert", "Edm.String"))
+                    .field(code)
                     .field(FieldSpec::atom(SORT_FIELD, "Sortierung", "Edm.Int64"))
-                    .without_audit()
+                    .without_audit();
+                if list.code_key {
+                    entity.without_drafts().with_primary_key(CODE_FIELD)
+                } else {
+                    entity
+                }
             })
             .collect()
+    }
+
+    /// Name der Fremdschluessel-Spalte fuer eine einwertige Navigation `field` auf
+    /// `target`. Hat das Ziel einen eigenen Primaerschluessel, heisst sie `{field}_code`
+    /// (der Wert ist der Schluessel); sonst `{field}_ID` (GUID).
+    ///
+    /// Der Name darf nicht dem Feld selbst entsprechen: OData verlangt, dass Navigationen
+    /// und Properties eines Typs verschiedene Namen haben.
+    pub fn fk_column(&self, target: &str, field: &str) -> String {
+        let own_key = self
+            .resolve_entity_any(target)
+            .is_some_and(|e| e.primary_key.is_some());
+        if own_key { format!("{field}{CODE_FK_SUFFIX}") } else { format!("{field}_ID") }
+    }
+
+    /// Entitaet nach Name, aktiv falls vorhanden, sonst im Entwurfsstand.
+    fn resolve_entity_any(&self, name: &str) -> Option<&EntitySpec> {
+        self.active
+            .get(name)
+            .or_else(|| self.entities.iter().find(|e| e.name() == name))
     }
 
     /// Wandelt Atome mit Festwertliste im Speicher in Lookups auf die Listen-Entitaet
@@ -638,6 +710,12 @@ impl DataDictionary {
     }
 
     /// Register a package unless one with the same name already exists.
+    /// Festwertliste registrieren (ersetzt eine Liste gleicher ID).
+    pub fn add_value_list(&mut self, list: ValueList) {
+        self.value_lists.retain(|l| !l.id.eq_ignore_ascii_case(&list.id));
+        self.value_lists.push(list);
+    }
+
     pub fn add_package(&mut self, package: Package) -> bool {
         if self.packages.iter().any(|p| p.name() == package.name()) {
             return false;
@@ -813,13 +891,15 @@ impl DataDictionary {
     /// Atom oder eine einwertige Navigation, deren Ziel ein Feld `name` hat.
     /// Sammelnavigationen sind als Spalte nicht zulaessig.
     pub fn validate_list_views(&self) -> Result<(), String> {
+        info!("validiere ListViews");
         let mut active = self.clone();
         active.activate();
 
         for entity in &self.entities {
-            let mut seen_names: Vec<&str> = Vec::new();
+            let mut seen_names: HashSet<&str> = HashSet::new();
             for view in entity.list_views() {
                 let ctx = format!("{}.list_views['{}']", entity.name(), view.name);
+              info!("validiere ListView {}", ctx);
                 if view.name.trim().is_empty()
                     || view.name.contains('#')
                     || view.name.chars().any(char::is_whitespace)
@@ -829,18 +909,18 @@ impl DataDictionary {
                 if seen_names.contains(&view.name.as_str()) {
                     return Err(format!("{ctx}: Ansichtsname doppelt"));
                 }
-                seen_names.push(&view.name);
+                seen_names.insert(&view.name);
                 if view.columns.is_empty() {
                     return Err(format!("{ctx}: keine Spalten"));
                 }
 
-                let mut seen_cols: Vec<&str> = Vec::new();
+                let mut seen_cols: HashSet<&str> = HashSet::new();
                 for column in &view.columns {
                     let col = column.field.as_str();
                     if seen_cols.contains(&col) {
                         return Err(format!("{ctx}: Spalte '{col}' doppelt"));
                     }
-                    seen_cols.push(col);
+                    seen_cols.insert(col);
                     check_list_column(&active, entity.name(), col)
                         .map_err(|e| format!("{ctx}: {e}"))?;
                     if let Some(width) = &column.width {
@@ -1039,6 +1119,7 @@ mod list_view_tests {
             immutable: false,
             value_list: None,
             unit_scale_field: None,
+            code_list: None,
             link: false,
             multiline: false,
             side_effects: Vec::new(),
@@ -1155,6 +1236,7 @@ mod value_list_tests {
                 ValueEntry { code: "open".into(), label: "Offen".into(), sort: 1 },
                 ValueEntry { code: "done".into(), label: "Erledigt".into(), sort: 2 },
             ],
+            code_key: false,
         }];
         dd.entities.push(
             EntitySpec::new("Project", "core", "Projects").field(
@@ -1211,5 +1293,123 @@ mod value_list_tests {
         assert!(is_valid_entity_name("ProjectStatus"));
         assert!(!is_valid_entity_name("Project Status"));
         assert!(!is_valid_entity_name("1Status"));
+    }
+}
+
+#[cfg(test)]
+mod primary_key_tests {
+    use super::*;
+
+    fn dd_with(entity: EntitySpec) -> DataDictionary {
+        let mut dd = DataDictionary::new();
+        dd.entities.push(entity);
+        dd
+    }
+
+    fn code_entity() -> EntitySpec {
+        EntitySpec::new("Code", "core", "Codes")
+            .without_drafts()
+            .without_audit()
+            .field(FieldSpec::string("code", "Code", 10))
+            .field(FieldSpec::atom("name", "Bezeichnung", "Edm.String"))
+            .with_primary_key("code")
+    }
+
+    #[test]
+    fn valid_string_key_is_accepted() {
+        let dd = dd_with(code_entity());
+        assert!(dd.validate_primary_keys().is_ok());
+        let e = code_entity();
+        assert_eq!(e.primary_key_name(), "code");
+        assert_eq!(e.primary_key_type(), "Edm.String");
+    }
+
+    #[test]
+    fn default_key_is_id_guid() {
+        let e = EntitySpec::new("X", "core", "Xs");
+        assert_eq!(e.primary_key_name(), "ID");
+        assert_eq!(e.primary_key_type(), "Edm.Guid");
+    }
+
+    #[test]
+    fn key_with_drafts_is_rejected() {
+        let dd = dd_with(code_entity().field(FieldSpec::atom("x", "X", "Edm.String")));
+        let mut dd = dd;
+        dd.entities.last_mut().unwrap().draft_enabled = true;
+        assert!(dd.validate_primary_keys().unwrap_err().contains("ohne Drafts"));
+    }
+
+    #[test]
+    fn missing_or_wrong_field_is_rejected() {
+        let dd = dd_with(code_entity().with_primary_key("nope"));
+        assert!(dd.validate_primary_keys().unwrap_err().contains("existiert nicht"));
+
+        let dd = dd_with(code_entity().with_primary_key("name").field(FieldSpec::int("n", "N")));
+        assert!(dd.validate_primary_keys().is_ok());
+    }
+
+    #[test]
+    fn computed_or_value_list_key_is_rejected() {
+        let e = EntitySpec::new("Code", "core", "Codes")
+            .without_drafts()
+            .field(FieldSpec::string("code", "Code", 10).computed())
+            .with_primary_key("code");
+        assert!(dd_with(e).validate_primary_keys().unwrap_err().contains("berechnet"));
+    }
+
+    #[test]
+    fn unsupported_type_is_rejected() {
+        let e = EntitySpec::new("Code", "core", "Codes")
+            .without_drafts()
+            .field(FieldSpec::atom("d", "D", "Edm.DateTimeOffset"))
+            .with_primary_key("d");
+        assert!(dd_with(e).validate_primary_keys().unwrap_err().contains("nicht als Schluessel"));
+    }
+}
+
+#[cfg(test)]
+mod code_key_tests {
+    use super::*;
+
+    const LIST: &str = "79714635-4b3e-51a6-be78-dc009beb5f3c";
+
+    fn dictionary(code_key: bool) -> DataDictionary {
+        let mut dd = DataDictionary::empty();
+        dd.value_lists = vec![ValueList {
+            id: LIST.into(),
+            name: "ProjectStatus".into(),
+            values: vec![crate::value_list::ValueEntry { code: "open".into(), label: "Offen".into(), sort: 1 }],
+            code_key,
+        }];
+        dd.entities.push(
+            EntitySpec::new("Project", "core", "Projects").field(
+                FieldSpec::atom("status", "Status", "Edm.String").with_value_list(
+                    AtomValueList::FieldValueList { list_id: LIST.into(), prefer_dialog: false },
+                ),
+            ),
+        );
+        dd.apply_value_list_lookups().unwrap();
+        dd.activate();
+        dd
+    }
+
+    #[test]
+    fn code_key_list_is_keyed_by_code_without_drafts() {
+        let dd = dictionary(true);
+        let list = dd.active_entity("ProjectStatus").expect("list entity");
+        assert_eq!(list.primary_key_name(), "value");
+        assert_eq!(list.primary_key_type(), "Edm.String");
+        assert_eq!(list.key_fields(), vec!["value"]);
+        assert!(!list.draft_enabled);
+        assert_eq!(dd.fk_column("ProjectStatus", "status"), "status_code");
+        assert!(dd.validate_primary_keys().is_ok());
+    }
+
+    #[test]
+    fn guid_list_keeps_id_and_fk_suffix() {
+        let dd = dictionary(false);
+        let list = dd.active_entity("ProjectStatus").expect("list entity");
+        assert_eq!(list.key_fields(), vec!["ID", "IsActiveEntity"]);
+        assert_eq!(dd.fk_column("ProjectStatus", "status"), "status_ID");
     }
 }

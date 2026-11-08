@@ -223,7 +223,7 @@ impl SqliteStore {
         let Some(raw) = value.as_str() else {
             return Ok(None);
         };
-        let refid = Uuid::parse_str(raw).map_err(|e| StoreError::Conflict(e.to_string()))?;
+        let refid = data_store::key::KeyValue::parse(raw);
         Ok(Some((
             link.to_set.clone(),
             EntityKey::new(refid, rec.is_active_entity()),
@@ -249,7 +249,7 @@ impl SqliteStore {
             result.extend(
                 candidates
                     .iter()
-                    .filter(|rec| references(rec, &link.to_field, key.id))
+                    .filter(|rec| references(rec, &link.to_field, &key.id))
                     .map(|rec| (link.to_set.clone(), EntityKey::from(rec))),
             );
         }
@@ -282,7 +282,7 @@ impl SqliteStore {
         link: &NavLink,
     ) -> Result<(), StoreError> {
         if !link.single {
-            let q = ODataQuery::new().filter(Expr::equals_guid(row.id(), &link.to_field));
+            let q = ODataQuery::new().filter(row.id().equals_filter(&link.to_field));
             row[field] = json!(self
                 .get_collection(&link.to_set, &q)
                 .await?
@@ -355,11 +355,10 @@ impl SqliteStore {
     }
 }
 
-fn references(rec: &DataRecord, field: &str, parent: Uuid) -> bool {
+fn references(rec: &DataRecord, field: &str, parent: &data_store::key::KeyValue) -> bool {
     rec.get(field)
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .and_then(|s| Uuid::parse_str(&s).ok())
-        == Some(parent)
+        .and_then(|v| v.as_str().map(data_store::key::KeyValue::parse))
+        .is_some_and(|s| &s == parent)
 }
 
 fn parse_record(payload: &str) -> Result<DataRecord, StoreError> {

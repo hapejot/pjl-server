@@ -291,7 +291,7 @@ pub async fn filter_by_equality<H: Harness>() {
     ));
     let result = h.store().await.get_collection(ORDERS, &query).await.unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].id(), uuid(2));
+    assert_eq!(result[0].id(), uuid(2).into());
 }
 
 pub async fn filter_by_comparison<H: Harness>() {
@@ -304,7 +304,7 @@ pub async fn filter_by_comparison<H: Harness>() {
     ));
     let result = h.store().await.get_collection(ORDERS, &query).await.unwrap();
     assert_eq!(result.len(), 1, "nur Amount 480 ist groesser als 200");
-    assert_eq!(result[0].id(), uuid(2));
+    assert_eq!(result[0].id(), uuid(2).into());
 }
 
 pub async fn filter_combines_with_and<H: Harness>() {
@@ -325,7 +325,7 @@ pub async fn filter_combines_with_and<H: Harness>() {
     ));
     let result = h.store().await.get_collection(ORDERS, &query).await.unwrap();
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].id(), uuid(1));
+    assert_eq!(result[0].id(), uuid(1).into());
 }
 
 pub async fn skip_and_top_paginate<H: Harness>() {
@@ -358,7 +358,7 @@ pub async fn drafts_shadow_active_records_in_collections<H: Harness>() {
 
     let all = h.store().await.get_collection(ORDERS, &q()).await.unwrap();
     assert_eq!(all.len(), 2, "der Draft verdeckt den aktiven Satz");
-    let shadowed = all.iter().find(|r| r.id() == uuid(1)).expect("order 1");
+    let shadowed = all.iter().find(|r| r.id() == uuid(1).into()).expect("order 1");
     assert!(!shadowed.is_active_entity());
     assert_eq!(shadowed.get("Status"), Some(json!("InProgress")));
 }
@@ -539,7 +539,7 @@ pub async fn read_sibling_entity_crosses_activation_state<H: Harness>() {
         .read_sibling_entity(ORDERS, &draft(1)).await
         .expect("sibling");
     assert!(sibling.is_active_entity());
-    assert_eq!(sibling.id(), uuid(1));
+    assert_eq!(sibling.id(), uuid(1).into());
 }
 
 // ---------------------------------------------------------------------------

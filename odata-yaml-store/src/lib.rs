@@ -175,7 +175,7 @@ mod tests {
         let (dir, mut store) = make_store();
         setup_data(&mut store).await.unwrap();
         let key = &EntityKey {
-            id: to_uuid(2),
+            id: to_uuid(2).into(),
             is_active_entity: true,
         };
         store.draft_edit(ORDERS, key).await?;
@@ -205,7 +205,7 @@ mod tests {
         // versuche einen Item alleine zu editieren. Sollte nicht gehen
         //
         let item_key = EntityKey {
-            id: to_uuid(13),
+            id: to_uuid(13).into(),
             is_active_entity: true,
         };
         let r = store.draft_edit(ORDER_ITEMS, &item_key).await;
@@ -219,7 +219,7 @@ mod tests {
         let (dir, mut store) = make_store();
         setup_data(&mut store).await.unwrap();
         let key = &EntityKey {
-            id: to_uuid(2),
+            id: to_uuid(2).into(),
             is_active_entity: true,
         };
         store.delete_entity(ORDERS, key).await?;
@@ -234,7 +234,7 @@ mod tests {
         let (dir, mut store) = make_store();
         setup_data(&mut store).await.unwrap();
         let key = &EntityKey {
-            id: to_uuid(2),
+            id: to_uuid(2).into(),
             is_active_entity: true,
         };
         store.draft_edit(ORDERS, key).await?;
@@ -257,7 +257,7 @@ mod tests {
         let (dir, mut store) = make_store();
         setup_data(&mut store).await.unwrap();
         let key = &EntityKey {
-            id: to_uuid(12),
+            id: to_uuid(12).into(),
             is_active_entity: true,
         };
         store.delete_entity(ORDER_ITEMS, key).await?;

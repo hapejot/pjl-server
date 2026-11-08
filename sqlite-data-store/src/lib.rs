@@ -423,7 +423,7 @@ mod tests {
 
         let sibling = store.read_sibling_entity(ORDERS, &key.sibling()).await?;
         assert!(sibling.is_active_entity());
-        assert_eq!(sibling.id(), to_uuid(1));
+        assert_eq!(sibling.id(), to_uuid(1).into());
         Ok(())
     }
 

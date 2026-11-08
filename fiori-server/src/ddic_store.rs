@@ -435,9 +435,10 @@ fn project(base: &Value) -> Sets {
         let (Some(id), Some(name)) = (text(l, "id"), text(l, "name")) else {
             continue;
         };
+        let code_key = l.get("code_key").and_then(Value::as_bool).unwrap_or(false);
         push_record(&mut sets, "ValueListSet",
             id.to_string(),
-            json!({ "name": name }),
+            json!({ "name": name, "code_key": code_key }),
         );
         for v in items(l, "values") {
             let Some(code) = text(v, "code") else {
@@ -1183,6 +1184,9 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
         let mut obj = Map::new();
         obj.insert("id".into(), json!(id));
         obj.insert("name".into(), json!(name));
+        if r.get("code_key") == Some(&json!(true)) {
+            obj.insert("code_key".into(), json!(true));
+        }
         if !values.is_empty() {
             obj.insert("values".into(), Value::Array(values));
         }
@@ -1221,6 +1225,9 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
         dictionary
             .validate_list_views()
             .map_err(|e| StoreError::Conflict(format!("ungueltige Listenansichten: {e}")))?;
+        dictionary
+            .validate_primary_keys()
+            .map_err(|e| StoreError::Conflict(format!("ungueltiger Primaerschluessel: {e}")))?;
     Ok(out)
 }
 

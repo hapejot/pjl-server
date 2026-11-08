@@ -108,6 +108,9 @@ def import_set(client, model, set_name, records, source_index, report, dry_run):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--user", default="export@local", help="Benutzer fuer den Auth-Header")
+    parser.add_argument("--user-header", default="X-Forwarded-User",
+                        help="Header, in dem der Benutzer uebergeben wird (Server: AUTH_USER_HEADER)")
     parser.add_argument("--base-url", required=True, help="Service-Wurzel des Ziels")
     parser.add_argument("--from", dest="source", required=True, help="Verzeichnis aus odata-export.py")
     parser.add_argument("--dry-run", action="store_true", help="nur pruefen und uebersetzen, nichts schreiben")
@@ -118,7 +121,7 @@ def main():
         parser.error(f"unbekanntes Exportformat: {manifest.get('format')}")
     sources = {s["set"]: s for s in manifest["sets"]}
 
-    client = Client(args.base_url)
+    client = Client(args.base_url, user=args.user, user_header=args.user_header)
     model = Model(client.metadata_xml())
 
     sets = [s for s in manifest["order"] if s in model.sets]

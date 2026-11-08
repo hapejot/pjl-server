@@ -13,7 +13,8 @@
 # Uebersetzung und schreibt nichts. Erst --apply schreibt in die Runtime des Containers.
 #
 # Verwendung:
-#   scripts/import-into-container.sh CONTAINER --from DIR [--apply] [--base-url URL] [--rebuild]
+#   scripts/import-into-container.sh CONTAINER --from DIR [--apply] [--base-url URL]
+#                                    [--user NAME] [--user-header HEADER] [--rebuild]
 
 set -euo pipefail
 
@@ -29,6 +30,8 @@ shift
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BASE_URL="http://localhost:8080/Service"
+USER_NAME="export@local"
+USER_HEADER="X-Forwarded-User"
 SOURCE=""
 APPLY=0
 REBUILD=0
@@ -38,6 +41,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --from) SOURCE="$2"; shift 2 ;;
     --base-url) BASE_URL="$2"; shift 2 ;;
+    --user) USER_NAME="$2"; shift 2 ;;
+    --user-header) USER_HEADER="$2"; shift 2 ;;
     --apply) APPLY=1; shift ;;
     --rebuild) REBUILD=1; shift ;;
     -h|--help) usage 0 ;;
@@ -90,6 +95,7 @@ docker cp "$BIN" "$CONTAINER:$REMOTE_BIN"
 docker cp "$SOURCE" "$CONTAINER:$REMOTE_DATA"
 
 ARGS=(--base-url "$BASE_URL" --from "$REMOTE_DATA")
+ARGS+=(--user "$USER_NAME" --user-header "$USER_HEADER")
 if [[ $APPLY -eq 0 ]]; then
   ARGS+=(--dry-run)
   echo "Probelauf gegen $BASE_URL (ohne --apply wird nichts geschrieben)"

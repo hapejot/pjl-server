@@ -39,12 +39,15 @@ def fetch_all(client, set_name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--user", default="export@local", help="Benutzer fuer den Auth-Header")
+    parser.add_argument("--user-header", default="X-Forwarded-User",
+                        help="Header, in dem der Benutzer uebergeben wird (Server: AUTH_USER_HEADER)")
     parser.add_argument("--base-url", required=True, help="Service-Wurzel, z. B. http://host:port/Service")
     parser.add_argument("--out", required=True, help="Zielverzeichnis (wird angelegt)")
     parser.add_argument("--sets", help="Komma-getrennte Setnamen (Standard: alle)")
     args = parser.parse_args()
 
-    client = Client(args.base_url)
+    client = Client(args.base_url, user=args.user, user_header=args.user_header)
     xml_text = client.metadata_xml()
     model = Model(xml_text)
 

@@ -11,7 +11,8 @@
 #      werden entfernt.
 #
 # Verwendung:
-#   scripts/export-from-container.sh CONTAINER [--out DIR] [--base-url URL] [--sets A,B] [--rebuild]
+#   scripts/export-from-container.sh CONTAINER [--out DIR] [--base-url URL] [--sets A,B]
+#                                    [--user NAME] [--user-header HEADER] [--rebuild]
 #
 # Beispiel:
 #   scripts/export-from-container.sh poc-crm-runtime-1 --out ./export-poc-crm
@@ -30,6 +31,8 @@ shift
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BASE_URL="http://localhost:8080/Service"
+USER_NAME="export@local"
+USER_HEADER="X-Forwarded-User"
 OUT=""
 SETS=""
 REBUILD=0
@@ -39,6 +42,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --out) OUT="$2"; shift 2 ;;
     --base-url) BASE_URL="$2"; shift 2 ;;
+    --user) USER_NAME="$2"; shift 2 ;;
+    --user-header) USER_HEADER="$2"; shift 2 ;;
     --sets) SETS="$2"; shift 2 ;;
     --rebuild) REBUILD=1; shift ;;
     -h|--help) usage 0 ;;
@@ -87,6 +92,7 @@ echo "Kopiere Export-Programm nach $CONTAINER:$REMOTE_BIN"
 docker cp "$BIN" "$CONTAINER:$REMOTE_BIN"
 
 ARGS=(--base-url "$BASE_URL" --out "$REMOTE_OUT")
+ARGS+=(--user "$USER_NAME" --user-header "$USER_HEADER")
 [[ -n "$SETS" ]] && ARGS+=(--sets "$SETS")
 echo "Export im Container gegen $BASE_URL ..."
 docker exec "$CONTAINER" "$REMOTE_BIN" "${ARGS[@]}"

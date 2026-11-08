@@ -26,9 +26,17 @@ class ODataError(RuntimeError):
 
 
 class Client:
-    def __init__(self, base_url, timeout=60):
+    def __init__(self, base_url, timeout=60, user=None, user_header="X-Forwarded-User"):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.user = user
+        self.user_header = user_header
+
+    def _headers(self):
+        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        if self.user:
+            headers[self.user_header] = self.user
+        return headers
 
     def request(self, method, path, body=None, accept_status=()):
         """Liefert (status, json-oder-None). Fehlerstatus ausser `accept_status` werfen."""
@@ -37,7 +45,7 @@ class Client:
             self.base_url + path,
             data=data,
             method=method,
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            headers=self._headers(),
         )
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
@@ -51,7 +59,10 @@ class Client:
             raise ODataError(method, path, err.code, detail[:500]) from None
 
     def metadata_xml(self):
-        req = urllib.request.Request(self.base_url + "/$metadata", headers={"Accept": "application/xml"})
+        headers = {"Accept": "application/xml"}
+        if self.user:
+            headers[self.user_header] = self.user
+        req = urllib.request.Request(self.base_url + "/$metadata", headers=headers)
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
             return resp.read().decode("utf-8")
 

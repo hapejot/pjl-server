@@ -14,6 +14,8 @@ pub struct Client {
     host_port: String,
     /// Pfad der Service-Wurzel ohne abschliessenden Schraegstrich, z. B. `/Service`.
     prefix: String,
+    /// Zusaetzlicher Header, mit dem der Benutzer an den Service uebergeben wird.
+    user: Option<(String, String)>,
 }
 
 impl Client {
@@ -29,7 +31,14 @@ impl Client {
         Ok(Self {
             host_port: host_port.to_string(),
             prefix: path.trim_end_matches('/').to_string(),
+            user: None,
         })
+    }
+
+    /// Setzt bei jeder Anfrage den Header `header: user` (z. B. `X-Forwarded-User: export@local`).
+    pub fn with_user(mut self, header: &str, user: &str) -> Self {
+        self.user = Some((header.to_string(), user.to_string()));
+        self
     }
 
     /// GET auf `prefix + path`. Liefert Statuscode und Rumpf.
@@ -51,6 +60,9 @@ impl Client {
             "{method} {target} HTTP/1.1\r\nHost: {}\r\nAccept: application/json\r\nConnection: close\r\n",
             self.host_port
         );
+        if let Some((header, user)) = &self.user {
+            request.push_str(&format!("{header}: {user}\r\n"));
+        }
         if body.is_some() {
             request.push_str(&format!(
                 "Content-Type: application/json\r\nContent-Length: {}\r\n",

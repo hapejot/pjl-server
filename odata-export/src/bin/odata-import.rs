@@ -37,6 +37,12 @@ struct Args {
     /// Nur pruefen und uebersetzen, nichts schreiben
     #[arg(long)]
     dry_run: bool,
+    /// Benutzer, unter dem der Import laeuft (Header siehe --user-header)
+    #[arg(long, default_value = "export@local")]
+    user: String,
+    /// Header, in dem der Auth-Proxy den Benutzer erwartet (Server: AUTH_USER_HEADER)
+    #[arg(long, default_value = "X-Forwarded-User")]
+    user_header: String,
 }
 
 #[derive(Default)]
@@ -82,7 +88,7 @@ fn run() -> Result<()> {
     }
     let sources = source_sets(&manifest)?;
 
-    let client = Client::new(&args.base_url)?;
+    let client = Client::new(&args.base_url)?.with_user(&args.user_header, &args.user);
     let (status, xml) = client.get("/$metadata")?;
     if status != 200 {
         bail!("$metadata des Ziels lieferte HTTP {status}");

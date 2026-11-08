@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use thiserror::Error;
 use tracing::debug;
 
-use data_store::{DataRecord, DataStore, DraftDataStore, EntityKey, Navigation, StoreError, WriteOp};
+use data_store::{
+    DataRecord, DataStore, DraftDataStore, EntityKey, Navigation, StoreError, WriteOp,
+};
 use odata::query::ODataQuery;
 
 /// Identifiziert eine durchlaufende Operation (für Logging/Vorschau im Hook).
@@ -136,7 +138,11 @@ pub struct Extender {
 
 impl Extender {
     /// Aktueller Datensatz als JSON (fuer Hooks, die vor einem Patch den Bestand brauchen).
-    pub async fn current_value(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
+    pub async fn current_value(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+    ) -> Result<Value, StoreError> {
         let record = self
             .inner
             .read_entity(set_name, key, &odata::query::ODataQuery::new())
@@ -262,9 +268,7 @@ impl DataStore for Extender {
         with_count: bool,
     ) -> Result<(Vec<DataRecord>, Option<usize>), StoreError> {
         let mut q = query.clone();
-        self.hook
-            .before_read(self, set_name, None, &mut q)
-            .await?;
+        self.hook.before_read(self, set_name, None, &mut q).await?;
         let mut records = self.inner.get_collection(set_name, &q).await?;
         let before = records.len();
         self.hook
@@ -398,7 +402,8 @@ impl DataStore for Extender {
                 }
                 Ok(None) => {
                     // Delete: After-Hook mit dem Schluessel-Datensatz, wie in delete_entity.
-                    let mut record = Self::key_record(key.as_ref().expect("Delete hat einen Schluessel"));
+                    let mut record =
+                        Self::key_record(key.as_ref().expect("Delete hat einen Schluessel"));
                     match self.hook.after(self, set_name, kind, &mut record).await {
                         Ok(()) => Ok(None),
                         Err(e) => Err(e.into()),
@@ -509,92 +514,4 @@ impl Hook for DefaultHook {
 }
 
 #[cfg(test)]
-mod test {
-    use std::sync::RwLock;
-
-    use odata_yaml_store::YamlStore;
-    use serde_json::json;
-    use tracing::Level;
-
-    use super::*;
-    /// Ein Beispiel-Sink, der das Skelett füllbar lässt: jeder Hook speichert Zahlen, die du testweise
-    /// abrufen und für Prüfungen nutzen kannst. Dein eigener Hook kopiert hier diese Felder.
-    #[derive(Default)]
-    struct HookData {
-        pub created: u64,
-        pub activated: u64,
-    }
-    #[derive(Default)]
-    pub struct ExampleHook {
-        inner: RwLock<HookData>,
-    }
-
-    impl ExampleHook {
-        pub fn create_count(&self) -> u64 {
-            self.inner.try_read().unwrap().created
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl Hook for ExampleHook {
-        async fn after(
-            &self,
-            store: &Extender,
-            set_name: &str,
-            op: Operation,
-            value: &mut DataRecord,
-        ) -> Result<(), HookError> {
-            debug!(?op, ?value);
-
-            // Track whether we need to create an OrderItem
-            let should_create_item = {
-                let mut w = self
-                    .inner
-                    .try_write()
-                    .map_err(|_| HookError::Hook("Failed to acquire write lock".to_string()))?;
-
-                match set_name {
-                    "OrderSet" => match op {
-                        Operation::Create => {
-                            w.created += 1;
-                            true
-                        }
-                        Operation::DraftActivate => {
-                            w.activated += 1;
-                            false
-                        }
-                        _ => false,
-                    },
-                    _ => false,
-                }
-            }; // Lock is released here
-
-            // Create OrderItem outside the lock
-            if should_create_item {
-                store
-                    .create_entity(
-                        "OrderItemSet",
-                        &json!({"Pos": "10", "Order_ID": value.id()}),
-                    )
-                    .await?;
-            }
-
-            Ok(())
-        }
-    }
-
-    #[tokio::test]
-    async fn example_hook() -> anyhow::Result<()> {
-        tracing_subscriber::fmt()
-            .with_max_level(Level::TRACE)
-            .init();
-        let ystore = Arc::new(YamlStore::open("testdata")?);
-        let hook = Arc::new(ExampleHook::default());
-        let store = Extender::new(ystore, hook.clone())?;
-        store
-            .create_entity("OrderSet", &json!({"SoldTo": "Peter"}))
-            .await?;
-        assert_eq!(hook.create_count(), 1);
-        Ok(())
-    }
-}
+mod test;

@@ -1,20 +1,24 @@
-use std::collections::HashMap;
-use std::time::Instant;
 use axum::middleware::Next;
 use axum::{
-    Json, Router, extract::{Path, Query, State}, http::{HeaderName, StatusCode, header}, response::{Html, IntoResponse, Response}, routing::{get, post},
+    Json, Router,
+    extract::{Path, Query, State},
+    http::{HeaderName, StatusCode, header},
+    response::{Html, IntoResponse, Response},
+    routing::{get, post},
 };
 use data_store::{DataRecord, EntityKey, StoreError};
 use odata::{
-    path::{parse_odata_path, PathSegment},
+    path::{PathSegment, parse_odata_path},
     query::{BinOp, ExpandItem, Expr, ODataQuery, OrderByItem, SortDirection},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use spec::{
-    app::App, data_dictionary::DataDictionary, package::Package, AtomValueList, EntitySpec,
-    FieldSpec, ListColumn, MeasureKind, Relationship,
+    AtomValueList, EntitySpec, FieldSpec, ListColumn, MeasureKind, Relationship, app::App,
+    data_dictionary::DataDictionary, package::Package,
 };
+use std::collections::HashMap;
+use std::time::Instant;
 use tracing::*;
 
 use crate::AppState;
@@ -87,7 +91,8 @@ impl EntityType {
                     let mut property = Property::new(name, edm_type);
                     // Code einer Code-Liste (Einheit/Waehrung) ist nicht nullable: ValueListHelper._enrichPath
                     // uebernimmt einen ValueListParameterOut nur fuer nicht nullable Eigenschaften als Schluessel.
-                    if unit_scale_field.is_some() || x.primary_key.as_deref() == Some(name.as_str()) {
+                    if unit_scale_field.is_some() || x.primary_key.as_deref() == Some(name.as_str())
+                    {
                         property = property.nullable(false);
                     }
                     if let Some(max_length) = max_length {
@@ -390,12 +395,15 @@ fn capability_annotations_for_entity(ddic: &DataDictionary, entity: &EntitySpec)
     let entity_name = entity.name();
     let set_name = entity.setname();
     if !entity.draft_enabled {
-        return vec![format!(
-            r##"<Annotations Target="Service.EntityContainer/{set_name}"><Annotation Term="Capabilities.UpdateRestrictions"><Record><PropertyValue Property="Updatable" Bool="true"/></Record></Annotation><Annotation Term="Capabilities.DeleteRestrictions"><Record><PropertyValue Property="Deletable" Bool="true"/></Record></Annotation><Annotation Term="Capabilities.InsertRestrictions"><Record><PropertyValue Property="Insertable" Bool="true"/><PropertyValue Property="NonInsertableProperties"><Collection><PropertyPath>ID</PropertyPath></Collection></PropertyValue></Record></Annotation>{}</Annotations>"##,
-            navigation_restrictions(ddic, entity)
-        ), format!(
-            r##"<Annotations Target="Service.{entity_name}/ID"><Annotation Term="Core.Computed" Bool="true"/></Annotations>"##
-        )];
+        return vec![
+            format!(
+                r##"<Annotations Target="Service.EntityContainer/{set_name}"><Annotation Term="Capabilities.UpdateRestrictions"><Record><PropertyValue Property="Updatable" Bool="true"/></Record></Annotation><Annotation Term="Capabilities.DeleteRestrictions"><Record><PropertyValue Property="Deletable" Bool="true"/></Record></Annotation><Annotation Term="Capabilities.InsertRestrictions"><Record><PropertyValue Property="Insertable" Bool="true"/><PropertyValue Property="NonInsertableProperties"><Collection><PropertyPath>ID</PropertyPath></Collection></PropertyValue></Record></Annotation>{}</Annotations>"##,
+                navigation_restrictions(ddic, entity)
+            ),
+            format!(
+                r##"<Annotations Target="Service.{entity_name}/ID"><Annotation Term="Core.Computed" Bool="true"/></Annotations>"##
+            ),
+        ];
     }
     // Ein Kind einer Composition ist DraftNode, alles andere ein eigenstaendiger DraftRoot.
     let draft_role = match ddic.owning_relationship(entity_name) {
@@ -463,7 +471,12 @@ pub struct Annotations {
 impl Annotations {
     /// `app_entities`: Namen der Hauptentitaeten aller Apps. Ein Verweis auf eine
     /// dieser Entitaeten wird als semantische Verlinkung (Intent) ausgegeben.
-    fn from_entity(ddic: &DataDictionary, x: &EntitySpec, hidden: &[String], app_entities: &[String]) -> Vec<Annotations> {
+    fn from_entity(
+        ddic: &DataDictionary,
+        x: &EntitySpec,
+        hidden: &[String],
+        app_entities: &[String],
+    ) -> Vec<Annotations> {
         let mut annotations = Vec::new();
         let mut main_annotations = Annotations {
             target: format!("Service.{}", x.name()),
@@ -481,7 +494,9 @@ impl Annotations {
             ),
         );
 
-        main_annotations.annotations.extend(line_item_annotations(ddic, x, app_entities));
+        main_annotations
+            .annotations
+            .extend(line_item_annotations(ddic, x, app_entities));
         // Nur App-Hauptentitaeten sind Sprungziele. Bei Join-Entitaeten (M:N ohne eigenen
         // Inhalt) wuerde der Schluessel-Fallback die ID der Zwischenzeile statt des Ziels senden.
         if app_entities.iter().any(|a| a == x.name()) {
@@ -498,7 +513,12 @@ impl Annotations {
                     matches!(f, FieldSpec::Lookup { name, collection: false, .. } if name == field)
                 });
                 let path = match x.fields().find_map(|f| match f {
-                    FieldSpec::Lookup { name, entity, collection: false, .. } if name == field => Some(entity.as_str()),
+                    FieldSpec::Lookup {
+                        name,
+                        entity,
+                        collection: false,
+                        ..
+                    } if name == field => Some(entity.as_str()),
                     _ => None,
                 }) {
                     Some(target) if is_to_one => ddic.fk_column(target, field),
@@ -578,7 +598,10 @@ impl Annotations {
             annotations.push(Self::from_field(ddic, x.name(), f));
             // Begleitfeld einer Measure: SAP kennzeichnet es mit IsUnit bzw. IsCurrency,
             // sonst wird es in der Measure-Darstellung nicht als bearbeitbare Einheit behandelt.
-            if let FieldSpec::Measure { unit_field, kind, .. } = f {
+            if let FieldSpec::Measure {
+                unit_field, kind, ..
+            } = f
+            {
                 let term = match kind {
                     MeasureKind::Currency => "Common.IsCurrency",
                     MeasureKind::Unit => "Common.IsUnit",
@@ -591,8 +614,12 @@ impl Annotations {
         }
         for (field, value) in x.filter_defaults() {
             let annotation = match value {
-                spec::FilterDefault::Text(t) => Annotation::new("Common.FilterDefaultValue").string(t),
-                spec::FilterDefault::Flag(b) => Annotation::new("Common.FilterDefaultValue").boolean(*b),
+                spec::FilterDefault::Text(t) => {
+                    Annotation::new("Common.FilterDefaultValue").string(t)
+                }
+                spec::FilterDefault::Flag(b) => {
+                    Annotation::new("Common.FilterDefaultValue").boolean(*b)
+                }
             };
             annotations.push(Annotations {
                 target: format!("Service.{}/{}", x.name(), field),
@@ -605,7 +632,13 @@ impl Annotations {
     fn from_field(ddic: &DataDictionary, service_name: &str, f: &spec::FieldSpec) -> Annotations {
         let mut target = format!("Service.{}/{}", service_name, f.name());
         let mut annotations = vec![Annotation::new("Common.Label").string(f.label())];
-        if matches!(f, FieldSpec::Atom { multiline: true, .. }) {
+        if matches!(
+            f,
+            FieldSpec::Atom {
+                multiline: true,
+                ..
+            }
+        ) {
             annotations.push(Annotation::new("UI.MultiLineText"));
         }
         match f {
@@ -618,7 +651,8 @@ impl Annotations {
             } => {
                 if !collection {
                     if spec::system_user::is_read_only_audit_field(f.name()) {
-                        annotations.push(Annotation::new("Org.OData.Core.V1.Computed").boolean(true));
+                        annotations
+                            .push(Annotation::new("Org.OData.Core.V1.Computed").boolean(true));
                     }
                     let name = ddic.fk_column(entity, name);
                     target = format!("Service.{}/{}", service_name, name);
@@ -640,7 +674,10 @@ impl Annotations {
                                     .add(
                                         PropertyValue::new("LocalDataProperty").property_path(name),
                                     )
-                                    .add(PropertyValue::new("ValueListProperty").string(target_key_of(ddic, entity).0)),
+                                    .add(
+                                        PropertyValue::new("ValueListProperty")
+                                            .string(target_key_of(ddic, entity).0),
+                                    ),
                             )
                             .add_record(
                                 Record::new("Common.ValueListParameterDisplayOnly")
@@ -720,10 +757,20 @@ fn merge_by_target(blocks: Vec<Annotations>) -> Vec<Annotations> {
 ///   sind die Auswahlpunkte in der ListReport-Ansicht (siehe `flp.rs`).
 /// * Eine fehlende `default`-Ansicht wird durch dieselbe Fallback-Spalte ersetzt, weil
 ///   Fiori Elements ein unqualifiziertes LineItem fuer die Standardtabelle braucht.
-fn line_item_annotations(ddic: &DataDictionary, x: &EntitySpec, app_entities: &[String]) -> Vec<Annotation> {
+fn line_item_annotations(
+    ddic: &DataDictionary,
+    x: &EntitySpec,
+    app_entities: &[String],
+) -> Vec<Annotation> {
     let views = x.list_views();
     if views.is_empty() {
-        return vec![line_item(ddic, None, &[ListColumn::new(default_line_item_column(x))], x, app_entities)];
+        return vec![line_item(
+            ddic,
+            None,
+            &[ListColumn::new(default_line_item_column(x))],
+            x,
+            app_entities,
+        )];
     }
 
     let mut out = Vec::new();
@@ -736,7 +783,13 @@ fn line_item_annotations(ddic: &DataDictionary, x: &EntitySpec, app_entities: &[
 
     for view in views {
         if !view.is_default() {
-            out.push(line_item(ddic, Some(&view.name), &view.columns, x, app_entities));
+            out.push(line_item(
+                ddic,
+                Some(&view.name),
+                &view.columns,
+                x,
+                app_entities,
+            ));
         }
         out.push(presentation_variant(&view.name));
     }
@@ -781,9 +834,12 @@ fn line_item(
     for column in columns {
         let col = column.field.as_str();
         let lookup = x.fields().find_map(|f| match f {
-            spec::FieldSpec::Lookup { name, entity, collection: false, .. } if name == col => {
-                Some(entity.as_str())
-            }
+            spec::FieldSpec::Lookup {
+                name,
+                entity,
+                collection: false,
+                ..
+            } if name == col => Some(entity.as_str()),
             _ => None,
         });
         // Zusaetzlich zur normalen Anzeige: Sprung in die volle Objektansicht.
@@ -796,7 +852,12 @@ fn line_item(
                         .add(PropertyValue::new("Value").path(ddic.fk_column(entity, col)))
                         .annotation(Annotation::new("UI.Hidden")),
                 );
-                intent_link_record(&format!("{col}/name"), &ddic.fk_column(entity, col), entity, &target_key_of(ddic, entity).0)
+                intent_link_record(
+                    &format!("{col}/name"),
+                    &ddic.fk_column(entity, col),
+                    entity,
+                    &target_key_of(ddic, entity).0,
+                )
             }
             Some(_) => data_field(&format!("{col}/name"), false),
             None if col == "name" && app_entities.iter().any(|a| a == x.name()) => {
@@ -853,19 +914,26 @@ pub(crate) fn list_column_widths(ddic: &DataDictionary, entity: &str) -> Option<
 /// den `line_item` fuer diese Spalte erzeugt.
 fn column_record_key(x: &EntitySpec, col: &str, app_entities: &[String]) -> String {
     let lookup = x.fields().find_map(|f| match f {
-        spec::FieldSpec::Lookup { name, entity, collection: false, .. } if name == col => {
-            Some(entity.as_str())
-        }
+        spec::FieldSpec::Lookup {
+            name,
+            entity,
+            collection: false,
+            ..
+        } if name == col => Some(entity.as_str()),
         _ => None,
     });
     match lookup {
-        Some(entity) if app_entities.iter().any(|a| a == entity) => {
-            stable_column_key("DataFieldWithIntentBasedNavigation", &format!("{col}/name"), Some((entity, "Detail")))
-        }
+        Some(entity) if app_entities.iter().any(|a| a == entity) => stable_column_key(
+            "DataFieldWithIntentBasedNavigation",
+            &format!("{col}/name"),
+            Some((entity, "Detail")),
+        ),
         Some(_) => stable_column_key("DataField", &format!("{col}/name"), None),
-        None if col == "name" && app_entities.iter().any(|a| a == x.name()) => {
-            stable_column_key("DataFieldWithIntentBasedNavigation", "name", Some((x.name(), "Detail")))
-        }
+        None if col == "name" && app_entities.iter().any(|a| a == x.name()) => stable_column_key(
+            "DataFieldWithIntentBasedNavigation",
+            "name",
+            Some((x.name(), "Detail")),
+        ),
         None if is_link_atom(x, col) => format!("DataFieldWithUrl::{col}"),
         None => format!("DataField::{col}"),
     }
@@ -889,16 +957,21 @@ fn intent_link_record(value: &str, local_key: &str, entity: &str, target_key: &s
         .add(PropertyValue::new("Value").path(value))
         .add(PropertyValue::new("SemanticObject").string(entity))
         .add(PropertyValue::new("Action").string("Detail"))
-        .add(PropertyValue::new("Mapping").collection(Collection::new().add_record(
-            Record::new("Common.SemanticObjectMappingType")
-                .add(PropertyValue::new("LocalProperty").property_path(local_key))
-                .add(PropertyValue::new("SemanticObjectProperty").string(target_key)),
-        )))
+        .add(
+            PropertyValue::new("Mapping").collection(
+                Collection::new().add_record(
+                    Record::new("Common.SemanticObjectMappingType")
+                        .add(PropertyValue::new("LocalProperty").property_path(local_key))
+                        .add(PropertyValue::new("SemanticObjectProperty").string(target_key)),
+                ),
+            ),
+        )
 }
 
 /// Ist `name` ein Atom mit `link: true` (Wert ist eine URL)?
 fn is_link_atom(x: &EntitySpec, name: &str) -> bool {
-    x.fields().any(|f| matches!(f, FieldSpec::Atom { name: n, link: true, .. } if n == name))
+    x.fields()
+        .any(|f| matches!(f, FieldSpec::Atom { name: n, link: true, .. } if n == name))
 }
 
 /// `UI.DataField` bzw. bei `link` ein `UI.DataFieldWithUrl`, dessen Ziel der Wert selbst ist.
@@ -983,7 +1056,11 @@ fn object_page_sections(
     let navs: Vec<String> = x
         .fields()
         .filter_map(|f| match f {
-            FieldSpec::Lookup { name, collection: true, .. } => Some(name.clone()),
+            FieldSpec::Lookup {
+                name,
+                collection: true,
+                ..
+            } => Some(name.clone()),
             _ => None,
         })
         .collect();
@@ -997,22 +1074,40 @@ fn object_page_sections(
     let long_texts: Vec<String> = x
         .fields()
         .filter_map(|f| match f {
-            FieldSpec::Atom { name, multiline: true, .. } if !mentioned.contains(&name.as_str()) => {
-                Some(name.clone())
-            }
+            FieldSpec::Atom {
+                name,
+                multiline: true,
+                ..
+            } if !mentioned.contains(&name.as_str()) => Some(name.clone()),
             _ => None,
         })
         .collect();
     let remainder: Vec<String> = x
         .fields()
-        .filter(|f| !matches!(f, FieldSpec::Lookup { collection: true, .. }))
+        .filter(|f| {
+            !matches!(
+                f,
+                FieldSpec::Lookup {
+                    collection: true,
+                    ..
+                }
+            )
+        })
         .filter(|f| !mentioned.contains(&f.name()))
         .filter(|f| !long_texts.iter().any(|l| l == f.name()))
         .map(|f| f.name().to_string())
         .collect();
     let general_fields: Vec<String> = x
         .fields()
-        .filter(|f| !matches!(f, FieldSpec::Lookup { collection: true, .. }))
+        .filter(|f| {
+            !matches!(
+                f,
+                FieldSpec::Lookup {
+                    collection: true,
+                    ..
+                }
+            )
+        })
         .filter(|f| !long_texts.iter().any(|l| l == f.name()))
         .map(|f| f.name().to_string())
         .collect();
@@ -1040,12 +1135,22 @@ fn object_page_sections(
             continue;
         }
         if let Some(long) = key.strip_suffix(LONG_TEXT_SUFFIX) {
-            groups.push(field_group(ddic, key, x, Some(&[long.to_string()]), hidden, app_entities));
+            groups.push(field_group(
+                ddic,
+                key,
+                x,
+                Some(&[long.to_string()]),
+                hidden,
+                app_entities,
+            ));
             records.push(
                 Record::new("UI.ReferenceFacet")
                     .add(PropertyValue::new("Label").string(facet_title(x, long)))
                     .add(PropertyValue::new("ID").string(format!("{long}Section")))
-                    .add(PropertyValue::new("Target").annotation_path(format!("@UI.FieldGroup#{key}"))),
+                    .add(
+                        PropertyValue::new("Target")
+                            .annotation_path(format!("@UI.FieldGroup#{key}")),
+                    ),
             );
             continue;
         }
@@ -1064,18 +1169,32 @@ fn object_page_sections(
         } else {
             (x.facet(key).map(|f| f.fields.clone()), key.as_str())
         };
-        groups.push(field_group(ddic, qualifier, x, selected.as_deref(), hidden, app_entities));
+        groups.push(field_group(
+            ddic,
+            qualifier,
+            x,
+            selected.as_deref(),
+            hidden,
+            app_entities,
+        ));
 
         if key == GENERAL_FACET {
             records.push(
                 Record::new("UI.CollectionFacet")
                     .add(PropertyValue::new("Label").string(facet_title(x, key)))
                     .add(PropertyValue::new("ID").string("GeneralSection"))
-                    .add(PropertyValue::new("Facets").collection(Collection::new().add_record(
-                        Record::new("UI.ReferenceFacet")
-                            .add(PropertyValue::new("Label").string(facet_title(x, key)))
-                            .add(PropertyValue::new("Target").annotation_path("@UI.FieldGroup#Main")),
-                    ))),
+                    .add(
+                        PropertyValue::new("Facets").collection(
+                            Collection::new().add_record(
+                                Record::new("UI.ReferenceFacet")
+                                    .add(PropertyValue::new("Label").string(facet_title(x, key)))
+                                    .add(
+                                        PropertyValue::new("Target")
+                                            .annotation_path("@UI.FieldGroup#Main"),
+                                    ),
+                            ),
+                        ),
+                    ),
             );
         } else {
             records.push(
@@ -1113,11 +1232,15 @@ fn lookup_intent_field(ddic: &DataDictionary, name: &str, entity: &str) -> Recor
         .add(PropertyValue::new("Value").path(&fk))
         .add(PropertyValue::new("SemanticObject").string(entity))
         .add(PropertyValue::new("Action").string("Detail"))
-        .add(PropertyValue::new("Mapping").collection(Collection::new().add_record(
-            Record::new("Common.SemanticObjectMappingType")
-                .add(PropertyValue::new("LocalProperty").property_path(&fk))
-                .add(PropertyValue::new("SemanticObjectProperty").string(target_key)),
-        )))
+        .add(
+            PropertyValue::new("Mapping").collection(
+                Collection::new().add_record(
+                    Record::new("Common.SemanticObjectMappingType")
+                        .add(PropertyValue::new("LocalProperty").property_path(&fk))
+                        .add(PropertyValue::new("SemanticObjectProperty").string(target_key)),
+                ),
+            ),
+        )
 }
 
 /// FieldGroup mit dem Qualifier `qualifier`. `selected`: Felder in Anzeigereihenfolge,
@@ -1162,15 +1285,28 @@ fn field_group(
 /// Primaerschluessel eines Ziels: Name und EDM-Typ (`ID`/Edm.Guid ohne eigenen Schluessel).
 fn target_key_of(ddic: &DataDictionary, entity: &str) -> (String, String) {
     match ddic.active_entity(entity) {
-        Some(e) => (e.primary_key_name().to_string(), e.primary_key_type().to_string()),
+        Some(e) => (
+            e.primary_key_name().to_string(),
+            e.primary_key_type().to_string(),
+        ),
         None => ("ID".to_string(), "Edm.Guid".to_string()),
     }
 }
 
 /// Ein `UI.DataField` fuer ein Feld. `None` fuer Felder ohne Zeile in der FieldGroup.
-fn field_record(ddic: &DataDictionary, f: &FieldSpec, hidden: &[String], app_entities: &[String]) -> Option<Record> {
+fn field_record(
+    ddic: &DataDictionary,
+    f: &FieldSpec,
+    hidden: &[String],
+    app_entities: &[String],
+) -> Option<Record> {
     match f {
-        FieldSpec::Lookup { name, entity, collection, .. } => {
+        FieldSpec::Lookup {
+            name,
+            entity,
+            collection,
+            ..
+        } => {
             if *collection {
                 None
             } else if app_entities.iter().any(|a| a == entity) {
@@ -1259,7 +1395,9 @@ fn annotations_for_atom_value_list(name: &str, value_list: &AtomValueList) -> Ve
             for filter in constant_filters {
                 parameters = parameters.add_record(
                     Record::new("Common.ValueListParameterConstant")
-                        .add(PropertyValue::new("ValueListProperty").string(&filter.target_property))
+                        .add(
+                            PropertyValue::new("ValueListProperty").string(&filter.target_property),
+                        )
                         .add(PropertyValue::new("Constant").string(&filter.value)),
                 );
             }
@@ -1685,7 +1823,8 @@ pub fn router() -> Router<AppState> {
                 .post(post_handler)
                 .patch(patch_handler)
                 .delete(delete_handler),
-        ).layer(axum::middleware::from_fn(log_request))
+        )
+        .layer(axum::middleware::from_fn(log_request))
         .layer(axum::middleware::from_fn(crate::sticky::context))
 }
 
@@ -1764,7 +1903,7 @@ fn parse_orderby_item(raw: &str) -> Result<OrderByItem, ODataError> {
         _ => {
             return Err(ODataError::bad_request(format!(
                 "Invalid $orderby item '{raw}'"
-            )))
+            )));
         }
     };
     Ok(OrderByItem {
@@ -2141,9 +2280,18 @@ fn materialize(
             value["@odata.context"] = json!(format!("{context}/$entity"));
             Ok(GetResult::Json(value))
         }
-        (Cursor::Collection { spec, records, count }, None) => {
-            let records: Vec<Value> = records.into_iter()
-                .map(|r| entity_json(state, &spec, json!(r))).collect();
+        (
+            Cursor::Collection {
+                spec,
+                records,
+                count,
+            },
+            None,
+        ) => {
+            let records: Vec<Value> = records
+                .into_iter()
+                .map(|r| entity_json(state, &spec, json!(r)))
+                .collect();
             let mut value = json!({ "@odata.context": context, "value": records });
             if let Some(count) = count {
                 value["@odata.count"] = json!(count);
@@ -2158,8 +2306,13 @@ fn materialize(
 }
 
 const DRAFT_PROPERTIES: &[&str] = &[
-    "IsActiveEntity", "HasActiveEntity", "HasDraftEntity",
-    "DraftAdministrativeData", "DraftAdministrativeData_ID", "DraftMessages", "SiblingEntity",
+    "IsActiveEntity",
+    "HasActiveEntity",
+    "HasDraftEntity",
+    "DraftAdministrativeData",
+    "DraftAdministrativeData_ID",
+    "DraftMessages",
+    "SiblingEntity",
 ];
 
 fn entity_json(state: &AppState, spec: &EntitySpec, mut value: Value) -> Value {
@@ -2182,7 +2335,9 @@ fn entity_json(state: &AppState, spec: &EntitySpec, mut value: Value) -> Value {
         let ddic = state.ddic();
         for field in spec.fields() {
             if let FieldSpec::Lookup { name, entity, .. } = field {
-                if let (Some(target), Some(nested)) = (ddic.active_entity(entity), object.get_mut(name)) {
+                if let (Some(target), Some(nested)) =
+                    (ddic.active_entity(entity), object.get_mut(name))
+                {
                     *nested = entity_json(state, target, nested.take());
                 }
             }
@@ -2208,33 +2363,48 @@ fn validate_write(spec: &EntitySpec, body: &Value) -> Result<(), ODataError> {
     if let Some(pk) = spec.primary_key.as_deref() {
         if body.get("ID").is_some() {
             return Err(ODataError::bad_request(format!(
-                "'ID' ist kein Feld von '{}', Schluessel ist '{pk}'", spec.name()
+                "'ID' ist kein Feld von '{}', Schluessel ist '{pk}'",
+                spec.name()
             )));
         }
     }
     if !spec.draft_enabled {
-        if let Some(name) = DRAFT_PROPERTIES.iter().find(|name| body.get(**name).is_some()) {
+        if let Some(name) = DRAFT_PROPERTIES
+            .iter()
+            .find(|name| body.get(**name).is_some())
+        {
             return Err(ODataError::bad_request(format!(
-                "{} does not support draft property '{name}'", spec.name()
+                "{} does not support draft property '{name}'",
+                spec.name()
             )));
         }
     }
     Ok(())
 }
 
-fn validate_query(state: &AppState, spec: &EntitySpec, query: &ODataQuery) -> Result<(), ODataError> {
+fn validate_query(
+    state: &AppState,
+    spec: &EntitySpec,
+    query: &ODataQuery,
+) -> Result<(), ODataError> {
     if !spec.draft_enabled {
-        for name in query.select.iter().map(String::as_str)
+        for name in query
+            .select
+            .iter()
+            .map(String::as_str)
             .chain(query.expand.iter().map(|e| e.navigation_property.as_str()))
         {
             if DRAFT_PROPERTIES.contains(&name) {
-                return Err(ODataError::bad_request(format!("Unknown property '{name}'")));
+                return Err(ODataError::bad_request(format!(
+                    "Unknown property '{name}'"
+                )));
             }
         }
     }
     let ddic = state.ddic();
     for expand in &query.expand {
-        if let Some(FieldSpec::Lookup { entity, .. }) = spec.fields()
+        if let Some(FieldSpec::Lookup { entity, .. }) = spec
+            .fields()
             .find(|f| f.name() == expand.navigation_property)
         {
             if let Some(target) = ddic.active_entity(entity) {
@@ -2260,13 +2430,20 @@ async fn follow_segment(
         )));
     };
     let key = if spec.draft_enabled {
-        format!("ID={},IsActiveEntity={}", record.id(), record.is_active_entity())
+        format!(
+            "ID={},IsActiveEntity={}",
+            record.id(),
+            record.is_active_entity()
+        )
     } else {
         format!("ID={}", record.id())
     };
     context.push_str(&format!("({key})/{}", segment.name));
     if !spec.draft_enabled && DRAFT_PROPERTIES.contains(&segment.name.as_str()) {
-        return Err(ODataError::not_found(format!("Unknown property '{}'", segment.name)));
+        return Err(ODataError::not_found(format!(
+            "Unknown property '{}'",
+            segment.name
+        )));
     }
 
     match segment.name.as_str() {
@@ -2415,22 +2592,31 @@ fn entity_key(spec: &EntitySpec, segment: &PathSegment) -> Result<EntityKey, ODa
     if let Some(pk) = spec.primary_key.as_deref() {
         let [key] = segment.keys.as_slice() else {
             return Err(ODataError::bad_request(format!(
-                "Expected key '{pk}' for '{}'", spec.name()
+                "Expected key '{pk}' for '{}'",
+                spec.name()
             )));
         };
         if key.name.as_deref().is_some_and(|n| n != pk) {
-            return Err(ODataError::bad_request(format!("Unknown key for '{}'", spec.name())));
+            return Err(ODataError::bad_request(format!(
+                "Unknown key for '{}'",
+                spec.name()
+            )));
         }
         let value = data_store::key::KeyValue::parse(&key.value.to_string_value());
         return Ok(EntityKey::new(value, true));
     }
     if segment.keys.len() != spec.key_names().len() {
         return Err(ODataError::bad_request(format!(
-            "Expected keys {} for '{}'", spec.key_names().join(", "), spec.name()
+            "Expected keys {} for '{}'",
+            spec.key_names().join(", "),
+            spec.name()
         )));
     }
     for (index, key) in segment.keys.iter().enumerate() {
-        if segment.keys[..index].iter().any(|other| other.name == key.name) {
+        if segment.keys[..index]
+            .iter()
+            .any(|other| other.name == key.name)
+        {
             return Err(ODataError::bad_request("Duplicate key"));
         }
         if key.name.is_none() && spec.draft_enabled {
@@ -2438,24 +2624,39 @@ fn entity_key(spec: &EntitySpec, segment: &PathSegment) -> Result<EntityKey, ODa
         }
         if let Some(name) = &key.name {
             if !spec.key_names().contains(&name.as_str()) {
-                return Err(ODataError::bad_request(format!("Unknown key '{name}' for '{}'", spec.name())));
+                return Err(ODataError::bad_request(format!(
+                    "Unknown key '{name}' for '{}'",
+                    spec.name()
+                )));
             }
         }
     }
-    if spec.draft_enabled && !segment.keys.iter().any(|key| {
-        key.name.as_deref() == Some("IsActiveEntity") && key.value.as_bool().is_some()
-    }) {
-        return Err(ODataError::bad_request("Missing boolean key 'IsActiveEntity'"));
+    if spec.draft_enabled
+        && !segment.keys.iter().any(|key| {
+            key.name.as_deref() == Some("IsActiveEntity") && key.value.as_bool().is_some()
+        })
+    {
+        return Err(ODataError::bad_request(
+            "Missing boolean key 'IsActiveEntity'",
+        ));
     }
     let id = segment.id().ok_or_else(|| {
         ODataError::bad_request(format!("Missing key 'ID' in '{}'", segment.name))
     })?;
-    Ok(EntityKey::new(id, !spec.draft_enabled || segment.is_active_entity()))
+    Ok(EntityKey::new(
+        id,
+        !spec.draft_enabled || segment.is_active_entity(),
+    ))
 }
 
 fn touch_selected_fields(value: &mut Value, query: &ODataQuery) {
     for field in query.select.iter() {
-        if field == "*" || query.expand.iter().any(|item| item.navigation_property == *field) {
+        if field == "*"
+            || query
+                .expand
+                .iter()
+                .any(|item| item.navigation_property == *field)
+        {
             continue;
         }
         if value[field].is_null() {
@@ -2502,7 +2703,8 @@ async fn read_single(
     query: &ODataQuery,
 ) -> Result<DataRecord, ODataError> {
     let ddic = state.ddic();
-    let spec = ddic.active_entity_by_setname(set)
+    let spec = ddic
+        .active_entity_by_setname(set)
         .ok_or_else(|| ODataError::not_found(format!("Unknown entity set '{set}'")))?;
     validate_query(state, spec, query)?;
     let mut record = state
@@ -2528,20 +2730,37 @@ fn expand_designer_rows<'a>(
         }
         for item in &query.expand {
             let name = &item.navigation_property;
-            let segment = PathSegment { name: name.clone(), keys: vec![] };
+            let segment = PathSegment {
+                name: name.clone(),
+                keys: vec![],
+            };
             for record in records.iter_mut() {
                 if record.get(name).is_some() {
                     continue;
                 }
                 let cursor = Cursor::Entity {
-                    spec: spec.clone(), set: set.into(), record: Box::new(record.clone()),
+                    spec: spec.clone(),
+                    set: set.into(),
+                    record: Box::new(record.clone()),
                 };
                 let mut context = set.to_string();
-                let expanded = follow_segment(state, cursor, &segment, &item.nested_query, &mut context).await?;
+                let expanded =
+                    follow_segment(state, cursor, &segment, &item.nested_query, &mut context)
+                        .await?;
                 record[name] = match expanded {
-                    Cursor::Entity { spec, set, record: mut child } => {
-                        expand_designer_rows(state, &spec, &set, std::slice::from_mut(child.as_mut()),
-                            &item.nested_query).await?;
+                    Cursor::Entity {
+                        spec,
+                        set,
+                        record: mut child,
+                    } => {
+                        expand_designer_rows(
+                            state,
+                            &spec,
+                            &set,
+                            std::slice::from_mut(child.as_mut()),
+                            &item.nested_query,
+                        )
+                        .await?;
                         json!(child)
                     }
                     Cursor::Collection { records, count, .. } => {
@@ -2551,8 +2770,11 @@ fn expand_designer_rows<'a>(
                         json!(records)
                     }
                     Cursor::Empty => Value::Null,
-                    Cursor::Property { .. } => return Err(ODataError::bad_request(
-                        format!("'{name}' is not a navigation property"))),
+                    Cursor::Property { .. } => {
+                        return Err(ODataError::bad_request(format!(
+                            "'{name}' is not a navigation property"
+                        )));
+                    }
                 };
             }
         }
@@ -2565,7 +2787,10 @@ async fn read_collection(
     set: &str,
     query: &ODataQuery,
 ) -> Result<Cursor, ODataError> {
-    let spec = state.ddic().active_entity_by_setname(set).cloned()
+    let spec = state
+        .ddic()
+        .active_entity_by_setname(set)
+        .cloned()
         .ok_or_else(|| ODataError::not_found(format!("Unknown entity set '{set}'")))?;
     validate_query(state, &spec, query)?;
     // Ein Aufruf: Hooks laufen einmal pro Request, Count beruecksichtigt Entfernungen.
@@ -2575,7 +2800,11 @@ async fn read_collection(
         .await
         .map_err(ODataError::from_store)?;
     expand_designer_rows(state, &spec, set, &mut records, query).await?;
-    Ok(Cursor::Collection { spec, records, count })
+    Ok(Cursor::Collection {
+        spec,
+        records,
+        count,
+    })
 }
 
 pub(crate) async fn action_entity_json(
@@ -2584,11 +2813,28 @@ pub(crate) async fn action_entity_json(
     key: &EntityKey,
     query: &ODataQuery,
 ) -> Result<Value, Response> {
-    let record = read_single(state, set, key, query).await.map_err(IntoResponse::into_response)?;
-    let spec = state.ddic().active_entity_by_setname(set).cloned()
-        .ok_or_else(|| ODataError::not_found(format!("Unknown entity set '{set}'")).into_response())?;
-    let result = materialize(state, Cursor::Entity { spec, set: set.into(), record: Box::new(record) },
-        None, query, set).map_err(IntoResponse::into_response)?;
+    let record = read_single(state, set, key, query)
+        .await
+        .map_err(IntoResponse::into_response)?;
+    let spec = state
+        .ddic()
+        .active_entity_by_setname(set)
+        .cloned()
+        .ok_or_else(|| {
+            ODataError::not_found(format!("Unknown entity set '{set}'")).into_response()
+        })?;
+    let result = materialize(
+        state,
+        Cursor::Entity {
+            spec,
+            set: set.into(),
+            record: Box::new(record),
+        },
+        None,
+        query,
+        set,
+    )
+    .map_err(IntoResponse::into_response)?;
     match result {
         GetResult::Json(value) => Ok(value),
         _ => unreachable!("single entity JSON representation"),
@@ -2621,21 +2867,34 @@ async fn post_handler(
     if let Some(sessions) = &state.sticky {
         match path_struct.segments.as_slice() {
             [action] if action.name == "stickyDiscard" && action.keys.is_empty() => {
-                return sessions.action(&state, None, None, "stickyDiscard", &query).await;
+                return sessions
+                    .action(&state, None, None, "stickyDiscard", &query)
+                    .await;
             }
-            [entity, action] if action.name.starts_with("Service.sticky") && action.keys.is_empty() => {
+            [entity, action]
+                if action.name.starts_with("Service.sticky") && action.keys.is_empty() =>
+            {
                 let spec = match entity_spec_for_segment(&state, entity) {
                     Ok(spec) => spec,
                     Err(error) => return error.into_response(),
                 };
-                let key = if entity.keys.is_empty() { None } else {
+                let key = if entity.keys.is_empty() {
+                    None
+                } else {
                     match entity_key(&spec, entity) {
                         Ok(key) => Some(key),
                         Err(error) => return error.into_response(),
                     }
                 };
-                return sessions.action(&state, Some(&entity.name), key.as_ref(),
-                    action.name.trim_start_matches("Service."), &query).await;
+                return sessions
+                    .action(
+                        &state,
+                        Some(&entity.name),
+                        key.as_ref(),
+                        action.name.trim_start_matches("Service."),
+                        &query,
+                    )
+                    .await;
             }
             _ => {}
         }
@@ -2643,8 +2902,10 @@ async fn post_handler(
 
     match path_struct.segments.as_slice() {
         [entity] if entity.keys.is_empty() => {
-            let spec = match entity_spec_for_segment(&state, entity)
-                .and_then(|spec| { validate_write(&spec, &body)?; Ok(spec) }) {
+            let spec = match entity_spec_for_segment(&state, entity).and_then(|spec| {
+                validate_write(&spec, &body)?;
+                Ok(spec)
+            }) {
                 Ok(spec) => spec,
                 Err(e) => return e.into_response(),
             };
@@ -2654,10 +2915,14 @@ async fn post_handler(
             }
             to_store_body(&spec, &mut body);
             match state.store.create_entity(&entity.name, &body).await {
-                Ok(r) => created_response(entity_json(&state, &spec, json!(r)), &path, spec.primary_key.as_deref()),
+                Ok(r) => created_response(
+                    entity_json(&state, &spec, json!(r)),
+                    &path,
+                    spec.primary_key.as_deref(),
+                ),
                 Err(e) => ODataError::from_store(e).into_response(),
             }
-        },
+        }
         [entity, action]
             if !entity.keys.is_empty() && action.keys.is_empty() && action.name.contains('.') =>
         {
@@ -2708,7 +2973,11 @@ fn created_response(body: Value, path: &str, pk: Option<&str>) -> Response {
     };
     (
         StatusCode::CREATED,
-        [content_type_json(), odata_version(), (header::LOCATION, format!("/Service/{path}({key})"))],
+        [
+            content_type_json(),
+            odata_version(),
+            (header::LOCATION, format!("/Service/{path}({key})")),
+        ],
         body.to_string(),
     )
         .into_response()
@@ -2721,10 +2990,13 @@ async fn draft_action(
     action: &str,
 ) -> Result<Value, ODataError> {
     let ddic = state.ddic();
-    let spec = ddic.active_entity_by_setname(set)
+    let spec = ddic
+        .active_entity_by_setname(set)
         .ok_or_else(|| ODataError::not_found(format!("Unknown entity set '{set}'")))?;
     if !spec.draft_enabled {
-        return Err(ODataError::not_found(format!("Draft actions are not supported for '{set}'")));
+        return Err(ODataError::not_found(format!(
+            "Draft actions are not supported for '{set}'"
+        )));
     }
     match action {
         "draftEdit" => {
@@ -2832,7 +3104,10 @@ async fn create_in_navigation(
         .create_entity(&target.setname(), &body)
         .await
         .map_err(ODataError::from_store)?;
-    Ok((entity_json(state, target, json!(created)), target.primary_key.clone()))
+    Ok((
+        entity_json(state, target, json!(created)),
+        target.primary_key.clone(),
+    ))
 }
 
 /// Zielset und FK-Feld aller Compositions unterhalb von `set`.
@@ -2901,8 +3176,11 @@ async fn patch_handler(
     };
     // Der Schluessel ist unveraenderlich.
     if let Some(pk) = spec.primary_key.as_deref() {
-        if body.get(pk).is_some_and(|v| v.as_str().map(|s| data_store::key::KeyValue::parse(s)) != Some(ekey.id.clone())) {
-            return ODataError::bad_request(format!("Schluessel '{pk}' ist nicht aenderbar")).into_response();
+        if body.get(pk).is_some_and(|v| {
+            v.as_str().map(|s| data_store::key::KeyValue::parse(s)) != Some(ekey.id.clone())
+        }) {
+            return ODataError::bad_request(format!("Schluessel '{pk}' ist nicht aenderbar"))
+                .into_response();
         }
     }
     let mut body = body;
@@ -2947,7 +3225,10 @@ async fn delete_entity(state: &AppState, segments: &[PathSegment]) -> Result<(),
     let key = EntityKey::from(&*record);
     delete_owned_children(state, &set, &key).await?;
     if !spec.draft_enabled {
-        return state.store.delete_entity_tree_only(&set, &key).await
+        return state
+            .store
+            .delete_entity_tree_only(&set, &key)
+            .await
             .map_err(ODataError::from_store);
     }
 
@@ -3051,7 +3332,8 @@ async fn index(State(state): State<AppState>) -> Response {
     Json(json!({
       "@odata.context": "/Service/$metadata",
       "value": value
-    })).into_response()
+    }))
+    .into_response()
 }
 /// Namen der Hauptentitaeten aller Apps (Ziele der semantischen Verlinkung).
 fn app_entity_names(ddic: &DataDictionary) -> Vec<String> {
@@ -3077,7 +3359,14 @@ async fn metadata(State(state): State<AppState>) -> Response {
     let app_entities = app_entity_names(&ddic);
     let annotation_lst: Vec<Annotations> = ddic
         .active_entities()
-        .map(|x| Annotations::from_entity(&ddic, x, &crate::extension::hidden_fields(&state.extensions, x.name()), &app_entities))
+        .map(|x| {
+            Annotations::from_entity(
+                &ddic,
+                x,
+                &crate::extension::hidden_fields(&state.extensions, x.name()),
+                &app_entities,
+            )
+        })
         .flatten()
         .collect();
     // let _sample_entity = sample::sample_entity();
@@ -3111,9 +3400,13 @@ async fn metadata(State(state): State<AppState>) -> Response {
     let mut actions = vec![];
     let mut action_imports = String::new();
     if state.sticky.is_some() {
-        action_imports.push_str(r#"<ActionImport Name="stickyDiscard" Action="Service.stickyDiscard"/>"#);
+        action_imports
+            .push_str(r#"<ActionImport Name="stickyDiscard" Action="Service.stickyDiscard"/>"#);
         actions.push(r#"<Action Name="stickyDiscard"/>"#.to_string());
-        for entity in ddic.active_entities().filter(|entity| !entity.draft_enabled) {
+        for entity in ddic
+            .active_entities()
+            .filter(|entity| !entity.draft_enabled)
+        {
             let name = entity.name();
             let set = entity.setname();
             actions.push(format!(
@@ -3129,23 +3422,23 @@ async fn metadata(State(state): State<AppState>) -> Response {
     for e in ddic.active_entities() {
         let entity_name = format!("Service.{}", e.name());
         if e.draft_enabled {
-        actions.push(format!(
-            r##"<Action Name="draftEdit" IsBound="true" EntitySetPath="in">
+            actions.push(format!(
+                r##"<Action Name="draftEdit" IsBound="true" EntitySetPath="in">
                     <Parameter Name="in" Type="{entity_name}"/>
                     <Parameter Name="PreserveChanges" Type="Edm.Boolean"/>
                     <ReturnType Type="{entity_name}"/>
                 </Action>"##,
-        ));
-        actions.push(format!(
+            ));
+            actions.push(format!(
             r##"<Action Name="draftActivate" IsBound="true" EntitySetPath="in"><Parameter Name="in" Type="{entity_name}"/>
                     <ReturnType Type="{entity_name}"/></Action>"##,
         ));
-        actions.push(format!(
-            r##"<Action Name="draftPrepare" IsBound="true" EntitySetPath="in">
+            actions.push(format!(
+                r##"<Action Name="draftPrepare" IsBound="true" EntitySetPath="in">
                     <Parameter Name="in" Type="{entity_name}"/>
                     <Parameter Name="SideEffectsQualifier" Type="Edm.String"/>
                     <ReturnType Type="{entity_name}"/></Action>"##,
-        ));
+            ));
         }
         actions.push(format!(
             r##"<Action Name="publishConfig" IsBound="true" EntitySetPath="in">
@@ -3248,7 +3541,8 @@ async fn metadata(State(state): State<AppState>) -> Response {
             (HeaderName::from_static("odata-version"), "4.0"),
         ],
         xml,
-    ).into_response()
+    )
+        .into_response()
 }
 
 fn edmx_template(drafts: bool) -> String {
@@ -3304,586 +3598,10 @@ fn edmx_template(drafts: bool) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn entity_type_from_entity_maps_field_variants() {
-        let mut ddic = DataDictionary::new();
-        ddic.activate();
-        let entity = ddic.active_entity("Entity").unwrap();
-
-        let entity_type = EntityType::from_entity(&ddic, entity);
-        dbg!(&entity_type);
-        assert!(entity_type
-            .properties
-            .iter()
-            .any(|property| property.name == "name" && property.type_ == "Edm.String"));
-    }
-
-    #[test]
-    fn lookup_to_app_entity_gets_intent_based_navigation() {
-        let mut ddic = DataDictionary::new();
-        ddic.activate();
-        let (entity, target, name) = ddic
-            .active_entities()
-            .find_map(|e| {
-                e.fields().find_map(|f| match f {
-                    FieldSpec::Lookup {
-                        name,
-                        entity,
-                        collection: false,
-                        ..
-                    } => Some((e.clone(), entity.clone(), name.clone())),
-                    _ => None,
-                })
-            })
-            .expect("ein Einzel-Lookup im Standard-Dictionary");
-        let fk = format!("{name}_ID");
-
-        let linked = Annotations::from_entity(&DataDictionary::new(), &entity, &[], std::slice::from_ref(&target));
-        let xml = format!("{linked:?}");
-        assert!(xml.contains("UI.DataFieldWithIntentBasedNavigation"));
-        assert!(xml.contains(&target));
-
-        let plain = Annotations::from_entity(&DataDictionary::new(), &entity, &[], &[]);
-        let xml = format!("{plain:?}");
-        assert!(!xml.contains("UI.DataFieldWithIntentBasedNavigation"));
-        assert!(xml.contains(&fk));
-    }
-
-    #[test]
-    fn facet_target_uses_the_configured_view() {
-        let mut x = EntitySpec::new("Actor", "core", "Actors");
-        assert_eq!(facet_target_path(&x, "_ActorSceneMap"), "_ActorSceneMap/@UI.LineItem");
-        x.facets.push(spec::FacetSpec { facet: "_ActorSceneMap".into(), view: Some("reverse".into()), title: None, fields: vec![] });
-        assert_eq!(
-            facet_target_path(&x, "_ActorSceneMap"),
-            "_ActorSceneMap/@UI.LineItem#reverse"
-        );
-        x.facets[0].view = Some("default".into());
-        assert_eq!(facet_target_path(&x, "_ActorSceneMap"), "_ActorSceneMap/@UI.LineItem");
-    }
-
-    #[test]
-    fn facet_title_prefers_the_model_label_of_the_navigation() {
-        let mut x = EntitySpec::new("Actor", "core", "Actors");
-        x.fields.push(FieldSpec::Lookup {
-            name: "_ActorSceneMap".into(),
-            entity: "ActorSceneMap".into(),
-            collection: true,
-            owned: false,
-            label: Some("Scene assignments".into()),
-        });
-        assert_eq!(facet_title(&x, "_ActorSceneMap"), "Scene assignments");
-        x.facets.push(spec::FacetSpec { facet: "_ActorSceneMap".into(), view: None, title: Some("Szenen".into()), fields: vec![] });
-        assert_eq!(facet_title(&x, "_ActorSceneMap"), "Szenen");
-    }
-
-    #[test]
-    fn facet_title_defaults_to_the_navigation_name() {
-        let mut x = EntitySpec::new("Actor", "core", "Actors");
-        assert_eq!(facet_title(&x, "_ActorSceneMap"), "_ActorSceneMap");
-        x.facets.push(spec::FacetSpec { facet: "_ActorSceneMap".into(), view: None, title: Some("Szenen".into()), fields: vec![] });
-        assert_eq!(facet_title(&x, "_ActorSceneMap"), "Szenen");
-    }
-
-    #[test]
-    fn facets_include_a_list_section_per_to_many_navigation() {
-        let mut ddic = DataDictionary::new();
-        ddic.activate();
-        // "Entity" has to-many lookups _Fields, _Many, _One after activation.
-        let entity = ddic.active_entity("Entity").unwrap();
-
-        let annotations = Annotations::from_entity(&DataDictionary::new(), entity, &[], &[]);
-        let main = annotations
-            .iter()
-            .find(|a| a.target == "Service.Entity")
-            .unwrap();
-        let facets = main
-            .annotations
-            .iter()
-            .find(|a| a.term == "UI.Facets")
-            .unwrap()
-            .collection
-            .as_ref()
-            .unwrap();
-
-        for nav_name in ["_Fields", "_Many", "_One"] {
-            let record = facets
-                .records
-                .iter()
-                .find(|r| {
-                    r.property_values.iter().any(|pv| {
-                        pv.property == "ID"
-                            && pv.string.as_deref() == Some(&format!("{nav_name}Section"))
-                    })
-                })
-                .unwrap_or_else(|| panic!("no list facet generated for {nav_name}"));
-            let target = record
-                .property_values
-                .iter()
-                .find(|pv| pv.property == "Target")
-                .unwrap();
-            assert_eq!(
-                target.annotation_path.as_deref(),
-                Some(format!("{nav_name}/@UI.LineItem").as_str())
-            );
-        }
-    }
-
-    #[test]
-    fn field_annotations_cover_atom_value_list_and_measure() {
-        let value_list_field = FieldSpec::string("code", "Code", 20)
-            .computed()
-            .immutable()
-            .with_value_list(AtomValueList::entity_ref("PackageSet", "ID", Some("name")));
-        let value_list_annotations = Annotations::from_field(&DataDictionary::new(), "Invoice", &value_list_field);
-
-        assert!(value_list_annotations.annotations.iter().any(|annotation| {
-            annotation.term == "Common.Label" && annotation.string.as_deref() == Some("Code")
-        }));
-        assert!(value_list_annotations
-            .annotations
-            .iter()
-            .any(|annotation| annotation.term == "Org.OData.Core.V1.Computed"));
-        assert!(value_list_annotations
-            .annotations
-            .iter()
-            .any(|annotation| annotation.term == "Org.OData.Core.V1.Immutable"));
-        assert!(value_list_annotations
-            .annotations
-            .iter()
-            .any(|annotation| annotation.term == "Common.ValueList"));
-        assert!(value_list_annotations
-            .annotations
-            .iter()
-            .any(|annotation| annotation.term == "Common.ValueListWithFixedValues"));
-
-        let measure = FieldSpec::Measure {
-            name: "amount".into(),
-            label: "Amount".into(),
-            package: None,
-            precision: Some(15),
-            scale: Some(2),
-            unit_field: "currency".into(),
-            kind: MeasureKind::Currency,
-        };
-        let measure_annotations = Annotations::from_field(&DataDictionary::new(), "Invoice", &measure);
-
-        assert!(measure_annotations.annotations.iter().any(|annotation| {
-            annotation.term == "Org.OData.Measures.V1.ISOCurrency"
-                && annotation.path.as_deref() == Some("currency")
-        }));
-    }
-
-    #[test]
-    fn measure_fields_render_as_data_field_and_unit_annotation() {
-        for kind in [MeasureKind::Currency, MeasureKind::Unit] {
-            let measure = FieldSpec::Measure {
-                name: "amount".into(),
-                label: "Amount".into(),
-                package: None,
-                precision: None,
-                scale: None,
-                unit_field: "unit".into(),
-                kind,
-            };
-            let rec = field_record(&DataDictionary::new(), &measure, &[], &[]).expect("Measure ist sichtbar");
-            let json = serde_json::to_string(&rec).unwrap();
-            assert!(json.contains("UI.DataField"));
-            assert!(json.contains("amount"));
-            assert!(field_record(&DataDictionary::new(), &measure, &["amount".to_string()], &[]).is_none());
-        }
-    }
-
-    #[test]
-    fn parses_simple_expand_list() {
-        let expand = parse_expand_items("DraftAdministrativeData,package").unwrap();
-
-        assert_eq!(expand.len(), 2);
-        assert_eq!(expand[0].navigation_property, "DraftAdministrativeData");
-        assert_eq!(expand[1].navigation_property, "package");
-    }
-
-    #[test]
-    fn parses_expand_with_select_options() {
-        let expand =
-            parse_expand_items("DraftAdministrativeData($select=DraftUUID,InProcessByUser)")
-                .unwrap();
-
-        assert_eq!(expand.len(), 1);
-        assert_eq!(expand[0].navigation_property, "DraftAdministrativeData");
-        assert_eq!(
-            expand[0].nested_query.select,
-            vec!["DraftUUID".to_string(), "InProcessByUser".to_string()]
-        );
-    }
-
-    #[test]
-    fn parses_nested_expand_options() {
-        let expand = parse_expand_items("_Entities($expand=package($select=name))").unwrap();
-
-        assert_eq!(expand.len(), 1);
-        assert_eq!(expand[0].navigation_property, "_Entities");
-        assert_eq!(expand[0].nested_query.expand.len(), 1);
-        assert_eq!(
-            expand[0].nested_query.expand[0].navigation_property,
-            "package"
-        );
-        assert_eq!(
-            expand[0].nested_query.expand[0].nested_query.select,
-            vec!["name".to_string()]
-        );
-    }
-
-    #[test]
-    fn parses_orderby_list_with_directions() {
-        let items = parse_orderby("ID,Amount desc, name ASC").unwrap();
-
-        assert_eq!(items.len(), 3);
-        assert_eq!(items[0].property, "ID");
-        assert_eq!(items[0].direction, SortDirection::Asc);
-        assert_eq!(items[1].property, "Amount");
-        assert_eq!(items[1].direction, SortDirection::Desc);
-        assert_eq!(items[2].property, "name");
-        assert_eq!(items[2].direction, SortDirection::Asc);
-    }
-
-    #[test]
-    fn invalid_orderby_direction_is_bad_request() {
-        assert!(parse_orderby("Amount sideways").is_err());
-        assert!(parse_orderby("Amount desc extra").is_err());
-    }
-
-    #[test]
-    fn build_query_passes_orderby_through() {
-        let mut params = HashMap::new();
-        params.insert("$orderby".to_string(), "ID desc".to_string());
-        let query = build_query(&params).unwrap();
-
-        assert_eq!(query.orderby.len(), 1);
-        assert_eq!(query.orderby[0].property, "ID");
-        assert_eq!(query.orderby[0].direction, SortDirection::Desc);
-    }
-
-    #[test]
-    fn expand_option_orderby_is_parsed() {
-        let expand = parse_expand_items("_Entities($orderby=name desc)").unwrap();
-
-        assert_eq!(expand[0].nested_query.orderby.len(), 1);
-        assert_eq!(expand[0].nested_query.orderby[0].property, "name");
-        assert_eq!(
-            expand[0].nested_query.orderby[0].direction,
-            SortDirection::Desc
-        );
-    }
-}
+mod tests;
 
 #[cfg(test)]
-mod list_view_annotation_tests {
-    use super::*;
-    use spec::{FieldSpec, ListView, Relationship};
-
-    fn atom(name: &str) -> FieldSpec {
-        FieldSpec::Atom {
-            name: name.into(),
-            label: name.into(),
-            edm_type: "Edm.String".into(),
-            package: None,
-            max_length: None,
-            precision: None,
-            scale: None,
-            computed: false,
-            immutable: false,
-            value_list: None,
-            unit_scale_field: None,
-            code_list: None,
-            link: false,
-            multiline: false,
-            side_effects: Vec::new(),
-            ui: None,
-        }
-    }
-
-    #[test]
-    fn link_atoms_become_clickable_fields() {
-        let mut e = active_video(vec![ListView::new("default", &["title"])]);
-        for f in e.fields.iter_mut() {
-            if let FieldSpec::Atom { name, link, .. } = f {
-                if name == "title" {
-                    *link = true;
-                }
-            }
-        }
-        let fg = serde_json::to_string(&field_group(&DataDictionary::new(), "Main", &e, None, &[], &[])).unwrap();
-        assert!(fg.contains("UI.DataFieldWithUrl"), "link-Atom wird DataFieldWithUrl");
-        let anns = line_item_annotations(&DataDictionary::new(), &e, &[]);
-        let li = serde_json::to_string(&anns[0]).unwrap();
-        assert!(li.contains("UI.DataFieldWithUrl"));
-        assert!(!serde_json::to_string(&field_group(&DataDictionary::new(), "Main", &active_video(vec![]), None, &[], &[])).unwrap().contains("DataFieldWithUrl"));
-    }
-
-    #[test]
-    fn header_type_names_are_display_texts_not_technical_names() {
-        let mut e = active_video(vec![]);
-        let header = |e: &spec::EntitySpec| {
-            let anns = Annotations::from_entity(&DataDictionary::new(), e, &[], &[]);
-            let main = anns.iter().find(|a| a.target == "Service.Video").unwrap();
-            serde_json::to_string(main.annotations.iter().find(|a| a.term == "UI.HeaderInfo").unwrap()).unwrap()
-        };
-        let h = header(&e);
-        assert!(h.contains("\"Videos\""), "Plural aus type_name_plural");
-        assert!(!h.contains("VideoSet"));
-        e.type_name = Some("Film".into());
-        assert!(header(&e).contains("\"Film\""), "TypeName aus type_name");
-    }
-
-    fn active_video(views: Vec<ListView>) -> spec::EntitySpec {
-        let mut ddic = spec::data_dictionary::DataDictionary::empty();
-        ddic.add_package(spec::package::Package::new("core"));
-        ddic.add_entity(spec::EntitySpec::new("Agent", "core", "Agents").field(atom("name")));
-        let mut video = spec::EntitySpec::new("Video", "core", "Videos")
-            .field(atom("name"))
-            .field(atom("title"));
-        for v in views {
-            video = video.list_view(v);
-        }
-        ddic.add_entity(video);
-        ddic.add_relationship(
-            Relationship::new("videos_agent_id", "core")
-                .with_one("Agent", "_Videos")
-                .with_many("Video", "agent"),
-        );
-        ddic.validate_list_views().expect("valid list views");
-        ddic.activate();
-        ddic.active_entity("Video").unwrap().clone()
-    }
-
-    fn find<'a>(anns: &'a [Annotation], term: &str, qualifier: Option<&str>) -> &'a Annotation {
-        anns.iter()
-            .find(|a| a.term == term && a.qualifier.as_deref() == qualifier)
-            .unwrap_or_else(|| panic!("{term} qualifier={qualifier:?} fehlt"))
-    }
-
-    fn datafield_paths(a: &Annotation) -> Vec<String> {
-        a.collection
-            .as_ref()
-            .unwrap()
-            .records
-            .iter()
-            .map(|r| {
-                r.property_values
-                    .iter()
-                    .find(|p| p.property == "Value")
-                    .and_then(|p| p.path.clone())
-                    .unwrap()
-            })
-            .collect()
-    }
-
-    #[test]
-    fn selection_fields_become_ui_selection_fields() {
-        let mut e = active_video(vec![]);
-        e.selection_fields = vec!["title".into(), "name".into()];
-        let anns = Annotations::from_entity(&DataDictionary::new(), &e, &[], &[]);
-        let main = anns.iter().find(|a| a.target == "Service.Video").unwrap();
-        let sel = main
-            .annotations
-            .iter()
-            .find(|a| a.term == "UI.SelectionFields")
-            .expect("UI.SelectionFields fehlt");
-        assert_eq!(datafield_paths_of_property_paths(sel), vec!["title", "name"]);
-    }
-
-    fn datafield_paths_of_property_paths(a: &Annotation) -> Vec<String> {
-        a.collection.as_ref().unwrap().property_paths.clone()
-    }
-
-    #[test]
-    fn filter_defaults_become_property_annotations() {
-        let mut e = active_video(vec![]);
-        e.filter_defaults.insert("name".into(), spec::FilterDefault::Text("Demo".into()));
-        e.filter_defaults.insert("title".into(), spec::FilterDefault::Flag(true));
-        let anns = Annotations::from_entity(&DataDictionary::new(), &e, &[], &[]);
-        let on = |target: &str| {
-            anns.iter()
-                .filter(|a| a.target == target)
-                .flat_map(|a| a.annotations.iter())
-                .find(|a| a.term == "Common.FilterDefaultValue")
-                .expect("FilterDefaultValue fehlt")
-        };
-        assert_eq!(on("Service.Video/name").string.as_deref(), Some("Demo"));
-        assert_eq!(on("Service.Video/title").bool_, Some(true));
-    }
-
-    #[test]
-    fn general_facet_with_fields_restricts_the_main_group() {
-        let mut e = active_video(vec![]);
-        e.facets.push(spec::FacetSpec { facet: "General".into(), view: None, title: None, fields: vec!["name".into()] });
-        let (_, groups) = object_page_sections(&DataDictionary::new(), &e, &[], &[]);
-        let main = serde_json::to_string(&groups[0]).unwrap();
-        assert!(main.contains("\"name\""));
-        assert!(!main.contains("\"title\""));
-    }
-
-    #[test]
-    fn default_facet_collects_unmentioned_fields() {
-        let mut e = active_video(vec![]);
-        e.facets.push(spec::FacetSpec { facet: "General".into(), view: None, title: None, fields: vec!["name".into()] });
-        e.facets.push(spec::FacetSpec { facet: "Default".into(), view: None, title: Some("Weitere".into()), fields: vec![] });
-        let (records, groups) = object_page_sections(&DataDictionary::new(), &e, &[], &[]);
-        let rest = groups.iter().find(|g| g.qualifier.as_deref() == Some("Default")).unwrap();
-        let rest = serde_json::to_string(rest).unwrap();
-        assert!(rest.contains("\"title\""));
-        assert!(!rest.contains("\"name\""), "genannte Felder stehen nicht in Default");
-        let default_ref = serde_json::to_string(&records).unwrap();
-        assert!(default_ref.contains("Weitere"));
-    }
-
-    #[test]
-    fn custom_facet_gets_its_own_field_group() {
-        let mut e = active_video(vec![]);
-        e.facets.push(spec::FacetSpec { facet: "Meta".into(), view: None, title: Some("Meta".into()), fields: vec!["title".into()] });
-        let (_, groups) = object_page_sections(&DataDictionary::new(), &e, &[], &[]);
-        let meta = groups.iter().find(|g| g.qualifier.as_deref() == Some("Meta")).unwrap();
-        assert!(serde_json::to_string(meta).unwrap().contains("\"title\""));
-        // Ohne General-Konfiguration bleibt der Hauptabschnitt mit allen Feldern erhalten.
-        let main = groups.iter().find(|g| g.qualifier.as_deref() == Some("Main")).unwrap();
-        assert!(serde_json::to_string(main).unwrap().contains("\"name\""));
-    }
-
-    #[test]
-    fn without_views_line_item_shows_name_only() {
-        let e = active_video(vec![]);
-        let anns = line_item_annotations(&DataDictionary::new(), &e, &[]);
-        assert_eq!(anns.len(), 1);
-        assert_eq!(anns[0].qualifier, None);
-        assert_eq!(datafield_paths(&anns[0]), vec!["name"]);
-    }
-
-    #[test]
-    fn without_name_field_uses_first_displayable_field() {
-        let entity = EntitySpec::new("ListColumn", "core", "List Columns")
-            .field(FieldSpec::atom("field", "Field", "Edm.String"))
-            .field(FieldSpec::atom("order", "Position", "Edm.Int64"));
-        let annotations = line_item_annotations(&DataDictionary::new(), &entity, &[]);
-        assert_eq!(datafield_paths(&annotations[0]), vec!["field"]);
-    }
-
-    #[test]
-    fn column_priority_becomes_importance_and_width_goes_to_config() {
-        use spec::{ListColumn, Priority};
-        let e = active_video(vec![ListView::with_columns(
-            "default",
-            vec![
-                ListColumn::new("name").width("20%").priority(Priority::High),
-                ListColumn::new("title"),
-            ],
-        )]);
-        let anns = line_item_annotations(&DataDictionary::new(), &e, &[]);
-        let default = find(&anns, "UI.LineItem", None);
-        let records = &default.collection.as_ref().unwrap().records;
-        assert_eq!(
-            records[0].annotations[0].term, "UI.Importance",
-            "Prioritaet am Datenfeld"
-        );
-        assert_eq!(
-            records[0].annotations[0].enum_member.as_deref(),
-            Some("UI.ImportanceType/High")
-        );
-        assert!(records[1].annotations.is_empty());
-
-        let mut ddic = spec::data_dictionary::DataDictionary::empty();
-        ddic.add_package(spec::package::Package::new("core"));
-        ddic.add_entity(e);
-        ddic.activate();
-        let widths = list_column_widths(&ddic, "Video").expect("Breiten");
-        assert_eq!(
-            widths["@com.sap.vocabularies.UI.v1.LineItem"]["columns"]["DataField::name"]["width"],
-            "20%"
-        );
-        assert!(widths["@com.sap.vocabularies.UI.v1.LineItem"]["columns"]
-            .get("DataField::title")
-            .is_none());
-    }
-
-    #[test]
-    fn default_and_named_views_get_qualifiers_and_navigation_paths() {
-        let e = active_video(vec![
-            ListView::new("default", &["name", "agent", "title"]),
-            ListView::new("review", &["title"]),
-        ]);
-        let anns = line_item_annotations(&DataDictionary::new(), &e, &[]);
-
-        let default = find(&anns, "UI.LineItem", None);
-        assert_eq!(datafield_paths(default), vec!["name", "agent/name", "title"]);
-
-        let review = find(&anns, "UI.LineItem", Some("review"));
-        assert_eq!(datafield_paths(review), vec!["title"]);
-
-        let pv_default = find(&anns, "UI.PresentationVariant", None);
-        let vis = pv_default
-            .record
-            .as_ref()
-            .unwrap()
-            .property_values
-            .iter()
-            .find(|p| p.property == "Visualizations")
-            .unwrap()
-            .collection
-            .as_ref()
-            .unwrap();
-        assert_eq!(vis.annotation_paths, vec!["@UI.LineItem"]);
-
-        let pv_review = find(&anns, "UI.PresentationVariant", Some("review"));
-        let vis = pv_review
-            .record
-            .as_ref()
-            .unwrap()
-            .property_values
-            .iter()
-            .find(|p| p.property == "Visualizations")
-            .unwrap()
-            .collection
-            .as_ref()
-            .unwrap();
-        assert_eq!(vis.annotation_paths, vec!["@UI.LineItem#review"]);
-    }
-
-    #[test]
-    fn views_settings_only_with_more_than_one_view() {
-        let single = active_video(vec![ListView::new("default", &["name"])]);
-        assert!(crate::flp::list_views_settings(&single, &[]).is_empty());
-
-        let multi = active_video(vec![
-            ListView::new("review", &["title"]),
-            ListView::new("default", &["name"]),
-        ]);
-        let settings = crate::flp::list_views_settings(&multi, &[]);
-        let paths = settings["views"]["paths"].as_array().unwrap();
-        assert_eq!(paths[0]["key"], "default");
-        assert_eq!(
-            paths[1]["annotationPath"],
-            "com.sap.vocabularies.UI.v1.PresentationVariant#review"
-        );
-    }
-}
+mod list_view_annotation_tests;
 
 #[cfg(test)]
-mod value_list_annotation_tests {
-    use super::*;
-
-    /// Konstante Werte muessen als `String="..."` ausgegeben werden; `Constant="..."`
-    /// ist kein gueltiges CSDL und laesst die Oberflaeche die Wertehilfe verwerfen.
-    #[test]
-    fn list_id_constant_is_emitted_as_string() {
-        let vl = AtomValueList::FieldValueList {
-            list_id: "abc".into(),
-            prefer_dialog: false,
-        };
-        let json = serde_json::to_string(&annotations_for_atom_value_list("status", &vl)).unwrap();
-        assert!(!json.contains("@Constant"), "{json}");
-        assert!(json.contains("\"@String\":\"abc\""), "{json}");
-    }
-}
+mod value_list_annotation_tests;

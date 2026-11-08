@@ -130,7 +130,10 @@ impl ScriptHooks {
 
     /// Laedt Skripte aus einer beliebigen Quelle (z. B. ZIP im Speicher).
     /// Ohne Beobachtung: Aenderungen gibt es nur per `reload()`.
-    pub fn load_from(repo: Arc<dyn FileRepository>, label: impl Into<String>) -> anyhow::Result<ScriptHooks> {
+    pub fn load_from(
+        repo: Arc<dyn FileRepository>,
+        label: impl Into<String>,
+    ) -> anyhow::Result<ScriptHooks> {
         let inner = Arc::new(Inner::new(repo, label.into()));
         inner.reload();
         check_errors(&inner)?;
@@ -290,7 +293,11 @@ impl ScriptHooks {
             .read()
             .unwrap()
             .get(set)
-            .map(|v| v.iter().map(|b| (b.script.clone(), b.config.clone())).collect())
+            .map(|v| {
+                v.iter()
+                    .map(|b| (b.script.clone(), b.config.clone()))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -320,8 +327,8 @@ impl ScriptHooks {
             (arg, cfg),
         );
         DEADLINE.with(|d| d.set(None));
-        let dynamic =
-            result.map_err(|e| ScriptError::Script(format!("{script}.{fname}: {}", describe(&e))))?;
+        let dynamic = result
+            .map_err(|e| ScriptError::Script(format!("{script}.{fname}: {}", describe(&e))))?;
         let value: Value = rhai::serde::from_dynamic(&dynamic)
             .map_err(|e| ScriptError::Script(format!("{script}.{fname}: {e}")))?;
         if !value.is_object() {
@@ -394,7 +401,9 @@ impl Inner {
         match self.repo.list("") {
             Ok(names) => {
                 for name in names {
-                    let Some(set) = rhai_stem(&name) else { continue };
+                    let Some(set) = rhai_stem(&name) else {
+                        continue;
+                    };
                     match self.compile(&name) {
                         Ok(script) => {
                             next.insert(set.to_string(), Arc::new(script));
@@ -418,7 +427,9 @@ impl Inner {
         if let Ok(names) = self.repo.list("components") {
             let old_components = self.components.read().unwrap().clone();
             for name in names {
-                let Some(stem) = rhai_stem(&name) else { continue };
+                let Some(stem) = rhai_stem(&name) else {
+                    continue;
+                };
                 let key = format!("components/{stem}");
                 let rel = format!("components/{name}");
                 match self.compile(&rel) {
@@ -461,7 +472,8 @@ impl Inner {
 
 /// Stamm eines `*.rhai`-Dateinamens; `None` fuer andere Dateien.
 fn rhai_stem(name: &str) -> Option<&str> {
-    name.strip_suffix(".rhai").filter(|s| !s.is_empty() && !s.contains('/'))
+    name.strip_suffix(".rhai")
+        .filter(|s| !s.is_empty() && !s.contains('/'))
 }
 
 /// Schluessel der Query fuer Skripte: `$filter` heisst dort `filter` usw.
@@ -566,7 +578,8 @@ fn rhai_err(msg: &str) -> Box<rhai::EvalAltResult> {
 }
 
 fn parse_ts(ts: &str) -> Result<chrono::DateTime<chrono::FixedOffset>, Box<rhai::EvalAltResult>> {
-    chrono::DateTime::parse_from_rfc3339(ts).map_err(|e| rhai_err(&format!("Ungueltiger Zeitpunkt '{ts}': {e}")))
+    chrono::DateTime::parse_from_rfc3339(ts)
+        .map_err(|e| rhai_err(&format!("Ungueltiger Zeitpunkt '{ts}': {e}")))
 }
 
 fn register_helpers(engine: &mut Engine) {
@@ -599,37 +612,49 @@ fn register_helpers(engine: &mut Engine) {
     });
     // Datumsfunktionen fuer Skripte. Zeitpunkte sind ISO-8601-Texte mit Offset
     // (z. B. `2026-10-31T09:00:00+01:00`); Ergebnisse behalten den Offset der Eingabe.
-    engine.register_fn("ts_add_minutes", |ts: &str, minutes: i64| -> Result<String, Box<rhai::EvalAltResult>> {
-        let t = parse_ts(ts)?;
-        let d = chrono::Duration::try_minutes(minutes).ok_or_else(|| rhai_err("ts_add_minutes: Dauer ungueltig"))?;
-        let r = t.checked_add_signed(d).ok_or_else(|| rhai_err("ts_add_minutes: Ueberlauf"))?;
-        Ok(r.to_rfc3339_opts(chrono::SecondsFormat::Secs, false))
-    });
+    engine.register_fn(
+        "ts_add_minutes",
+        |ts: &str, minutes: i64| -> Result<String, Box<rhai::EvalAltResult>> {
+            let t = parse_ts(ts)?;
+            let d = chrono::Duration::try_minutes(minutes)
+                .ok_or_else(|| rhai_err("ts_add_minutes: Dauer ungueltig"))?;
+            let r = t
+                .checked_add_signed(d)
+                .ok_or_else(|| rhai_err("ts_add_minutes: Ueberlauf"))?;
+            Ok(r.to_rfc3339_opts(chrono::SecondsFormat::Secs, false))
+        },
+    );
     // Differenz `b - a` in ganzen Minuten.
-    engine.register_fn("ts_diff_minutes", |a: &str, b: &str| -> Result<i64, Box<rhai::EvalAltResult>> {
-        let (a, b) = (parse_ts(a)?, parse_ts(b)?);
-        Ok((b - a).num_minutes())
-    });
+    engine.register_fn(
+        "ts_diff_minutes",
+        |a: &str, b: &str| -> Result<i64, Box<rhai::EvalAltResult>> {
+            let (a, b) = (parse_ts(a)?, parse_ts(b)?);
+            Ok((b - a).num_minutes())
+        },
+    );
     // Rundet auf das naechste Vielfache von `step` Minuten (Sekunden werden auf 0 gesetzt).
-    engine.register_fn("ts_round_minutes", |ts: &str, step: i64| -> Result<String, Box<rhai::EvalAltResult>> {
-        if step <= 0 {
-            return Err(rhai_err("ts_round_minutes: Schrittweite muss > 0 sein"));
-        }
-        // Rundung auf der Wanduhrzeit (lokaler Zeitpunkt), Sekunden und Bruchteile werden verworfen.
-        let t = parse_ts(ts)?;
-        let local_secs = t.naive_local().and_utc().timestamp();
-        let step_s = step * 60;
-        let rounded = (local_secs + step_s / 2).div_euclid(step_s) * step_s;
-        let naive = chrono::DateTime::from_timestamp(rounded, 0)
-            .ok_or_else(|| rhai_err("ts_round_minutes: Ueberlauf"))?
-            .naive_utc();
-        let r = t
-            .offset()
-            .from_local_datetime(&naive)
-            .earliest()
-            .ok_or_else(|| rhai_err("ts_round_minutes: Zeitpunkt nicht eindeutig"))?;
-        Ok(r.to_rfc3339_opts(chrono::SecondsFormat::Secs, false))
-    });
+    engine.register_fn(
+        "ts_round_minutes",
+        |ts: &str, step: i64| -> Result<String, Box<rhai::EvalAltResult>> {
+            if step <= 0 {
+                return Err(rhai_err("ts_round_minutes: Schrittweite muss > 0 sein"));
+            }
+            // Rundung auf der Wanduhrzeit (lokaler Zeitpunkt), Sekunden und Bruchteile werden verworfen.
+            let t = parse_ts(ts)?;
+            let local_secs = t.naive_local().and_utc().timestamp();
+            let step_s = step * 60;
+            let rounded = (local_secs + step_s / 2).div_euclid(step_s) * step_s;
+            let naive = chrono::DateTime::from_timestamp(rounded, 0)
+                .ok_or_else(|| rhai_err("ts_round_minutes: Ueberlauf"))?
+                .naive_utc();
+            let r = t
+                .offset()
+                .from_local_datetime(&naive)
+                .earliest()
+                .ok_or_else(|| rhai_err("ts_round_minutes: Zeitpunkt nicht eindeutig"))?;
+            Ok(r.to_rfc3339_opts(chrono::SecondsFormat::Secs, false))
+        },
+    );
     engine.register_fn("ts_valid", |ts: &str| parse_ts(ts).is_ok());
 }
 

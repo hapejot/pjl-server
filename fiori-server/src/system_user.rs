@@ -15,10 +15,10 @@ use std::collections::HashSet;
 use chrono::{SecondsFormat, Utc};
 use data_store::{DataRecord, DraftDataStore, EntityKey, StoreError};
 use odata::query::ODataQuery;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use spec::system_user::{
-    self as su, default_user_id, CHANGED_AT, CHANGED_BY, CREATED_AT, CREATED_BY, OWNER,
-    SYSTEM_USER_SET,
+    self as su, CHANGED_AT, CHANGED_BY, CREATED_AT, CREATED_BY, OWNER, SYSTEM_USER_SET,
+    default_user_id,
 };
 use uuid::Uuid;
 
@@ -40,8 +40,13 @@ fn username_of(record: &DataRecord) -> Option<String> {
 }
 
 /// Sucht einen Benutzer ueber den Username (ohne Hooks, direkt am Store).
-async fn find_user(raw: &dyn DraftDataStore, username: &str) -> Result<Option<DataRecord>, StoreError> {
-    let all = raw.get_collection(SYSTEM_USER_SET, &ODataQuery::new()).await?;
+async fn find_user(
+    raw: &dyn DraftDataStore,
+    username: &str,
+) -> Result<Option<DataRecord>, StoreError> {
+    let all = raw
+        .get_collection(SYSTEM_USER_SET, &ODataQuery::new())
+        .await?;
     Ok(all
         .into_iter()
         .find(|r| username_of(r).as_deref() == Some(username)))
@@ -183,7 +188,11 @@ async fn check_user(
             "Benutzer koennen nicht geloescht werden".into(),
         ))),
         Operation::Create => {
-            let name = value.get(su::USERNAME).and_then(Value::as_str).unwrap_or("").trim();
+            let name = value
+                .get(su::USERNAME)
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
             if name.is_empty() {
                 return Err(HookError::Hook("Username fehlt".into()));
             }
@@ -197,7 +206,10 @@ async fn check_user(
                         "Der Default User kann nicht deaktiviert werden".into(),
                     )));
                 }
-                if value.get(su::USERNAME).is_some_and(|u| u.as_str() != Some(su::DEFAULT_USERNAME)) {
+                if value
+                    .get(su::USERNAME)
+                    .is_some_and(|u| u.as_str() != Some(su::DEFAULT_USERNAME))
+                {
                     return Err(HookError::Store(StoreError::Forbidden(
                         "Der Default User kann nicht umbenannt werden".into(),
                     )));
@@ -223,9 +235,9 @@ async fn ensure_unique(
     except: Option<Uuid>,
 ) -> Result<(), HookError> {
     match find_user(raw, username).await? {
-        Some(rec) if Some(uuid_of(&rec.id())) != except => Err(HookError::Store(StoreError::Conflict(
-            format!("Benutzername '{username}' ist bereits vergeben"),
-        ))),
+        Some(rec) if Some(uuid_of(&rec.id())) != except => Err(HookError::Store(
+            StoreError::Conflict(format!("Benutzername '{username}' ist bereits vergeben")),
+        )),
         _ => Ok(()),
     }
 }
@@ -241,7 +253,9 @@ fn fk(name: &str) -> String {
 /// Beim Anlegen: Owner (falls leer) = Akteur; Ersteller und Zeit setzen.
 /// Vom Client mitgegebene Aenderungsfelder werden verworfen.
 fn audit_create(value: &mut Value, actor: Uuid) {
-    let Some(obj) = value.as_object_mut() else { return };
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
     let owner_empty = match obj.get(&fk(OWNER)) {
         None | Some(Value::Null) => true,
         Some(Value::String(s)) => s.is_empty(),
@@ -258,7 +272,9 @@ fn audit_create(value: &mut Value, actor: Uuid) {
 
 /// Beim Aendern: Aenderer und Zeit setzen. Ersteller bleibt unveraendert.
 fn audit_patch(value: &mut Value, actor: Uuid) {
-    let Some(obj) = value.as_object_mut() else { return };
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
     obj.remove(&fk(CREATED_BY));
     obj.remove(CREATED_AT);
     obj.insert(fk(CHANGED_BY), json!(actor.to_string()));
@@ -301,49 +317,4 @@ impl Hook for SystemUserHook {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn create_sets_owner_and_created_fields_and_drops_client_changes() {
-        let actor = Uuid::new_v4();
-        let mut v = json!({"name": "x", "ChangedBy_ID": "evil", "ChangedAt": "x"});
-        audit_create(&mut v, actor);
-        assert_eq!(v["Owner_ID"], json!(actor.to_string()));
-        assert_eq!(v["CreatedBy_ID"], json!(actor.to_string()));
-        assert!(v.get("CreatedAt").is_some());
-        assert!(v.get("ChangedBy_ID").is_none());
-        assert!(v.get("ChangedAt").is_none());
-    }
-
-    #[test]
-    fn create_keeps_explicit_owner() {
-        let actor = Uuid::new_v4();
-        let other = Uuid::new_v4();
-        let mut v = json!({"Owner_ID": other.to_string()});
-        audit_create(&mut v, actor);
-        assert_eq!(v["Owner_ID"], json!(other.to_string()));
-        assert_eq!(v["CreatedBy_ID"], json!(actor.to_string()));
-    }
-
-    #[test]
-    fn patch_sets_changed_and_protects_created() {
-        let actor = Uuid::new_v4();
-        let mut v = json!({"name": "y", "CreatedBy_ID": "evil", "CreatedAt": "x"});
-        audit_patch(&mut v, actor);
-        assert_eq!(v["ChangedBy_ID"], json!(actor.to_string()));
-        assert!(v.get("ChangedAt").is_some());
-        assert!(v.get("CreatedBy_ID").is_none());
-        assert!(v.get("CreatedAt").is_none());
-        assert_eq!(v["name"], json!("y"));
-    }
-
-    #[tokio::test]
-    async fn current_user_defaults_outside_request() {
-        assert_eq!(current_user(), None);
-        let seen = CURRENT_USER
-            .scope(Some("peter".into()), async { current_user() })
-            .await;
-        assert_eq!(seen.as_deref(), Some("peter"));
-    }
-}
+mod tests;

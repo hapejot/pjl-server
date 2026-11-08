@@ -97,7 +97,10 @@ fn run() -> Result<()> {
             })
             .collect();
         let file = format!("{set}.json");
-        fs::write(args.out.join(&file), serde_json::to_string_pretty(&records)?)?;
+        fs::write(
+            args.out.join(&file),
+            serde_json::to_string_pretty(&records)?,
+        )?;
         println!("{:32} {:6} Saetze", set, records.len());
         total += records.len();
         manifest_sets.push(manifest_entry(&model, set, etype, records.len(), &file));
@@ -110,8 +113,15 @@ fn run() -> Result<()> {
         "order": order,
         "sets": manifest_sets,
     });
-    fs::write(args.out.join("manifest.json"), serde_json::to_string_pretty(&manifest)?)?;
-    println!("{} Sets, {total} Saetze nach {}", order.len(), args.out.display());
+    fs::write(
+        args.out.join("manifest.json"),
+        serde_json::to_string_pretty(&manifest)?,
+    )?;
+    println!(
+        "{} Sets, {total} Saetze nach {}",
+        order.len(),
+        args.out.display()
+    );
     Ok(())
 }
 
@@ -123,8 +133,13 @@ fn fetch_all(client: &Client, set: &str) -> Result<Vec<Value>> {
         if status != 200 {
             bail!("{set}: HTTP {status}: {}", String::from_utf8_lossy(&body));
         }
-        let page: Value = serde_json::from_slice(&body).with_context(|| format!("{set}: ungueltiges JSON"))?;
-        let items = page.get("value").and_then(Value::as_array).cloned().unwrap_or_default();
+        let page: Value =
+            serde_json::from_slice(&body).with_context(|| format!("{set}: ungueltiges JSON"))?;
+        let items = page
+            .get("value")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
         let n = items.len();
         records.extend(items);
         if n < PAGE {

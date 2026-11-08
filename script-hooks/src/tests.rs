@@ -108,7 +108,9 @@ fn list_after_read_can_remove_rows() {
     )]);
     let hooks = ScriptHooks::load(d.path()).unwrap();
     let mut payload = json!([{"Visible": true}, {"Visible": false}]);
-    hooks.after_read("Item", "list", None, None, &mut payload).unwrap();
+    hooks
+        .after_read("Item", "list", None, None, &mut payload)
+        .unwrap();
     assert_eq!(payload, json!([{"Visible": true}]));
 }
 
@@ -157,7 +159,10 @@ fn before_read_reduces_filter_and_keeps_other_side() {
 
 #[test]
 fn invalid_query_returned_is_error() {
-    let d = dir_with(&[("Item.rhai", r#"fn before_read(ctx) { ctx.query.top = "viel"; ctx }"#)]);
+    let d = dir_with(&[(
+        "Item.rhai",
+        r#"fn before_read(ctx) { ctx.query.top = "viel"; ctx }"#,
+    )]);
     let hooks = ScriptHooks::load(d.path()).unwrap();
     let mut q = ODataQuery::new();
     assert!(hooks.before_read("Item", None, &mut q).is_err());

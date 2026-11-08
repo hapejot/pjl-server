@@ -78,7 +78,10 @@ impl AppState {
     }
 
     pub fn with_sticky_sessions(mut self, store: Arc<ddic_store::DdicStore>) -> Self {
-        assert!(self.is_designer(), "Sticky sessions currently require the designer store");
+        assert!(
+            self.is_designer(),
+            "Sticky sessions currently require the designer store"
+        );
         self.sticky = Some(Arc::new(sticky::StickySessions::new(store)));
         self
     }

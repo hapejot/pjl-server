@@ -58,8 +58,12 @@ pub fn validate(lists: &[ValueList]) -> Result<(), String> {
     let mut ids = std::collections::HashSet::new();
     let mut names = std::collections::HashSet::new();
     for list in lists {
-        Uuid::parse_str(&list.id)
-            .map_err(|_| format!("value list '{}': id '{}' ist keine UUID", list.name, list.id))?;
+        Uuid::parse_str(&list.id).map_err(|_| {
+            format!(
+                "value list '{}': id '{}' ist keine UUID",
+                list.name, list.id
+            )
+        })?;
         if !ids.insert(list.id.to_lowercase()) {
             return Err(format!("value list id '{}' doppelt", list.id));
         }
@@ -69,7 +73,10 @@ pub fn validate(lists: &[ValueList]) -> Result<(), String> {
         let mut codes = std::collections::HashSet::new();
         for v in &list.values {
             if !codes.insert(v.code.clone()) {
-                return Err(format!("value list '{}': code '{}' doppelt", list.name, v.code));
+                return Err(format!(
+                    "value list '{}': code '{}' doppelt",
+                    list.name, v.code
+                ));
             }
         }
     }
@@ -82,4 +89,3 @@ pub fn is_valid_entity_name(name: &str) -> bool {
     matches!(chars.next(), Some(c) if c.is_ascii_alphabetic())
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
-

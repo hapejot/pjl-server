@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use file_repo::{DirRepository, FileRepository, Limits};
 
 use crate::config::ServerConfig;
@@ -95,7 +95,9 @@ pub fn resolve(config: &ServerConfig) -> anyhow::Result<Sources> {
     let (ddic, overlay, scripts, ext) = match &config.model_root {
         Some(uri) => {
             if config.scripts_dir.is_some() || config.ext_dir.is_some() {
-                bail!("MODEL_ROOT ist gesetzt: SCRIPTS_DIR und EXT_DIR entfallen (Layout: scripts/, ext/)");
+                bail!(
+                    "MODEL_ROOT ist gesetzt: SCRIPTS_DIR und EXT_DIR entfallen (Layout: scripts/, ext/)"
+                );
             }
             let repo = open(uri)?;
             let fs_root = file_repo::file_path(uri);
@@ -145,10 +147,7 @@ pub fn resolve(config: &ServerConfig) -> anyhow::Result<Sources> {
 
 /// Dateipfad der Designer-Datei. Der Designer schreibt nur auf das Dateisystem.
 pub fn designer_path(config: &ServerConfig) -> anyhow::Result<PathBuf> {
-    let ddic = config
-        .ddic
-        .clone()
-        .context("designer needs --ddic")?;
+    let ddic = config.ddic.clone().context("designer needs --ddic")?;
     match &config.designer_root {
         Some(uri) => {
             let root = file_repo::file_path(uri).with_context(|| {
@@ -161,99 +160,4 @@ pub fn designer_path(config: &ServerConfig) -> anyhow::Result<PathBuf> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::http::{StatusCode, header};
-    use std::io::{Cursor, Write};
-
-    /// Minimales Modell als ZIP im Layout `ddic.json`, `scripts/`, `ext/`.
-    /// Alle Inhalte stehen im Test selbst.
-    fn model_zip() -> Vec<u8> {
-        let mut buf = Cursor::new(Vec::new());
-        {
-            let mut w = zip::ZipWriter::new(&mut buf);
-            let opts = zip::write::SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Deflated);
-            w.start_file("ddic.json", opts).unwrap();
-            w.write_all(br#"{"entities":[],"apps":[]}"#).unwrap();
-            w.start_file("scripts/CustomerSet.rhai", opts).unwrap();
-            w.write_all(b"fn before_patch(ctx) { ctx }").unwrap();
-            w.start_file("ext/videos/Player.js", opts).unwrap();
-            w.write_all(b"var a;").unwrap();
-            w.finish().unwrap();
-        }
-        buf.into_inner()
-    }
-
-    #[test]
-    fn model_root_zip_provides_ddic_scripts_and_ext() {
-        let dir = tempfile::tempdir().unwrap();
-        let zp = dir.path().join("model.zip");
-        std::fs::write(&zp, model_zip()).unwrap();
-
-        let mut config = ServerConfig::defaults(crate::config::ServerMode::Runtime);
-        config.model_root = Some(format!("zip://{}", zp.display()));
-        config.ddic = Some(PathBuf::from("ddic.json"));
-
-        let sources = resolve(&config).unwrap();
-        assert!(sources.ddic.repo.exists("ddic.json"));
-        assert!(sources.overlay.is_none());
-        let scripts = sources.scripts.expect("scripts");
-        assert!(scripts.fs_dir.is_none(), "zip hat keinen Dateisystempfad");
-        let hooks = script_hooks::ScriptHooks::load_from(scripts.repo, scripts.label).unwrap();
-        assert!(hooks.status()["sets"].get("CustomerSet").is_some());
-        assert!(sources.ext.expect("ext").repo.exists("videos/Player.js"));
-    }
-
-    #[test]
-    fn model_root_rejects_legacy_script_and_ext_dirs() {
-        let mut config = ServerConfig::defaults(crate::config::ServerMode::Runtime);
-        config.model_root = Some("zip:///nonexistent.zip".into());
-        config.scripts_dir = Some(PathBuf::from("x"));
-        assert!(resolve(&config).is_err());
-    }
-
-    #[test]
-    fn designer_root_must_be_file() {
-        let mut config = ServerConfig::defaults(crate::config::ServerMode::Runtime);
-        config.designer = true;
-        config.designer_root = Some("zip:///x.zip".into());
-        assert!(designer_path(&config).is_err());
-
-        config.designer_root = Some("file:///srv/designer".into());
-        config.ddic = Some(PathBuf::from("ddic.json"));
-        assert_eq!(designer_path(&config).unwrap(), PathBuf::from("/srv/designer/ddic.json"));
-    }
-
-    #[test]
-    fn fiori_root_zip_is_served_with_content_type() {
-        let mut buf = Cursor::new(Vec::new());
-        {
-            let mut w = zip::ZipWriter::new(&mut buf);
-            let opts = zip::write::SimpleFileOptions::default();
-            w.start_file("index.html", opts).unwrap();
-            w.write_all(b"<html></html>").unwrap();
-            w.start_file("apps/x/manifest.json", opts).unwrap();
-            w.write_all(b"{}").unwrap();
-            w.finish().unwrap();
-        }
-        let repo = file_repo::ZipRepository::from_bytes(
-            bytes::Bytes::from(buf.into_inner()),
-            &Limits::default(),
-        )
-        .unwrap();
-        let ok = crate::repo_serve::serve(&repo, "");
-        assert_eq!(ok.status(), StatusCode::OK);
-        assert_eq!(ok.headers()[header::CONTENT_TYPE], "text/html");
-        let json = crate::repo_serve::serve(&repo, "/apps/x/manifest.json");
-        assert_eq!(json.headers()[header::CONTENT_TYPE], "application/json");
-        assert_eq!(
-            crate::repo_serve::serve(&repo, "../etc/passwd").status(),
-            StatusCode::NOT_FOUND
-        );
-        assert_eq!(
-            crate::repo_serve::serve(&repo, "missing.js").status(),
-            StatusCode::NOT_FOUND
-        );
-    }
-}
+mod tests;

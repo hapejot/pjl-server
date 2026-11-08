@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use data_store::EntityKey;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::AppState;
 
@@ -94,7 +94,6 @@ pub trait Extension: Send + Sync {
     }
 }
 
-
 pub type Extensions = Vec<Arc<dyn Extension>>;
 
 /// Fehler einer Erweiterungs-Aktion. Wird in `srv` auf einen OData-Fehler abgebildet.
@@ -154,7 +153,11 @@ pub fn bound_actions(extensions: &[Arc<dyn Extension>]) -> Vec<BoundAction> {
 }
 
 /// Gebundene Aktion `name` auf dem Entity Set `set`.
-pub fn find_action(extensions: &[Arc<dyn Extension>], set: &str, name: &str) -> Option<BoundAction> {
+pub fn find_action(
+    extensions: &[Arc<dyn Extension>],
+    set: &str,
+    name: &str,
+) -> Option<BoundAction> {
     bound_actions(extensions)
         .into_iter()
         .find(|a| a.set == set && a.name == name)
@@ -184,7 +187,10 @@ pub fn object_page_content(extensions: &[Arc<dyn Extension>], entity: &str) -> O
 
 /// Zusaetzliche View-Eintraege aller Erweiterungen fuer die ListReport von `entity`.
 pub fn list_views(extensions: &[Arc<dyn Extension>], entity: &str) -> Vec<Value> {
-    extensions.iter().flat_map(|ext| ext.list_views(entity)).collect()
+    extensions
+        .iter()
+        .flat_map(|ext| ext.list_views(entity))
+        .collect()
 }
 
 /// Ausgeblendete Formularfelder der Hauptentitaet `entity` (alle Erweiterungen).
@@ -212,7 +218,10 @@ pub fn controller_extensions_manifest(extensions: &[Arc<dyn Extension>]) -> Valu
 
 /// UI5-Module aller Erweiterungen, in Registrierungsreihenfolge.
 pub fn ui5_modules(extensions: &[Arc<dyn Extension>]) -> Vec<String> {
-    extensions.iter().flat_map(|ext| ext.ui5_modules()).collect()
+    extensions
+        .iter()
+        .flat_map(|ext| ext.ui5_modules())
+        .collect()
 }
 
 /// Zusaetzliche Listenspalten aller Erweiterungen, als `columns`-Objekt der

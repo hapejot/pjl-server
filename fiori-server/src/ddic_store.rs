@@ -93,7 +93,11 @@ impl DdicStore {
         let sets = project(&base);
         Ok(Self {
             path,
-            inner: Mutex::new(Snapshot { sets, base, revision: 0 }),
+            inner: Mutex::new(Snapshot {
+                sets,
+                base,
+                revision: 0,
+            }),
             transient: false,
             navigation: Navigation::default(),
             navigations: Mutex::new(Vec::new()),
@@ -122,12 +126,17 @@ impl DdicStore {
         *self.inner.lock().expect("ddic lock") = snapshot;
     }
 
-    pub(crate) fn save_session(&self, baseline: &Snapshot, working: &DdicStore) -> Result<(), StoreError> {
+    pub(crate) fn save_session(
+        &self,
+        baseline: &Snapshot,
+        working: &DdicStore,
+    ) -> Result<(), StoreError> {
         let next = working.snapshot();
         let mut inner = self.inner.lock().expect("ddic lock");
         if inner.revision != baseline.revision {
             return Err(StoreError::Conflict(
-                "Dictionary changed since editing started; discard and reload before editing again".into(),
+                "Dictionary changed since editing started; discard and reload before editing again"
+                    .into(),
             ));
         }
         let json = build(&inner.base, &next.sets)?;
@@ -217,7 +226,8 @@ fn project(base: &Value) -> Sets {
     let mut sets: Sets = HashMap::new();
     for p in items(base, "packages") {
         if let Some(name) = text(p, "name") {
-            push_record(&mut sets,
+            push_record(
+                &mut sets,
                 "PackageSet",
                 id_for("PackageSet", name),
                 json!({ "name": name }),
@@ -230,120 +240,190 @@ fn project(base: &Value) -> Sets {
         };
         let entity_id = id_for("EntitySet", name);
         let pkg = text(e, "package").unwrap_or(DEFAULT_PACKAGE);
-        push_record(&mut sets, "EntitySet", entity_id.clone(), json!({
-            "name": name,
-            "plural": text(e, "type_name_plural"),
-            "draft_enabled": e.get("draft_enabled").and_then(Value::as_bool).unwrap_or(true),
-            "type_name": text(e, "type_name"),
-            "audited": e.get("audited").and_then(Value::as_bool).unwrap_or(true),
-            "package_ID": id_for("PackageSet", pkg),
-        }));
+        push_record(
+            &mut sets,
+            "EntitySet",
+            entity_id.clone(),
+            json!({
+                "name": name,
+                "plural": text(e, "type_name_plural"),
+                "draft_enabled": e.get("draft_enabled").and_then(Value::as_bool).unwrap_or(true),
+                "type_name": text(e, "type_name"),
+                "audited": e.get("audited").and_then(Value::as_bool).unwrap_or(true),
+                "package_ID": id_for("PackageSet", pkg),
+            }),
+        );
 
         for (view_order, view) in items(e, "list_views").iter().enumerate() {
-            let Some(view_name) = text(view, "name") else { continue };
+            let Some(view_name) = text(view, "name") else {
+                continue;
+            };
             let view_id = id_for("EntityListViewSet", &format!("{name}/{view_name}"));
-            push_record(&mut sets, "EntityListViewSet", view_id.clone(), json!({
-                "name": view_name,
-                "role": text(view, "role"),
-                "order": view_order,
-                "entity_ID": entity_id,
-            }));
+            push_record(
+                &mut sets,
+                "EntityListViewSet",
+                view_id.clone(),
+                json!({
+                    "name": view_name,
+                    "role": text(view, "role"),
+                    "order": view_order,
+                    "entity_ID": entity_id,
+                }),
+            );
             for (order, column) in items(view, "columns").iter().enumerate() {
                 // Kurzform (Feldname als String) oder Objekt mit field/width/priority.
                 let (field, width, priority) = match column.as_str() {
                     Some(field) => (Some(field), None, None),
-                    None => (text(column, "field"), text(column, "width"), text(column, "priority")),
+                    None => (
+                        text(column, "field"),
+                        text(column, "width"),
+                        text(column, "priority"),
+                    ),
                 };
                 let Some(field) = field else { continue };
-                push_record(&mut sets, "EntityListColumnSet",
-                    id_for("EntityListColumnSet", &format!("{name}/{view_name}/{order}")),
+                push_record(
+                    &mut sets,
+                    "EntityListColumnSet",
+                    id_for(
+                        "EntityListColumnSet",
+                        &format!("{name}/{view_name}/{order}"),
+                    ),
                     json!({
                         "field": field,
                         "order": order,
                         "width": width,
                         "priority": priority,
                         "list_view_ID": view_id,
-                    }));
+                    }),
+                );
             }
         }
         if let Some(defaults) = e.get("filter_defaults").and_then(Value::as_object) {
             for (field, value) in defaults {
                 let is_boolean = value.is_boolean();
-                push_record(&mut sets, "EntityFilterDefaultSet",
+                push_record(
+                    &mut sets,
+                    "EntityFilterDefaultSet",
                     id_for("EntityFilterDefaultSet", &format!("{name}/{field}")),
                     json!({
                         "field": field,
                         "value": if is_boolean { value.to_string() } else { value.as_str().unwrap_or_default().to_string() },
                         "is_boolean": is_boolean,
                         "entity_ID": entity_id,
-                    }));
+                    }),
+                );
             }
         }
         for (order, field) in items(e, "selection_fields").iter().enumerate() {
-            let Some(field) = field.as_str() else { continue };
-            push_record(&mut sets, "EntitySelectionFieldSet",
+            let Some(field) = field.as_str() else {
+                continue;
+            };
+            push_record(
+                &mut sets,
+                "EntitySelectionFieldSet",
                 id_for("EntitySelectionFieldSet", &format!("{name}/{field}")),
-                json!({ "field": field, "order": order, "entity_ID": entity_id }));
+                json!({ "field": field, "order": order, "entity_ID": entity_id }),
+            );
         }
         for (facet_order, facet) in items(e, "facets").iter().enumerate() {
-            let Some(facet_name) = text(facet, "facet") else { continue };
+            let Some(facet_name) = text(facet, "facet") else {
+                continue;
+            };
             let facet_id = id_for("EntityFacetSet", &format!("{name}/{facet_name}"));
-            push_record(&mut sets, "EntityFacetSet", facet_id.clone(), json!({
-                "facet": facet_name,
-                "view": text(facet, "view"),
-                "title": text(facet, "title"),
-                "order": facet_order,
-                "entity_ID": entity_id,
-            }));
+            push_record(
+                &mut sets,
+                "EntityFacetSet",
+                facet_id.clone(),
+                json!({
+                    "facet": facet_name,
+                    "view": text(facet, "view"),
+                    "title": text(facet, "title"),
+                    "order": facet_order,
+                    "entity_ID": entity_id,
+                }),
+            );
             for (order, field) in items(facet, "fields").iter().enumerate() {
-                let Some(field) = field.as_str() else { continue };
-                push_record(&mut sets, "EntityFacetFieldSet",
-                    id_for("EntityFacetFieldSet", &format!("{name}/{facet_name}/{order}")),
-                    json!({ "field": field, "order": order, "facet_ID": facet_id }));
+                let Some(field) = field.as_str() else {
+                    continue;
+                };
+                push_record(
+                    &mut sets,
+                    "EntityFacetFieldSet",
+                    id_for(
+                        "EntityFacetFieldSet",
+                        &format!("{name}/{facet_name}/{order}"),
+                    ),
+                    json!({ "field": field, "order": order, "facet_ID": facet_id }),
+                );
             }
         }
         if let Some(ui) = e.get("ui") {
             for (order, field) in items(ui, "hidden_fields").iter().enumerate() {
-                let Some(field) = field.as_str() else { continue };
-                push_record(&mut sets, "EntityHiddenFieldSet",
+                let Some(field) = field.as_str() else {
+                    continue;
+                };
+                push_record(
+                    &mut sets,
+                    "EntityHiddenFieldSet",
                     id_for("EntityHiddenFieldSet", &format!("{name}/{field}")),
-                    json!({ "field": field, "order": order, "entity_ID": entity_id }));
+                    json!({ "field": field, "order": order, "entity_ID": entity_id }),
+                );
             }
             for (order, facet) in items(ui, "hide_facets").iter().enumerate() {
-                let Some(facet) = facet.as_str() else { continue };
-                push_record(&mut sets, "EntityHiddenFacetSet",
+                let Some(facet) = facet.as_str() else {
+                    continue;
+                };
+                push_record(
+                    &mut sets,
+                    "EntityHiddenFacetSet",
                     id_for("EntityHiddenFacetSet", &format!("{name}/{facet}")),
-                    json!({ "facet": facet, "order": order, "entity_ID": entity_id }));
+                    json!({ "facet": facet, "order": order, "entity_ID": entity_id }),
+                );
             }
             for (order, section) in items(ui, "sections").iter().enumerate() {
-                let Some(key) = text(section, "key") else { continue };
-                push_record(&mut sets, "EntityUiSectionSet",
+                let Some(key) = text(section, "key") else {
+                    continue;
+                };
+                push_record(
+                    &mut sets,
+                    "EntityUiSectionSet",
                     id_for("EntityUiSectionSet", &format!("{name}/{key}")),
                     json!({
                         "key": key, "title": text(section, "title"),
                         "fragment": text(section, "fragment"), "anchor": text(section, "anchor"),
                         "placement": text(section, "placement"), "order": order, "entity_ID": entity_id,
-                    }));
+                    }),
+                );
             }
             for (order, column) in items(ui, "list_columns").iter().enumerate() {
-                let Some(key) = text(column, "key") else { continue };
-                push_record(&mut sets, "EntityUiListColumnSet",
+                let Some(key) = text(column, "key") else {
+                    continue;
+                };
+                push_record(
+                    &mut sets,
+                    "EntityUiListColumnSet",
                     id_for("EntityUiListColumnSet", &format!("{name}/{key}")),
                     json!({
                         "key": key, "header": text(column, "header"),
                         "fragment": text(column, "fragment"), "anchor": text(column, "anchor"),
                         "placement": text(column, "placement"), "width": text(column, "width"), "order": order,
                         "entity_ID": entity_id,
-                    }));
+                    }),
+                );
             }
             for (order, template) in items(ui, "list_templates").iter().enumerate() {
-                let Some(key) = text(template, "key") else { continue };
-                push_record(&mut sets, "EntityUiListTemplateSet",
+                let Some(key) = text(template, "key") else {
+                    continue;
+                };
+                push_record(
+                    &mut sets,
+                    "EntityUiListTemplateSet",
                     id_for("EntityUiListTemplateSet", &format!("{name}/{key}")),
                     json!({
                         "key": key, "label": text(template, "label"),
                         "fragment": text(template, "fragment"), "order": order, "entity_ID": entity_id,
-                    }));
+                    }),
+                );
             }
         }
 
@@ -388,24 +468,39 @@ fn project(base: &Value) -> Sets {
             for key in ATOM_NUMBERS {
                 fields[key] = spec.get(key).cloned().unwrap_or(Value::Null);
             }
-            fields["multiline"] = json!(spec.get("multiline").and_then(Value::as_bool).unwrap_or(false));
+            fields["multiline"] = json!(
+                spec.get("multiline")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            );
             push_record(&mut sets, "FieldSet", field_id.clone(), fields);
             for (order, target) in items(spec, "side_effects").iter().enumerate() {
-                let Some(target) = target.as_str() else { continue };
-                push_record(&mut sets, "FieldSideEffectSet",
+                let Some(target) = target.as_str() else {
+                    continue;
+                };
+                push_record(
+                    &mut sets,
+                    "FieldSideEffectSet",
                     id_for("FieldSideEffectSet", &format!("{name}.{fname}/{order}")),
-                    json!({ "target": target, "order": order, "field_ID": field_id }));
+                    json!({ "target": target, "order": order, "field_ID": field_id }),
+                );
             }
-            if let Some(filters) = entity_ref.and_then(|value| value.get("filters")).and_then(Value::as_array) {
+            if let Some(filters) = entity_ref
+                .and_then(|value| value.get("filters"))
+                .and_then(Value::as_array)
+            {
                 for (order, filter) in filters.iter().enumerate() {
-                    push_record(&mut sets, "ValueHelpFilterSet",
+                    push_record(
+                        &mut sets,
+                        "ValueHelpFilterSet",
                         id_for("ValueHelpFilterSet", &format!("{name}.{fname}/{order}")),
                         json!({
                             "local_property": text(filter, "local_property"),
                             "target_property": text(filter, "target_property"),
                             "order": order,
                             "field_ID": field_id,
-                        }));
+                        }),
+                    );
                 }
             }
         }
@@ -416,7 +511,9 @@ fn project(base: &Value) -> Sets {
         };
         let one = text(r, "one").unwrap_or_default();
         let many = text(r, "many").unwrap_or_default();
-        push_record(&mut sets, "RelationSet",
+        push_record(
+            &mut sets,
+            "RelationSet",
             id_for("RelationSet", name),
             json!({
                 "name": name,
@@ -436,7 +533,9 @@ fn project(base: &Value) -> Sets {
             continue;
         };
         let code_key = l.get("code_key").and_then(Value::as_bool).unwrap_or(false);
-        push_record(&mut sets, "ValueListSet",
+        push_record(
+            &mut sets,
+            "ValueListSet",
             id.to_string(),
             json!({ "name": name, "code_key": code_key }),
         );
@@ -444,7 +543,9 @@ fn project(base: &Value) -> Sets {
             let Some(code) = text(v, "code") else {
                 continue;
             };
-            push_record(&mut sets, "ValueSet",
+            push_record(
+                &mut sets,
+                "ValueSet",
                 id_for("ValueSet", &format!("{id}/{code}")),
                 json!({
                     "name": code,
@@ -463,32 +564,53 @@ fn project(base: &Value) -> Sets {
         let main = text(a, "main_entity").unwrap_or_default();
         let pkg = package_name(a).unwrap_or(DEFAULT_PACKAGE);
         let app_id = id_for("AppSet", name);
-        push_record(&mut sets, "AppSet", app_id.clone(), json!({
+        push_record(
+            &mut sets,
+            "AppSet",
+            app_id.clone(),
+            json!({
                 "name": name,
                 "title": text(a, "title"),
                 "subtitle": text(a, "subtitle"),
                 "icon": text(a, "icon"),
                 "main_entity_ID": id_for("EntitySet", main),
                 "package_ID": id_for("PackageSet", pkg),
-            }));
+            }),
+        );
         if let Some(ui) = a.get("ui") {
             for (order, module) in items(ui, "modules").iter().enumerate() {
-                let Some(module) = module.as_str() else { continue };
-                push_record(&mut sets, "AppModuleSet",
+                let Some(module) = module.as_str() else {
+                    continue;
+                };
+                push_record(
+                    &mut sets,
+                    "AppModuleSet",
                     id_for("AppModuleSet", &format!("{name}/{module}")),
-                    json!({ "module": module, "order": order, "app_ID": app_id }));
+                    json!({ "module": module, "order": order, "app_ID": app_id }),
+                );
             }
             for (order, extension) in items(ui, "controller_extensions").iter().enumerate() {
-                let (Some(target), Some(controller)) = (text(extension, "target"), text(extension, "controller")) else { continue };
-                push_record(&mut sets, "AppControllerExtensionSet",
+                let (Some(target), Some(controller)) =
+                    (text(extension, "target"), text(extension, "controller"))
+                else {
+                    continue;
+                };
+                push_record(
+                    &mut sets,
+                    "AppControllerExtensionSet",
                     id_for("AppControllerExtensionSet", &format!("{name}/{target}")),
-                    json!({ "target": target, "controller": controller, "order": order, "app_ID": app_id }));
+                    json!({ "target": target, "controller": controller, "order": order, "app_ID": app_id }),
+                );
             }
         }
     }
     for component in items(base, "components") {
-        let Some(name) = text(component, "name") else { continue };
-        push_record(&mut sets, "ComponentSet",
+        let Some(name) = text(component, "name") else {
+            continue;
+        };
+        push_record(
+            &mut sets,
+            "ComponentSet",
             id_for("ComponentSet", name),
             json!({
                 "name": name,
@@ -500,11 +622,14 @@ fn project(base: &Value) -> Sets {
         );
     }
     for usage in items(base, "component_uses") {
-        let (Some(entity), Some(instance)) = (text(usage, "entity"), text(usage, "instance")) else {
+        let (Some(entity), Some(instance)) = (text(usage, "entity"), text(usage, "instance"))
+        else {
             continue;
         };
         let use_id = id_for("ComponentUseSet", &format!("{entity}/{instance}"));
-        push_record(&mut sets, "ComponentUseSet",
+        push_record(
+            &mut sets,
+            "ComponentUseSet",
             use_id.clone(),
             json!({
                 "entity_ID": id_for("EntitySet", entity),
@@ -520,15 +645,21 @@ fn project(base: &Value) -> Sets {
         roles.extend(fields.into_iter().flat_map(|map| map.keys().cloned()));
         roles.extend(labels.into_iter().flat_map(|map| map.keys().cloned()));
         for (order, role) in roles.into_iter().enumerate() {
-            push_record(&mut sets, "ComponentUseRoleSet",
-                id_for("ComponentUseRoleSet", &format!("{entity}/{instance}/{role}")),
+            push_record(
+                &mut sets,
+                "ComponentUseRoleSet",
+                id_for(
+                    "ComponentUseRoleSet",
+                    &format!("{entity}/{instance}/{role}"),
+                ),
                 json!({
                     "role": role,
                     "field": fields.and_then(|map| map.get(&role)),
                     "label": labels.and_then(|map| map.get(&role)),
                     "order": order,
                     "component_use_ID": use_id,
-                }));
+                }),
+            );
         }
     }
     sets
@@ -660,7 +791,11 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
             Some(Value::Bool(false)) => {
                 obj.insert("draft_enabled".into(), json!(false));
             }
-            Some(_) => return Err(StoreError::Conflict("draft_enabled muss Boolean sein".into())),
+            Some(_) => {
+                return Err(StoreError::Conflict(
+                    "draft_enabled muss Boolean sein".into(),
+                ));
+            }
         }
         put(
             &mut obj,
@@ -709,14 +844,22 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
 
         let mut filter_defaults = Map::new();
         for filter in child_records(&filter_default_recs, "entity_ID", &ent_id) {
-            let Some(field) = text(filter, "field") else { continue };
+            let Some(field) = text(filter, "field") else {
+                continue;
+            };
             let value = text(filter, "value").unwrap_or_default();
-            let value = if filter.get("is_boolean").and_then(Value::as_bool).unwrap_or(false) {
+            let value = if filter
+                .get("is_boolean")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
                 match value.parse::<bool>() {
                     Ok(value) => json!(value),
-                    Err(_) => return Err(StoreError::Conflict(format!(
-                        "Filterdefault '{field}' muss true oder false sein"
-                    ))),
+                    Err(_) => {
+                        return Err(StoreError::Conflict(format!(
+                            "Filterdefault '{field}' muss true oder false sein"
+                        )));
+                    }
                 }
             } else {
                 json!(value)
@@ -729,10 +872,11 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
             obj.insert("filter_defaults".into(), Value::Object(filter_defaults));
         }
 
-        let selection_fields: Vec<Value> = child_records(&selection_field_recs, "entity_ID", &ent_id)
-            .into_iter()
-            .filter_map(|field| text(field, "field").map(|field| json!(field)))
-            .collect();
+        let selection_fields: Vec<Value> =
+            child_records(&selection_field_recs, "entity_ID", &ent_id)
+                .into_iter()
+                .filter_map(|field| text(field, "field").map(|field| json!(field)))
+                .collect();
         set_array(&mut obj, "selection_fields", selection_fields);
 
         let facets: Vec<Value> = child_records(&facet_recs, "entity_ID", &ent_id)
@@ -767,36 +911,47 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
             .collect();
         let sections: Vec<Value> = child_records(&ui_section_recs, "entity_ID", &ent_id)
             .into_iter()
-            .map(|section| json!({
-                "key": text(section, "key"), "title": text(section, "title"),
-                "fragment": text(section, "fragment"), "anchor": text(section, "anchor"),
-                "placement": text(section, "placement"),
-            }))
+            .map(|section| {
+                json!({
+                    "key": text(section, "key"), "title": text(section, "title"),
+                    "fragment": text(section, "fragment"), "anchor": text(section, "anchor"),
+                    "placement": text(section, "placement"),
+                })
+            })
             .collect();
         let list_columns: Vec<Value> = child_records(&ui_column_recs, "entity_ID", &ent_id)
             .into_iter()
-            .map(|column| json!({
-                "key": text(column, "key"), "header": text(column, "header"),
-                "fragment": text(column, "fragment"), "anchor": text(column, "anchor"),
-                "placement": text(column, "placement"), "width": text(column, "width"),
-            }))
+            .map(|column| {
+                json!({
+                    "key": text(column, "key"), "header": text(column, "header"),
+                    "fragment": text(column, "fragment"), "anchor": text(column, "anchor"),
+                    "placement": text(column, "placement"), "width": text(column, "width"),
+                })
+            })
             .collect();
         let list_templates: Vec<Value> = child_records(&ui_template_recs, "entity_ID", &ent_id)
             .into_iter()
-            .map(|template| json!({
-                "key": text(template, "key"), "label": text(template, "label"),
-                "fragment": text(template, "fragment"),
-            }))
+            .map(|template| {
+                json!({
+                    "key": text(template, "key"), "label": text(template, "label"),
+                    "fragment": text(template, "fragment"),
+                })
+            })
             .collect();
-        if hidden_fields.is_empty() && hide_facets.is_empty() && sections.is_empty()
-            && list_columns.is_empty() && list_templates.is_empty()
+        if hidden_fields.is_empty()
+            && hide_facets.is_empty()
+            && sections.is_empty()
+            && list_columns.is_empty()
+            && list_templates.is_empty()
         {
             obj.remove("ui");
         } else {
             let mut ui = Map::new();
             for (key, values) in [
-                ("hidden_fields", hidden_fields), ("hide_facets", hide_facets),
-                ("sections", sections), ("list_columns", list_columns),
+                ("hidden_fields", hidden_fields),
+                ("hide_facets", hide_facets),
+                ("sections", sections),
+                ("list_columns", list_columns),
                 ("list_templates", list_templates),
             ] {
                 if !values.is_empty() {
@@ -913,28 +1068,28 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
                 }
                 "FieldValueList" => match text(&fr, "value_list_ID") {
                     Some(list_id) => {
-                        spec.insert("value_list".into(), json!({ "FieldValueList": {
-                            "list_id": list_id,
-                            "prefer_dialog": prefer_dialog,
-                        }}));
+                        spec.insert(
+                            "value_list".into(),
+                            json!({ "FieldValueList": {
+                                "list_id": list_id,
+                                "prefer_dialog": prefer_dialog,
+                            }}),
+                        );
                     }
                     None => {
                         spec.remove("value_list");
                     }
                 },
                 "EntityRef" => {
-                    let filters: Vec<Value> = child_records(
-                        &value_help_filter_recs,
-                        "field_ID",
-                        field_id,
-                    )
-                    .into_iter()
-                    .map(|filter| {
-                        let local = text(filter, "local_property").unwrap_or_default();
-                        let target = text(filter, "target_property").unwrap_or_default();
-                        json!({ "local_property": local, "target_property": target })
-                    })
-                    .collect();
+                    let filters: Vec<Value> =
+                        child_records(&value_help_filter_recs, "field_ID", field_id)
+                            .into_iter()
+                            .map(|filter| {
+                                let local = text(filter, "local_property").unwrap_or_default();
+                                let target = text(filter, "target_property").unwrap_or_default();
+                                json!({ "local_property": local, "target_property": target })
+                            })
+                            .collect();
                     let mut config = json!({
                         "entity_set": text(&fr, "entity_set"),
                         "key_property": text(&fr, "key_property").unwrap_or("ID"),
@@ -1058,17 +1213,16 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
             .into_iter()
             .filter_map(|module| text(module, "module").map(|module| json!(module)))
             .collect();
-        let controller_extensions: Vec<Value> = child_records(
-            &app_extension_recs,
-            "app_ID",
-            app_id,
-        )
-        .into_iter()
-        .map(|extension| json!({
-            "target": text(extension, "target"),
-            "controller": text(extension, "controller"),
-        }))
-        .collect();
+        let controller_extensions: Vec<Value> =
+            child_records(&app_extension_recs, "app_ID", app_id)
+                .into_iter()
+                .map(|extension| {
+                    json!({
+                        "target": text(extension, "target"),
+                        "controller": text(extension, "controller"),
+                    })
+                })
+                .collect();
         if modules.is_empty() && controller_extensions.is_empty() {
             obj.remove("ui");
         } else {
@@ -1095,9 +1249,21 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
             .cloned()
             .unwrap_or_default();
         obj.insert("name".into(), json!(name));
-        put(&mut obj, "kind", &r.get("kind").cloned().unwrap_or(Value::Null));
-        put(&mut obj, "script", &r.get("script").cloned().unwrap_or(Value::Null));
-        put(&mut obj, "unit", &r.get("unit").cloned().unwrap_or(Value::Null));
+        put(
+            &mut obj,
+            "kind",
+            &r.get("kind").cloned().unwrap_or(Value::Null),
+        );
+        put(
+            &mut obj,
+            "script",
+            &r.get("script").cloned().unwrap_or(Value::Null),
+        );
+        put(
+            &mut obj,
+            "unit",
+            &r.get("unit").cloned().unwrap_or(Value::Null),
+        );
         put(
             &mut obj,
             "step_minutes",
@@ -1133,7 +1299,9 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
         let mut fields = Map::new();
         let mut labels = Map::new();
         for role in child_records(&component_role_recs, "component_use_ID", use_id) {
-            let Some(name) = text(role, "role") else { continue };
+            let Some(name) = text(role, "role") else {
+                continue;
+            };
             if let Some(field) = text(role, "field") {
                 fields.insert(name.into(), json!(field));
             }
@@ -1214,20 +1382,20 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
         out.insert("component_uses".into(), Value::Array(component_uses));
     }
     let out = Value::Object(out);
-        let mut dictionary = serde_json::from_value::<DataDictionary>(out.clone())
-            .map_err(|e| StoreError::Conflict(format!("ungueltiges Dictionary: {e}")))?;
-        dictionary
-            .expand_components()
-            .map_err(|e| StoreError::Conflict(format!("ungueltige Komponenten: {e}")))?;
-        dictionary
-            .apply_value_list_lookups()
-            .map_err(|e| StoreError::Conflict(format!("ungueltige Wertelisten: {e}")))?;
-        dictionary
-            .validate_list_views()
-            .map_err(|e| StoreError::Conflict(format!("ungueltige Listenansichten: {e}")))?;
-        dictionary
-            .validate_primary_keys()
-            .map_err(|e| StoreError::Conflict(format!("ungueltiger Primaerschluessel: {e}")))?;
+    let mut dictionary = serde_json::from_value::<DataDictionary>(out.clone())
+        .map_err(|e| StoreError::Conflict(format!("ungueltiges Dictionary: {e}")))?;
+    dictionary
+        .expand_components()
+        .map_err(|e| StoreError::Conflict(format!("ungueltige Komponenten: {e}")))?;
+    dictionary
+        .apply_value_list_lookups()
+        .map_err(|e| StoreError::Conflict(format!("ungueltige Wertelisten: {e}")))?;
+    dictionary
+        .validate_list_views()
+        .map_err(|e| StoreError::Conflict(format!("ungueltige Listenansichten: {e}")))?;
+    dictionary
+        .validate_primary_keys()
+        .map_err(|e| StoreError::Conflict(format!("ungueltiger Primaerschluessel: {e}")))?;
     Ok(out)
 }
 
@@ -1238,9 +1406,15 @@ fn build(base: &Value, sets: &Sets) -> Result<Value, StoreError> {
 /// Schluessel fuer die Eindeutigkeit innerhalb eines Sets.
 fn unique_key(set: &str, v: &Value) -> Option<String> {
     let parent_key = match set {
-        "ComponentUseSet" | "EntityListViewSet" | "EntityFilterDefaultSet"
-        | "EntitySelectionFieldSet" | "EntityFacetSet" | "EntityHiddenFieldSet"
-        | "EntityHiddenFacetSet" | "EntityUiSectionSet" | "EntityUiListColumnSet"
+        "ComponentUseSet"
+        | "EntityListViewSet"
+        | "EntityFilterDefaultSet"
+        | "EntitySelectionFieldSet"
+        | "EntityFacetSet"
+        | "EntityHiddenFieldSet"
+        | "EntityHiddenFacetSet"
+        | "EntityUiSectionSet"
+        | "EntityUiListColumnSet"
         | "EntityUiListTemplateSet" => "entity_ID",
         "EntityListColumnSet" => "list_view_ID",
         "EntityFacetFieldSet" => "facet_ID",
@@ -1316,7 +1490,8 @@ fn cascade_children(sets: &mut Sets, set: &str, id: &str) {
         ("AppSet", "AppControllerExtensionSet", "app_ID"),
         ("ComponentUseSet", "ComponentUseRoleSet", "component_use_ID"),
     ];
-    const COMPONENT_CASCADE: (&str, &str, &str) = ("ComponentSet", "ComponentUseSet", "component_ID");
+    const COMPONENT_CASCADE: (&str, &str, &str) =
+        ("ComponentSet", "ComponentUseSet", "component_ID");
     let mut pending = vec![(set.to_string(), id.to_string())];
     while let Some((parent_set, parent_id)) = pending.pop() {
         for (_, child_set, foreign_key) in CASCADES
@@ -1346,7 +1521,11 @@ fn cascade_children(sets: &mut Sets, set: &str, id: &str) {
                         != Some(parent_id.as_str())
                 });
             }
-            pending.extend(removed.into_iter().map(|child_id| (child_set.to_string(), child_id)));
+            pending.extend(
+                removed
+                    .into_iter()
+                    .map(|child_id| (child_set.to_string(), child_id)),
+            );
         }
     }
 }
@@ -1511,7 +1690,9 @@ impl DataStore for DdicStore {
         set: &str,
         _key: &EntityKey,
     ) -> Result<DataRecord, StoreError> {
-        Err(StoreError::Conflict(format!("{set} does not support drafts")))
+        Err(StoreError::Conflict(format!(
+            "{set} does not support drafts"
+        )))
     }
 
     async fn get_property(
@@ -1542,14 +1723,20 @@ impl DataStore for DdicStore {
 #[async_trait::async_trait]
 impl DraftDataStore for DdicStore {
     async fn draft_edit(&self, set: &str, _key: &EntityKey) -> Result<Value, StoreError> {
-        Err(StoreError::Conflict(format!("{set} does not support drafts")))
+        Err(StoreError::Conflict(format!(
+            "{set} does not support drafts"
+        )))
     }
 
     async fn draft_activate(&self, set: &str, _key: &EntityKey) -> Result<Value, StoreError> {
-        Err(StoreError::Conflict(format!("{set} does not support drafts")))
+        Err(StoreError::Conflict(format!(
+            "{set} does not support drafts"
+        )))
     }
 
     async fn draft_prepare(&self, set: &str, _key: &EntityKey) -> Result<Value, StoreError> {
-        Err(StoreError::Conflict(format!("{set} does not support drafts")))
+        Err(StoreError::Conflict(format!(
+            "{set} does not support drafts"
+        )))
     }
 }

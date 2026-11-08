@@ -3,7 +3,7 @@ use std::path::Path;
 use odata::query::Expr;
 use odata::query::ODataQuery;
 use odata::query::SortDirection;
-use odata_yaml_store::{Navigation, DataStore, DraftDataStore, EntityKey, YamlStore};
+use odata_yaml_store::{DataStore, DraftDataStore, EntityKey, Navigation, YamlStore};
 use serde_json::json;
 use tracing_subscriber::fmt;
 use tracing_subscriber::layer::SubscriberExt;
@@ -46,17 +46,25 @@ async fn main() -> anyhow::Result<()> {
     let cust_mueller = to_uuid(100);
     let cust_schmidt = to_uuid(101);
 
-    store.create_entity(
-        "Customers",
-        &json!({"ID": cust_mueller, "Name": "Müller GmbH"}),
-    ).await?;
-    store.draft_activate("Customers", &EntityKey::new(cust_mueller, false)).await?;
+    store
+        .create_entity(
+            "Customers",
+            &json!({"ID": cust_mueller, "Name": "Müller GmbH"}),
+        )
+        .await?;
+    store
+        .draft_activate("Customers", &EntityKey::new(cust_mueller, false))
+        .await?;
 
-    store.create_entity(
-        "Customers",
-        &json!({"ID": cust_schmidt, "Name": "Schmidt AG"}),
-    ).await?;
-    store.draft_activate("Customers", &EntityKey::new(cust_schmidt, false)).await?;
+    store
+        .create_entity(
+            "Customers",
+            &json!({"ID": cust_schmidt, "Name": "Schmidt AG"}),
+        )
+        .await?;
+    store
+        .draft_activate("Customers", &EntityKey::new(cust_schmidt, false))
+        .await?;
 
     store.create_entity(
         "Orders",
@@ -66,35 +74,47 @@ async fn main() -> anyhow::Result<()> {
         "Orders",
         &json!({ "ID": to_uuid(2), "Customer_ID": cust_schmidt, "Amount": 480, "Status": "Released" }),
     ).await?;
-    store.create_entity(
-        "OrderItems",
-        &json!({ "ID": to_uuid(10), "OrderID": to_uuid(1), "Material": "M-100", "Qty": 5 }),
-    ).await?;
-    store.create_entity(
-        "OrderItems",
-        &json!({ "ID": to_uuid(11), "OrderID": to_uuid(1), "Material": "M-200", "Qty": 2 }),
-    ).await?;
-    let _ = store.create_entity(
-        "OrderItems",
-        &json!({ "ID": to_uuid(12), "OrderID": to_uuid(2), "Material": "M-200", "Qty": 2 }),
-    ).await;
+    store
+        .create_entity(
+            "OrderItems",
+            &json!({ "ID": to_uuid(10), "OrderID": to_uuid(1), "Material": "M-100", "Qty": 5 }),
+        )
+        .await?;
+    store
+        .create_entity(
+            "OrderItems",
+            &json!({ "ID": to_uuid(11), "OrderID": to_uuid(1), "Material": "M-200", "Qty": 2 }),
+        )
+        .await?;
+    let _ = store
+        .create_entity(
+            "OrderItems",
+            &json!({ "ID": to_uuid(12), "OrderID": to_uuid(2), "Material": "M-200", "Qty": 2 }),
+        )
+        .await;
 
     // ------------------------------------------------------------------------------------------------
     // Tests on Data
     let key = EntityKey::new(to_uuid(1), false);
 
-    let order = store.read_entity(
-        "Orders",
-        &key,
-        &ODataQuery::new().expand("_Items").expand("Customer"),
-    ).await?;
+    let order = store
+        .read_entity(
+            "Orders",
+            &key,
+            &ODataQuery::new().expand("_Items").expand("Customer"),
+        )
+        .await?;
     println!(
         "\nGelesene Order: {}",
         serde_json::to_string_pretty(&order)?
     );
 
-    store.patch_entity("Orders", &key, &json!({ "Status": "Released" })).await?;
-    store.draft_activate("Orders", &EntityKey::new(to_uuid(2), false)).await?;
+    store
+        .patch_entity("Orders", &key, &json!({ "Status": "Released" }))
+        .await?;
+    store
+        .draft_activate("Orders", &EntityKey::new(to_uuid(2), false))
+        .await?;
     store.draft_activate("Orders", &key).await?;
 
     let query = ODataQuery::new()

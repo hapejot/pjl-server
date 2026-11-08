@@ -137,10 +137,9 @@ impl KeyValue {
     pub fn equals_filter(&self, field: &str) -> odata::query::Expr {
         match self {
             KeyValue::Uuid(u) => odata::query::Expr::equals_guid(u.to_string(), field),
-            KeyValue::Text(t) => odata::query::Expr::equals_value(
-                &serde_json::Value::String(t.clone()),
-                field,
-            ),
+            KeyValue::Text(t) => {
+                odata::query::Expr::equals_value(&serde_json::Value::String(t.clone()), field)
+            }
         }
     }
 }

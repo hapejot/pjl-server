@@ -35,7 +35,9 @@ impl ToSql for PgParam<'_> {
                 SqlParam::Bool(b) => b.to_string().as_str().to_sql(ty, out),
                 SqlParam::Int(i) => i.to_string().as_str().to_sql(ty, out),
                 SqlParam::Real(f) => f.to_string().as_str().to_sql(ty, out),
-                SqlParam::Blob(_) => Err("BLOB kann nicht an eine Textspalte gebunden werden".into()),
+                SqlParam::Blob(_) => {
+                    Err("BLOB kann nicht an eine Textspalte gebunden werden".into())
+                }
             };
         }
         match self.0 {
@@ -89,29 +91,46 @@ pub fn from_postgres(row: &Row, index: usize) -> Result<SqlParam, data_store::St
     };
 
     Ok(match column_type {
-        Type::BOOL => read(row.try_get::<_, Option<bool>>(index).map_err(err)?.map(SqlParam::Bool)),
-        Type::INT2 => read(row
-            .try_get::<_, Option<i16>>(index)
-            .map_err(err)?
-            .map(|v| SqlParam::Int(v.into()))),
-        Type::INT4 => read(row
-            .try_get::<_, Option<i32>>(index)
-            .map_err(err)?
-            .map(|v| SqlParam::Int(v.into()))),
-        Type::INT8 => read(row.try_get::<_, Option<i64>>(index).map_err(err)?.map(SqlParam::Int)),
-        Type::FLOAT4 => read(row
-            .try_get::<_, Option<f32>>(index)
-            .map_err(err)?
-            .map(|v| SqlParam::Real(v.into()))),
-        Type::FLOAT8 => read(row.try_get::<_, Option<f64>>(index).map_err(err)?.map(SqlParam::Real)),
-        Type::BYTEA => read(row
-            .try_get::<_, Option<Vec<u8>>>(index)
-            .map_err(err)?
-            .map(SqlParam::Blob)),
-        _ => read(row
-            .try_get::<_, Option<PgText>>(index)
-            .map_err(err)?
-            .map(|v| SqlParam::Text(v.0))),
+        Type::BOOL => read(
+            row.try_get::<_, Option<bool>>(index)
+                .map_err(err)?
+                .map(SqlParam::Bool),
+        ),
+        Type::INT2 => read(
+            row.try_get::<_, Option<i16>>(index)
+                .map_err(err)?
+                .map(|v| SqlParam::Int(v.into())),
+        ),
+        Type::INT4 => read(
+            row.try_get::<_, Option<i32>>(index)
+                .map_err(err)?
+                .map(|v| SqlParam::Int(v.into())),
+        ),
+        Type::INT8 => read(
+            row.try_get::<_, Option<i64>>(index)
+                .map_err(err)?
+                .map(SqlParam::Int),
+        ),
+        Type::FLOAT4 => read(
+            row.try_get::<_, Option<f32>>(index)
+                .map_err(err)?
+                .map(|v| SqlParam::Real(v.into())),
+        ),
+        Type::FLOAT8 => read(
+            row.try_get::<_, Option<f64>>(index)
+                .map_err(err)?
+                .map(SqlParam::Real),
+        ),
+        Type::BYTEA => read(
+            row.try_get::<_, Option<Vec<u8>>>(index)
+                .map_err(err)?
+                .map(SqlParam::Blob),
+        ),
+        _ => read(
+            row.try_get::<_, Option<PgText>>(index)
+                .map_err(err)?
+                .map(|v| SqlParam::Text(v.0)),
+        ),
     })
 }
 
@@ -141,17 +160,4 @@ impl<'a> FromSql<'a> for PgText {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use data_store::{json_to_param, DataType};
-    use serde_json::json;
-
-    /// Der Wahrheitswert kommt als `bool` an der Treibergrenze an - nicht als
-    /// 0/1 wie bei SQLite.
-    #[test]
-    fn booleans_stay_booleans() {
-        let param = json_to_param(&json!(true), &DataType::Bool, "IsActiveEntity").unwrap();
-        assert_eq!(param, SqlParam::Bool(true));
-        assert!(<PgParam as ToSql>::accepts(&Type::BOOL));
-    }
-}
+mod tests;

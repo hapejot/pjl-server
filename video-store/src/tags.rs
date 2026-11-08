@@ -73,9 +73,6 @@ impl Extension for VideoTagFacets {
         Some(("video.tags".into(), crate::status::tags_json()))
     }
 
-
-
-
     fn routes(&self, app: AppState) -> Router {
         let pool = match app.config.store_pg_url.as_deref().map(build_pool) {
             Some(Ok(pool)) => Some(pool),
@@ -119,9 +116,6 @@ struct FacetState {
 const SEARCH_PAGE: &str = include_str!("../tagsearch/index.html");
 const SEARCH_APP: &str = include_str!("../tagsearch/App.js");
 
-
-
-
 async fn search_page() -> Response {
     (
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
@@ -140,7 +134,6 @@ async fn search_app() -> Response {
     )
         .into_response()
 }
-
 
 fn parse_selected(q: &HashMap<String, String>) -> Vec<String> {
     let mut ids: Vec<String> = q
@@ -212,7 +205,10 @@ async fn check_selection(
 }
 
 /// Rangliste ohne Auswahl, aus dem Cache wenn frisch genug.
-async fn ranking(st: &FacetState, client: &deadpool_postgres::Object) -> Result<Arc<Ranking>, Response> {
+async fn ranking(
+    st: &FacetState,
+    client: &deadpool_postgres::Object,
+) -> Result<Arc<Ranking>, Response> {
     let mut cache = st.ranking.lock().await;
     if let Some((at, r)) = cache.as_ref() {
         if at.elapsed() < Duration::from_secs(TAG_CACHE_SECS) {
@@ -258,7 +254,10 @@ async fn ranking(st: &FacetState, client: &deadpool_postgres::Object) -> Result<
 }
 
 /// Trefferliste: `GET /ext/video/tags/videos?selected=..&skip=0&top=100`
-async fn videos(State(st): State<Arc<FacetState>>, Query(q): Query<HashMap<String, String>>) -> Response {
+async fn videos(
+    State(st): State<Arc<FacetState>>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
     let Some(pool) = st.pool.as_ref() else {
         return error_response(StatusCode::SERVICE_UNAVAILABLE, "no postgres store");
     };
@@ -333,13 +332,19 @@ async fn videos(State(st): State<Arc<FacetState>>, Query(q): Query<HashMap<Strin
 }
 
 /// Facetten: `GET /ext/video/tags/facets?selected=..&top=20&q=..`
-async fn facets(State(st): State<Arc<FacetState>>, Query(q): Query<HashMap<String, String>>) -> Response {
+async fn facets(
+    State(st): State<Arc<FacetState>>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
     let Some(pool) = st.pool.as_ref() else {
         return error_response(StatusCode::SERVICE_UNAVAILABLE, "no postgres store");
     };
     let selected = parse_selected(&q);
     let top = parse_usize(&q, "top", DEFAULT_TOP, MAX_TOP).max(1);
-    let needle = q.get("q").map(|s| s.trim().to_lowercase()).unwrap_or_default();
+    let needle = q
+        .get("q")
+        .map(|s| s.trim().to_lowercase())
+        .unwrap_or_default();
     let client = match pool.get().await {
         Ok(c) => c,
         Err(e) => return internal(e),

@@ -54,8 +54,6 @@ pub async fn run_with(
         }
     }
 
-
-
     let sources = crate::sources::resolve(&config).context("cannot resolve sources")?;
     let base = load_dictionary(&config, &sources)?;
 
@@ -216,7 +214,10 @@ async fn seed_entities(store: &dyn DraftDataStore, ddic: &DataDictionary) -> any
     Ok(())
 }
 
-pub async fn seed_value_lists(store: &dyn DraftDataStore, ddic: &DataDictionary) -> anyhow::Result<()> {
+pub async fn seed_value_lists(
+    store: &dyn DraftDataStore,
+    ddic: &DataDictionary,
+) -> anyhow::Result<()> {
     use data_store::EntityKey;
     use odata::query::ODataQuery;
     use serde_json::json;

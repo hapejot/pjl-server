@@ -84,7 +84,9 @@ pub struct DataRecord {
 impl DataRecord {
     pub fn from_entity_json(value: &Value, draft_enabled: bool) -> Result<Self, StoreError> {
         if !draft_enabled && value.get("IsActiveEntity") == Some(&Value::Bool(false)) {
-            return Err(StoreError::Conflict("Entity does not support drafts".into()));
+            return Err(StoreError::Conflict(
+                "Entity does not support drafts".into(),
+            ));
         }
         let mut record = Self::from_json(value)?;
         if !draft_enabled {
@@ -453,10 +455,7 @@ pub trait DataStore: Send + Sync {
         let mut results = Vec::with_capacity(ops.len());
         for op in ops {
             let result = match op {
-                WriteOp::Create(data) => self
-                    .create_entity(set_name, &data)
-                    .await
-                    .map(Some),
+                WriteOp::Create(data) => self.create_entity(set_name, &data).await.map(Some),
                 WriteOp::Patch(key, patch) => match self.patch_entity(set_name, &key, &patch).await
                 {
                     Ok(_) => self
@@ -506,70 +505,7 @@ pub trait DataStoreDebugExt: DataStore {
 }
 
 #[cfg(test)]
-mod from_json_id_tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn valid_uuid_id_is_kept() {
-        let r = DataRecord::from_json(&json!({
-            "ID": "00000000-0000-0000-0000-000000000042",
-            "IsActiveEntity": true
-        }))
-        .unwrap();
-        assert_eq!(r.id.to_string(), "00000000-0000-0000-0000-000000000042");
-    }
-
-    #[test]
-    fn text_id_is_kept_as_text() {
-        let r = DataRecord::from_json(&json!({ "ID": "active", "IsActiveEntity": true })).unwrap();
-        assert_eq!(r.id(), KeyValue::Text("active".into()));
-    }
-
-    #[test]
-    fn non_string_id_is_rejected_not_replaced() {
-        let err = DataRecord::from_json(&json!({ "ID": 3963451, "IsActiveEntity": true }));
-        assert!(matches!(err, Err(StoreError::Serialize(_))));
-    }
-
-    #[test]
-    fn missing_id_gets_new_uuid() {
-        let r = DataRecord::from_json(&json!({ "IsActiveEntity": false })).unwrap();
-        assert!(!r.is_active_entity);
-    }
-}
+mod from_json_id_tests;
 
 #[cfg(test)]
-mod principal_tests {
-    use super::*;
-
-    #[test]
-    fn created_by_me_compares_with_the_request_user() {
-        assert!(!draft_created_by_current_user("someone@example.org"));
-        assert!(draft_created_by_current_user(FALLBACK_PRINCIPAL));
-    }
-
-    fn record() -> DataRecord {
-        DataRecord::from_json(&json!({"name": "x"})).unwrap()
-    }
-
-    #[tokio::test]
-    async fn draft_is_owned_by_the_request_user() {
-        CURRENT_PRINCIPAL
-            .scope(Some("peter@example.org".into()), async {
-                let mut r = record();
-                r.edit();
-                let admin = r.draft_admin_data().unwrap();
-                assert_eq!(admin.in_process_by_user, "peter@example.org");
-                assert_eq!(admin.last_changed_by_user, "peter@example.org");
-            })
-            .await;
-    }
-
-    #[tokio::test]
-    async fn draft_without_request_user_falls_back() {
-        let mut r = record();
-        r.edit();
-        assert_eq!(r.draft_admin_data().unwrap().in_process_by_user, FALLBACK_PRINCIPAL);
-    }
-}
+mod principal_tests;

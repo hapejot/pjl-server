@@ -11,8 +11,8 @@ use spec::data_dictionary::DataDictionary;
 
 /// Liest `ddic.json`.
 pub fn load(path: &Path) -> Result<DataDictionary> {
-    let text = fs::read_to_string(path)
-        .with_context(|| format!("cannot read '{}'", path.display()))?;
+    let text =
+        fs::read_to_string(path).with_context(|| format!("cannot read '{}'", path.display()))?;
     serde_json::from_str(&text)
         .with_context(|| format!("'{}' is not a valid data dictionary", path.display()))
 }

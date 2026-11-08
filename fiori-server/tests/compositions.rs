@@ -2,8 +2,8 @@ use axum::{
     body::Body,
     http::{Method, Request, StatusCode},
 };
-use fiori_server::{AppState, srv};
 use data_store::{DataStore, EntityKey, StaticSchema};
+use fiori_server::{AppState, srv};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -18,18 +18,26 @@ async fn app_state() -> (TempDir, AppState) {
     let mut active = base.clone();
     active.activate();
     let schema = spec_schema::schema_from_ddic(&active).unwrap();
-    let store = Arc::new(sqlite_relational_store::RelationalStore::open_in_memory(
-        Arc::new(StaticSchema::new(schema)),
-    ).await.unwrap());
+    let store = Arc::new(
+        sqlite_relational_store::RelationalStore::open_in_memory(Arc::new(StaticSchema::new(
+            schema,
+        )))
+        .await
+        .unwrap(),
+    );
     store
         .create_entity(
             "EntitySet",
             &json!({ "ID": ENTITY_ID, "IsActiveEntity": true, "name": "Order", "plural": "Orders" }),
         ).await
         .unwrap();
-    let state = AppState::new(store, Arc::new(fiori_server::config::ServerConfig::defaults(
-        fiori_server::config::ServerMode::Runtime,
-    )), base);
+    let state = AppState::new(
+        store,
+        Arc::new(fiori_server::config::ServerConfig::defaults(
+            fiori_server::config::ServerMode::Runtime,
+        )),
+        base,
+    );
     state.reload();
     (dir, state)
 }
@@ -60,7 +68,8 @@ async fn fields_of(state: &AppState, parent: &str) -> Vec<Value> {
         .filter(odata::query::Expr::equals_guid(parent, "entity_ID"));
     state
         .store
-        .get_collection("FieldSet", &query).await
+        .get_collection("FieldSet", &query)
+        .await
         .unwrap()
         .iter()
         .map(|r| json!(r))
@@ -116,7 +125,8 @@ async fn draft_actions_cascade_to_children() {
         .create_entity(
             "FieldSet",
             &json!({ "IsActiveEntity": true, "entity_ID": ENTITY_ID, "name": "status" }),
-        ).await
+        )
+        .await
         .unwrap();
 
     let (status, _) = request(
@@ -152,7 +162,8 @@ async fn discarding_a_draft_keeps_the_active_children() {
         .create_entity(
             "FieldSet",
             &json!({ "IsActiveEntity": true, "entity_ID": ENTITY_ID, "name": "status" }),
-        ).await
+        )
+        .await
         .unwrap();
     request(
         &state,
@@ -181,7 +192,8 @@ async fn discarding_a_draft_keeps_the_active_children() {
                 "EntitySet",
                 &EntityKey::new_active(ENTITY_ID),
                 &Default::default()
-            ).await
+            )
+            .await
             .is_ok()
     );
 }
@@ -194,7 +206,8 @@ async fn deleting_the_parent_removes_its_children() {
         .create_entity(
             "FieldSet",
             &json!({ "IsActiveEntity": true, "entity_ID": ENTITY_ID, "name": "status" }),
-        ).await
+        )
+        .await
         .unwrap();
 
     let (status, _) = request(

@@ -144,7 +144,9 @@ impl PostgresStore {
             .schema()
             .map_err(|e| StoreError::Metadata(e.to_string()))?;
         {
-            let mut client = sqltrace::conn(&pool).await.map_err(|e| sql_err!(Metadata, e))?;
+            let mut client = sqltrace::conn(&pool)
+                .await
+                .map_err(|e| sql_err!(Metadata, e))?;
             apply_schema(&mut client, &POSTGRES, &schema).await?;
             set_applied_revision(&client, &POSTGRES, schema_source.revision().0).await?;
         }
@@ -206,17 +208,23 @@ impl PostgresStore {
             return 0;
         };
         let result = if set.draft_enabled {
-            sqltrace::query_one(&client, &format!(
-                        "SELECT COUNT(*) FROM {} WHERE {} = $1",
-                        quote(set_name),
-                        quote(IS_ACTIVE_COLUMN)
-                    ),
-                    &[&is_active],
-                )
-                .await
+            sqltrace::query_one(
+                &client,
+                &format!(
+                    "SELECT COUNT(*) FROM {} WHERE {} = $1",
+                    quote(set_name),
+                    quote(IS_ACTIVE_COLUMN)
+                ),
+                &[&is_active],
+            )
+            .await
         } else if is_active {
-            sqltrace::query_one(&client, &format!("SELECT COUNT(*) FROM {}", quote(set_name)), &[])
-                .await
+            sqltrace::query_one(
+                &client,
+                &format!("SELECT COUNT(*) FROM {}", quote(set_name)),
+                &[],
+            )
+            .await
         } else {
             return 0;
         };
@@ -228,12 +236,14 @@ impl PostgresStore {
         let Ok(client) = sqltrace::conn(&self.pool).await else {
             return 0;
         };
-        sqltrace::query_one(&client, &format!("SELECT COUNT(*) FROM {}", quote(DRAFT_ADMIN_TABLE)),
-                &[],
-            )
-            .await
-            .map(|r| r.get::<_, i64>(0))
-            .unwrap_or(0) as usize
+        sqltrace::query_one(
+            &client,
+            &format!("SELECT COUNT(*) FROM {}", quote(DRAFT_ADMIN_TABLE)),
+            &[],
+        )
+        .await
+        .map(|r| r.get::<_, i64>(0))
+        .unwrap_or(0) as usize
     }
 
     // -- SELECT-Bausteine ----------------------------------------------------
@@ -243,19 +253,21 @@ impl PostgresStore {
         conn: &impl GenericClient,
         draft_uuid: &str,
     ) -> Result<Option<Value>, StoreError> {
-        let rows = sqltrace::query(conn, &format!(
-                    "SELECT {uuid}, {created}, {in_process}, {changed} FROM {table} \
+        let rows = sqltrace::query(
+            conn,
+            &format!(
+                "SELECT {uuid}, {created}, {in_process}, {changed} FROM {table} \
                      WHERE {uuid} = $1",
-                    uuid = quote("DraftUUID"),
-                    created = quote("DraftIsCreatedByMe"),
-                    in_process = quote("InProcessByUser"),
-                    changed = quote("LastChangedByUser"),
-                    table = quote(DRAFT_ADMIN_TABLE),
-                ),
-                &[&draft_uuid],
-            )
-            .await
-            .map_err(|e| sql_err!(Metadata, pg(&e)))?;
+                uuid = quote("DraftUUID"),
+                created = quote("DraftIsCreatedByMe"),
+                in_process = quote("InProcessByUser"),
+                changed = quote("LastChangedByUser"),
+                table = quote(DRAFT_ADMIN_TABLE),
+            ),
+            &[&draft_uuid],
+        )
+        .await
+        .map_err(|e| sql_err!(Metadata, pg(&e)))?;
         let Some(row) = rows.first() else {
             return Ok(None);
         };
@@ -277,7 +289,8 @@ impl PostgresStore {
             return Ok(None);
         };
         let uuid = admin.draft_uuid.to_string();
-        sqltrace::execute(conn, 
+        sqltrace::execute(
+            conn,
             &format!(
                 "INSERT INTO {table} ({uuid}, {created}, {in_process}, {changed}) \
                  VALUES ($1, $2, $3, $4) \
@@ -614,7 +627,8 @@ impl PostgresStore {
                 out.push(uuid);
             }
             for (child_set, child_key) in self.child_keys(conn, set, key).await? {
-                self.draft_tree_admins(conn, &child_set, &child_key, out).await?;
+                self.draft_tree_admins(conn, &child_set, &child_key, out)
+                    .await?;
             }
             Ok(())
         })
@@ -877,9 +891,13 @@ async fn set_applied_revision(
     sqltrace::execute(client, &ddl::revision_delete_sql(), &[])
         .await
         .map_err(|e| sql_err!(Conversion, pg(&e)))?;
-    sqltrace::execute(client, &ddl::revision_insert_sql(dialect), &[&(revision as i64)])
-        .await
-        .map_err(|e| sql_err!(Conversion, pg(&e)))?;
+    sqltrace::execute(
+        client,
+        &ddl::revision_insert_sql(dialect),
+        &[&(revision as i64)],
+    )
+    .await
+    .map_err(|e| sql_err!(Conversion, pg(&e)))?;
     Ok(())
 }
 
@@ -1215,7 +1233,10 @@ impl DataStore for PostgresStore {
                     .patch_on(&mut conn, set_name, &key, &patch)
                     .await
                     .map(Some),
-                WriteOp::Delete(key) => self.delete_on(&mut conn, set_name, &key).await.map(|()| None),
+                WriteOp::Delete(key) => self
+                    .delete_on(&mut conn, set_name, &key)
+                    .await
+                    .map(|()| None),
             };
             results.push(result);
         }
@@ -1228,8 +1249,10 @@ impl DataStore for PostgresStore {
 #[async_trait::async_trait]
 impl DraftDataStore for PostgresStore {
     async fn draft_edit(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
-        self.entity_set(set_name)?.set(set_name)
-            .map_err(|e| StoreError::Metadata(e.to_string()))?.require_drafts()?;
+        self.entity_set(set_name)?
+            .set(set_name)
+            .map_err(|e| StoreError::Metadata(e.to_string()))?
+            .require_drafts()?;
         if !key.is_active_entity {
             return Err(StoreError::InvalidState);
         }
@@ -1278,8 +1301,10 @@ impl DraftDataStore for PostgresStore {
 
     /// Draft Datensatz aktivieren und die potenziellen Kinder auch aktivieren.
     async fn draft_activate(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
-        self.entity_set(set_name)?.set(set_name)
-            .map_err(|e| StoreError::Metadata(e.to_string()))?.require_drafts()?;
+        self.entity_set(set_name)?
+            .set(set_name)
+            .map_err(|e| StoreError::Metadata(e.to_string()))?
+            .require_drafts()?;
         if key.is_active_entity {
             return Err(StoreError::InvalidState);
         }

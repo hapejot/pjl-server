@@ -12,7 +12,8 @@ use sqlite_relational_store::RelationalStore;
 use tempfile::TempDir;
 
 async fn store() -> RelationalStore {
-    RelationalStore::open_in_memory(Arc::new(StaticSchema::new(conformance::schema()))).await
+    RelationalStore::open_in_memory(Arc::new(StaticSchema::new(conformance::schema())))
+        .await
         .expect("store")
 }
 
@@ -22,14 +23,16 @@ async fn seeded() -> RelationalStore {
         .create_entity(
             "CustomerSet",
             &json!({"ID": uuid(100), "IsActiveEntity": true, "Name": "Mueller GmbH"}),
-        ).await
+        )
+        .await
         .unwrap();
     store
         .create_entity(
             ORDERS,
             &json!({"ID": uuid(1), "IsActiveEntity": true, "Customer_ID": uuid(100),
                     "Amount": 150, "Status": "New"}),
-        ).await
+        )
+        .await
         .unwrap();
     for (id, material) in [(10, "M-100"), (11, "M-200")] {
         store
@@ -37,7 +40,8 @@ async fn seeded() -> RelationalStore {
                 ITEMS,
                 &json!({"ID": uuid(id), "IsActiveEntity": true, "Order_ID": uuid(1),
                         "Material": material, "Qty": 1}),
-            ).await
+            )
+            .await
             .unwrap();
     }
     store
@@ -62,7 +66,8 @@ async fn unknown_field_on_create_is_rejected() {
         .create_entity(
             ORDERS,
             &json!({"ID": uuid(1), "IsActiveEntity": true, "Bogus": 1}),
-        ).await
+        )
+        .await
         .expect_err("unbekanntes Feld muss auffallen");
     assert!(err.to_string().contains("Bogus"), "{err}");
 }
@@ -71,14 +76,18 @@ async fn unknown_field_on_create_is_rejected() {
 async fn unknown_field_on_patch_is_rejected() {
     let store = seeded().await;
     assert!(store
-        .patch_entity(ORDERS, &active(1), &json!({"Bogus": 1})).await
+        .patch_entity(ORDERS, &active(1), &json!({"Bogus": 1}))
+        .await
         .is_err());
 }
 
 #[tokio::test]
 async fn unknown_entity_set_is_rejected() {
     let store = store().await;
-    assert!(store.get_collection("NichtDaSet", &ODataQuery::new()).await.is_err());
+    assert!(store
+        .get_collection("NichtDaSet", &ODataQuery::new())
+        .await
+        .is_err());
 }
 
 #[tokio::test]
@@ -88,7 +97,8 @@ async fn type_mismatch_is_reported() {
         .create_entity(
             ORDERS,
             &json!({"ID": uuid(1), "IsActiveEntity": true, "Amount": {"nested": true}}),
-        ).await
+        )
+        .await
         .expect_err("Objekt passt nicht in eine Int-Spalte");
     assert!(err.to_string().contains("Amount"), "{err}");
 }
@@ -106,7 +116,8 @@ async fn filter_on_unknown_column_is_an_error_not_an_empty_result() {
         Expr::String("x".into()),
     ));
     let err = store
-        .get_collection(ORDERS, &query).await
+        .get_collection(ORDERS, &query)
+        .await
         .expect_err("Tippfehler darf nicht als 'kein Treffer' durchgehen");
     assert!(err.to_string().contains("Nope"), "{err}");
 }
@@ -119,7 +130,8 @@ async fn untranslatable_function_fails_loudly() {
         args: vec![Expr::Identifier("Amount".into())],
     });
     let err = store
-        .get_collection(ORDERS, &query).await
+        .get_collection(ORDERS, &query)
+        .await
         .expect_err("floor kennt SQLite nicht - lieber Fehler als falsches Ergebnis");
     assert!(err.to_string().contains("floor"), "{err}");
 }
@@ -152,9 +164,19 @@ async fn any_lambda_selects_parents_with_a_matching_child() {
 async fn all_lambda_requires_every_child_to_match() {
     let store = seeded().await;
     let all_qty_one = lambda_query("_Items/all(i: i/Qty eq 1)");
-    assert_eq!(store.get_collection(ORDERS, &all_qty_one).await.unwrap().len(), 1);
+    assert_eq!(
+        store
+            .get_collection(ORDERS, &all_qty_one)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
     let all_m100 = lambda_query("_Items/all(i: i/Material eq 'M-100')");
-    assert_eq!(store.get_collection(ORDERS, &all_m100).await.unwrap().len(), 0);
+    assert_eq!(
+        store.get_collection(ORDERS, &all_m100).await.unwrap().len(),
+        0
+    );
 }
 
 #[tokio::test]
@@ -165,7 +187,8 @@ async fn lambda_over_empty_collection_any_false_all_true() {
             ORDERS,
             &json!({"ID": uuid(2), "IsActiveEntity": true, "Customer_ID": uuid(100),
                     "Amount": 5, "Status": "Open"}),
-        ).await
+        )
+        .await
         .unwrap();
     // Auftrag 2 hat keine Positionen.
     let any = lambda_query("_Items/any(i: i/Qty eq 1)");
@@ -189,14 +212,16 @@ async fn sibling_lambdas_are_anded_on_the_same_parent() {
             ORDERS,
             &json!({"ID": uuid(2), "IsActiveEntity": true, "Customer_ID": uuid(100),
                     "Amount": 5, "Status": "Open"}),
-        ).await
+        )
+        .await
         .unwrap();
     store
         .create_entity(
             ITEMS,
             &json!({"ID": uuid(12), "IsActiveEntity": true, "Order_ID": uuid(2),
                     "Material": "M-100", "Qty": 1}),
-        ).await
+        )
+        .await
         .unwrap();
     // Auftrag 1 hat M-100 und M-200, Auftrag 2 nur M-100.
     let both = lambda_query(
@@ -206,7 +231,10 @@ async fn sibling_lambdas_are_anded_on_the_same_parent() {
     let same_var = lambda_query(
         "_Items/any(i: i/Material eq 'M-100') and _Items/any(i: i/Material eq 'M-200')",
     );
-    assert_eq!(store.get_collection(ORDERS, &same_var).await.unwrap().len(), 1);
+    assert_eq!(
+        store.get_collection(ORDERS, &same_var).await.unwrap().len(),
+        1
+    );
     let one = lambda_query("_Items/any(i: i/Material eq 'M-100')");
     assert_eq!(store.get_collection(ORDERS, &one).await.unwrap().len(), 2);
 }
@@ -215,9 +243,18 @@ async fn sibling_lambdas_are_anded_on_the_same_parent() {
 async fn string_functions_translate_to_sql() {
     let store = seeded().await;
     let cases = vec![
-        ("contains", vec![Expr::Identifier("Status".into()), Expr::String("e".into())]),
-        ("startswith", vec![Expr::Identifier("Status".into()), Expr::String("Ne".into())]),
-        ("endswith", vec![Expr::Identifier("Status".into()), Expr::String("ew".into())]),
+        (
+            "contains",
+            vec![Expr::Identifier("Status".into()), Expr::String("e".into())],
+        ),
+        (
+            "startswith",
+            vec![Expr::Identifier("Status".into()), Expr::String("Ne".into())],
+        ),
+        (
+            "endswith",
+            vec![Expr::Identifier("Status".into()), Expr::String("ew".into())],
+        ),
     ];
     for (name, args) in cases {
         let query = ODataQuery::new().filter(Expr::FunctionCall {
@@ -241,7 +278,14 @@ async fn filter_values_are_bound_not_interpolated() {
     ));
     assert_eq!(store.get_collection(ORDERS, &query).await.unwrap().len(), 0);
     // Tabelle steht noch.
-    assert_eq!(store.get_collection(ORDERS, &ODataQuery::new()).await.unwrap().len(), 1);
+    assert_eq!(
+        store
+            .get_collection(ORDERS, &ODataQuery::new())
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -266,7 +310,10 @@ async fn not_and_null_comparison_translate() {
         Expr::Identifier("Status".into()),
         Expr::Null,
     ));
-    assert_eq!(store.get_collection(ORDERS, &is_null).await.unwrap().len(), 0);
+    assert_eq!(
+        store.get_collection(ORDERS, &is_null).await.unwrap().len(),
+        0
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -280,7 +327,8 @@ async fn composition_cascade_is_enforced_by_the_database() {
     let store = seeded().await;
     assert_eq!(store.count_state(ITEMS, true), 2);
     store
-        .delete_entity_tree_only(ORDERS, &active(1)).await
+        .delete_entity_tree_only(ORDERS, &active(1))
+        .await
         .expect("delete");
     assert_eq!(
         store.count_state(ITEMS, true),
@@ -297,7 +345,8 @@ async fn child_under_missing_parent_is_rejected() {
             ITEMS,
             &json!({"ID": uuid(10), "IsActiveEntity": true, "Order_ID": uuid(999),
                     "Material": "M-1", "Qty": 1}),
-        ).await
+        )
+        .await
         .expect_err("Position ohne Auftrag");
     assert!(format!("{err}").contains("999") || format!("{err}").contains("nicht gefunden"));
 }
@@ -312,7 +361,8 @@ async fn draft_child_requires_a_draft_parent() {
             ITEMS,
             &json!({"ID": uuid(13), "IsActiveEntity": false, "Order_ID": uuid(1),
                     "Material": "M-3", "Qty": 1}),
-        ).await
+        )
+        .await
         .expect_err("kein Draft-Parent vorhanden");
     assert!(format!("{err}").len() > 0);
 }
@@ -324,17 +374,26 @@ async fn draft_child_requires_a_draft_parent() {
 #[tokio::test]
 async fn has_draft_entity_is_computed_from_the_sibling() {
     let store = seeded().await;
-    let before = store.read_entity(ORDERS, &active(1), &ODataQuery::new()).await.unwrap();
+    let before = store
+        .read_entity(ORDERS, &active(1), &ODataQuery::new())
+        .await
+        .unwrap();
     assert!(!before.has_draft_entity());
 
     store.draft_edit(ORDERS, &active(1)).await.unwrap();
 
-    let after = store.read_entity(ORDERS, &active(1), &ODataQuery::new()).await.unwrap();
+    let after = store
+        .read_entity(ORDERS, &active(1), &ODataQuery::new())
+        .await
+        .unwrap();
     assert!(
         after.has_draft_entity(),
         "abgeleitet aus der Existenz des Drafts, nicht gespeichert"
     );
-    let draft_row = store.read_entity(ORDERS, &draft(1), &ODataQuery::new()).await.unwrap();
+    let draft_row = store
+        .read_entity(ORDERS, &draft(1), &ODataQuery::new())
+        .await
+        .unwrap();
     assert!(draft_row.has_active_entity());
 }
 
@@ -347,7 +406,12 @@ fn schema_v1() -> Schema {
         .set(
             EntitySet::new("ThingSet", "Thing")
                 .drafts()
-                .column(Column::new("Name", DataType::String { max_length: Some(10) })),
+                .column(Column::new(
+                    "Name",
+                    DataType::String {
+                        max_length: Some(10),
+                    },
+                )),
         )
         .build()
         .unwrap()
@@ -358,8 +422,18 @@ fn schema_v2() -> Schema {
         .set(
             EntitySet::new("ThingSet", "Thing")
                 .drafts()
-                .column(Column::new("Name", DataType::String { max_length: Some(10) }))
-                .column(Column::new("Note", DataType::String { max_length: Some(99) })),
+                .column(Column::new(
+                    "Name",
+                    DataType::String {
+                        max_length: Some(10),
+                    },
+                ))
+                .column(Column::new(
+                    "Note",
+                    DataType::String {
+                        max_length: Some(99),
+                    },
+                )),
         )
         .build()
         .unwrap()
@@ -369,13 +443,15 @@ fn schema_v2() -> Schema {
 async fn additive_migration_adds_columns_and_keeps_data() {
     let dir = TempDir::new().unwrap();
     {
-        let store = RelationalStore::open(dir.path(), Arc::new(StaticSchema::new(schema_v1()))).await
+        let store = RelationalStore::open(dir.path(), Arc::new(StaticSchema::new(schema_v1())))
+            .await
             .expect("v1");
         store
             .create_entity(
                 "ThingSet",
                 &json!({"ID": uuid(1), "IsActiveEntity": true, "Name": "alt"}),
-            ).await
+            )
+            .await
             .unwrap();
         store.persist().unwrap();
     }
@@ -383,17 +459,20 @@ async fn additive_migration_adds_columns_and_keeps_data() {
     let store = RelationalStore::open(
         dir.path(),
         Arc::new(StaticSchema::with_revision(schema_v2(), 2)),
-    ).await
+    )
+    .await
     .expect("v2 migriert");
 
     let read = store
-        .read_entity("ThingSet", &active(1), &ODataQuery::new()).await
+        .read_entity("ThingSet", &active(1), &ODataQuery::new())
+        .await
         .expect("Bestandsdaten ueberleben");
     assert_eq!(read["Name"], json!("alt"));
     assert_eq!(read["Note"], json!(null), "neue Spalte ist NULL");
 
     store
-        .patch_entity("ThingSet", &active(1), &json!({"Note": "neu"})).await
+        .patch_entity("ThingSet", &active(1), &json!({"Note": "neu"}))
+        .await
         .expect("neue Spalte ist beschreibbar");
 }
 
@@ -401,13 +480,18 @@ async fn additive_migration_adds_columns_and_keeps_data() {
 async fn destructive_changes_are_reported_not_applied() {
     let dir = TempDir::new().unwrap();
     {
-        let store = RelationalStore::open(dir.path(), Arc::new(StaticSchema::with_revision(schema_v2(), 2))).await
-            .expect("v2");
+        let store = RelationalStore::open(
+            dir.path(),
+            Arc::new(StaticSchema::with_revision(schema_v2(), 2)),
+        )
+        .await
+        .expect("v2");
         store.persist().unwrap();
     }
     // Zurueck auf v1: 'Note' ist im Schema weg, in der Datenbank noch da.
-    let store =
-        RelationalStore::open(dir.path(), Arc::new(StaticSchema::new(schema_v1()))).await.expect("v1");
+    let store = RelationalStore::open(dir.path(), Arc::new(StaticSchema::new(schema_v1())))
+        .await
+        .expect("v1");
     let pending = store.pending_destructive_changes().await.unwrap();
     assert!(
         pending.iter().any(|p| p.contains("Note")),
@@ -419,8 +503,13 @@ async fn destructive_changes_are_reported_not_applied() {
 async fn reopening_with_the_same_revision_is_a_no_op() {
     let dir = TempDir::new().unwrap();
     let source = Arc::new(StaticSchema::new(conformance::schema()));
-    let store = RelationalStore::open(dir.path(), source.clone()).await.unwrap();
-    assert!(!store.refresh_schema().await.unwrap(), "keine Migration noetig");
+    let store = RelationalStore::open(dir.path(), source.clone())
+        .await
+        .unwrap();
+    assert!(
+        !store.refresh_schema().await.unwrap(),
+        "keine Migration noetig"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -431,25 +520,31 @@ async fn reopening_with_the_same_revision_is_a_no_op() {
 async fn decimals_keep_their_precision() {
     let schema = Schema::builder()
         .set(
-            EntitySet::new("MoneySet", "Money").drafts().column(Column::new(
-                "Amount",
-                DataType::Decimal {
-                    precision: 15,
-                    scale: 2,
-                },
-            )),
+            EntitySet::new("MoneySet", "Money")
+                .drafts()
+                .column(Column::new(
+                    "Amount",
+                    DataType::Decimal {
+                        precision: 15,
+                        scale: 2,
+                    },
+                )),
         )
         .build()
         .unwrap();
-    let store = RelationalStore::open_in_memory(Arc::new(StaticSchema::new(schema))).await.unwrap();
+    let store = RelationalStore::open_in_memory(Arc::new(StaticSchema::new(schema)))
+        .await
+        .unwrap();
     store
         .create_entity(
             "MoneySet",
             &json!({"ID": uuid(1), "IsActiveEntity": true, "Amount": 1234.56}),
-        ).await
+        )
+        .await
         .unwrap();
     let read = store
-        .read_entity("MoneySet", &active(1), &ODataQuery::new()).await
+        .read_entity("MoneySet", &active(1), &ODataQuery::new())
+        .await
         .unwrap();
     // Dezimalzahlen gehen exakt als JSON-String hinaus (siehe data-store/src/sql_value.rs).
     assert_eq!(read["Amount"], json!("1234.56"));
@@ -497,7 +592,9 @@ fn strict_schema() -> Schema {
 }
 
 async fn strict_store() -> RelationalStore {
-    RelationalStore::open_in_memory(Arc::new(StaticSchema::new(strict_schema()))).await.expect("store")
+    RelationalStore::open_in_memory(Arc::new(StaticSchema::new(strict_schema())))
+        .await
+        .expect("store")
 }
 
 /// Ein Draft entsteht in zwei Anweisungen: erst die Verwaltungsdaten, dann
@@ -509,10 +606,12 @@ async fn a_failed_create_leaves_no_orphaned_draft_administration() {
     let store = strict_store().await;
     assert_eq!(store.count_draft_admin(), 0);
 
-    let result = store.create_entity(
-        "TicketSet",
-        &json!({"ID": uuid(1), "IsActiveEntity": false}),
-    ).await;
+    let result = store
+        .create_entity(
+            "TicketSet",
+            &json!({"ID": uuid(1), "IsActiveEntity": false}),
+        )
+        .await;
     assert!(result.is_err(), "Pflichtspalte fehlt, das muss scheitern");
 
     assert_eq!(
@@ -531,7 +630,8 @@ async fn a_successful_create_writes_record_and_administration_together() {
         .create_entity(
             "TicketSet",
             &json!({"ID": uuid(1), "IsActiveEntity": false, "Titel": "Drucker klemmt"}),
-        ).await
+        )
+        .await
         .expect("Anlegen gelingt");
     assert_eq!(store.count_state("TicketSet", false), 1);
     assert_eq!(store.count_draft_admin(), 1);
@@ -546,15 +646,19 @@ async fn a_failed_patch_changes_nothing() {
         .create_entity(
             "TicketSet",
             &json!({"ID": uuid(1), "IsActiveEntity": false, "Titel": "Drucker klemmt"}),
-        ).await
+        )
+        .await
         .unwrap();
 
     let key = EntityKey::new(uuid(1), false);
-    let result = store.patch_entity("TicketSet", &key, &json!({"Titel": null})).await;
+    let result = store
+        .patch_entity("TicketSet", &key, &json!({"Titel": null}))
+        .await;
     assert!(result.is_err(), "Pflichtspalte darf nicht geleert werden");
 
     let record = store
-        .read_entity("TicketSet", &key, &ODataQuery::new()).await
+        .read_entity("TicketSet", &key, &ODataQuery::new())
+        .await
         .unwrap();
     assert_eq!(record.get("Titel"), Some(json!("Drucker klemmt")));
     assert_eq!(store.count_draft_admin(), 1);
@@ -577,11 +681,22 @@ async fn filter_on_computed_draft_flags_is_accepted() {
     let store = seeded().await;
     let filter = Expr::BinaryOp {
         op: BinOp::And,
-        left: Box::new(bin(BinOp::Eq, Expr::Identifier("HasActiveEntity".into()), Expr::Bool(false))),
-        right: Box::new(bin(BinOp::Eq, Expr::Identifier("HasDraftEntity".into()), Expr::Bool(false))),
+        left: Box::new(bin(
+            BinOp::Eq,
+            Expr::Identifier("HasActiveEntity".into()),
+            Expr::Bool(false),
+        )),
+        right: Box::new(bin(
+            BinOp::Eq,
+            Expr::Identifier("HasDraftEntity".into()),
+            Expr::Bool(false),
+        )),
     };
     let query = ODataQuery::new().filter(filter);
-    let rows = store.get_collection(ORDERS, &query).await.expect("Filter ist gueltig");
+    let rows = store
+        .get_collection(ORDERS, &query)
+        .await
+        .expect("Filter ist gueltig");
     assert_eq!(rows.len(), 1);
 }
 
@@ -593,7 +708,10 @@ async fn select_accepts_computed_draft_flags() {
         .select("IsActiveEntity")
         .select("HasActiveEntity")
         .select("HasDraftEntity");
-    let rows = store.get_collection(ORDERS, &query).await.expect("$select ist gueltig");
+    let rows = store
+        .get_collection(ORDERS, &query)
+        .await
+        .expect("$select ist gueltig");
     assert_eq!(rows.len(), 1);
     assert!(rows[0].is_active_entity());
 }

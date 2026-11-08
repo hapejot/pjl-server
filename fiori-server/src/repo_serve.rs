@@ -21,7 +21,11 @@ pub fn serve(repo: &dyn FileRepository, raw: &str) -> Response {
     match repo.read(&path) {
         Ok(Some(bytes)) => {
             let mime = mime_guess::from_path(&path).first_or_octet_stream();
-            ([(header::CONTENT_TYPE, mime.essence_str().to_string())], bytes).into_response()
+            (
+                [(header::CONTENT_TYPE, mime.essence_str().to_string())],
+                bytes,
+            )
+                .into_response()
         }
         _ => StatusCode::NOT_FOUND.into_response(),
     }

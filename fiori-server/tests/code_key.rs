@@ -45,7 +45,13 @@ async fn request(state: &AppState, method: Method, uri: &str, body: Value) -> (S
     (status, String::from_utf8(bytes.to_vec()).unwrap())
 }
 
-async fn json_request(state: &AppState, method: Method, uri: &str, body: Value, expected: StatusCode) -> Value {
+async fn json_request(
+    state: &AppState,
+    method: Method,
+    uri: &str,
+    body: Value,
+    expected: StatusCode,
+) -> Value {
     let (status, text) = request(state, method, uri, body).await;
     assert_eq!(status, expected, "{uri}: {text}");
     if text.is_empty() {
@@ -62,8 +68,16 @@ fn base_dictionary() -> DataDictionary {
         id: LIST_ID.into(),
         name: "ProjectStatus".into(),
         values: vec![
-            ValueEntry { code: "planned".into(), label: "Geplant".into(), sort: 1 },
-            ValueEntry { code: "active".into(), label: "Aktiv".into(), sort: 2 },
+            ValueEntry {
+                code: "planned".into(),
+                label: "Geplant".into(),
+                sort: 1,
+            },
+            ValueEntry {
+                code: "active".into(),
+                label: "Aktiv".into(),
+                sort: 2,
+            },
         ],
         code_key: true,
     });
@@ -71,9 +85,14 @@ fn base_dictionary() -> DataDictionary {
         EntitySpec::new("Project", "test", "Projects")
             .without_drafts()
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
-            .field(FieldSpec::atom("status", "Status", "Edm.String").with_value_list(
-                AtomValueList::FieldValueList { list_id: LIST_ID.into(), prefer_dialog: false },
-            )),
+            .field(
+                FieldSpec::atom("status", "Status", "Edm.String").with_value_list(
+                    AtomValueList::FieldValueList {
+                        list_id: LIST_ID.into(),
+                        prefer_dialog: false,
+                    },
+                ),
+            ),
     );
     ddic.apply_value_list_lookups().unwrap();
     ddic
@@ -92,7 +111,11 @@ async fn runtime() -> AppState {
     fiori_server::server::seed_value_lists(store.as_ref(), &active)
         .await
         .unwrap();
-    AppState::new(store, Arc::new(ServerConfig::defaults(ServerMode::Runtime)), base)
+    AppState::new(
+        store,
+        Arc::new(ServerConfig::defaults(ServerMode::Runtime)),
+        base,
+    )
 }
 
 #[tokio::test]
@@ -100,12 +123,30 @@ async fn metadata_uses_code_as_key_and_foreign_key_is_the_field() {
     let state = runtime().await;
     let (status, xml) = request(&state, Method::GET, "/$metadata", Value::Null).await;
     assert_eq!(status, StatusCode::OK, "{xml}");
-    let list = xml.split("<EntityType Name=\"ProjectStatus\">").nth(1).unwrap().split("</EntityType>").next().unwrap();
+    let list = xml
+        .split("<EntityType Name=\"ProjectStatus\">")
+        .nth(1)
+        .unwrap()
+        .split("</EntityType>")
+        .next()
+        .unwrap();
     assert!(list.contains("<PropertyRef Name=\"value\"/>"), "{list}");
     assert!(!list.contains("Name=\"ID\""), "{list}");
-    let project = xml.split("<EntityType Name=\"Project\">").nth(1).unwrap().split("</EntityType>").next().unwrap();
-    assert!(project.contains("Name=\"status_code\" Type=\"Edm.String\""), "{project}");
-    assert!(project.contains("ReferencedProperty=\"value\""), "{project}");
+    let project = xml
+        .split("<EntityType Name=\"Project\">")
+        .nth(1)
+        .unwrap()
+        .split("</EntityType>")
+        .next()
+        .unwrap();
+    assert!(
+        project.contains("Name=\"status_code\" Type=\"Edm.String\""),
+        "{project}"
+    );
+    assert!(
+        project.contains("ReferencedProperty=\"value\""),
+        "{project}"
+    );
 }
 
 #[tokio::test]
@@ -122,7 +163,14 @@ async fn code_is_key_in_path_and_create() {
     assert_eq!(created["value"], json!("done"));
     assert!(created.get("ID").is_none(), "{created}");
 
-    let read = json_request(&state, Method::GET, "/ProjectStatusSet('done')", Value::Null, StatusCode::OK).await;
+    let read = json_request(
+        &state,
+        Method::GET,
+        "/ProjectStatusSet('done')",
+        Value::Null,
+        StatusCode::OK,
+    )
+    .await;
     assert_eq!(read["name"], json!("Erledigt"));
 }
 
@@ -148,7 +196,11 @@ async fn project_references_code_and_path_expressions_work() {
         StatusCode::OK,
     )
     .await;
-    assert_eq!(expanded["value"][0]["status"]["name"], json!("Geplant"), "{expanded}");
+    assert_eq!(
+        expanded["value"][0]["status"]["name"],
+        json!("Geplant"),
+        "{expanded}"
+    );
 
     let selected = json_request(
         &state,
@@ -158,7 +210,11 @@ async fn project_references_code_and_path_expressions_work() {
         StatusCode::OK,
     )
     .await;
-    assert_eq!(selected["value"][0]["status"]["name"], json!("Geplant"), "{selected}");
+    assert_eq!(
+        selected["value"][0]["status"]["name"],
+        json!("Geplant"),
+        "{selected}"
+    );
 }
 
 #[tokio::test]

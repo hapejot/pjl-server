@@ -4,8 +4,8 @@
 use std::fs;
 use std::sync::Arc;
 
-use data_store::conformance::{self, Harness};
 use data_store::DataStore;
+use data_store::conformance::{self, Harness};
 use fiori_server::hook::{DefaultHook, Extender};
 use odata_yaml_store::YamlStore;
 use tempfile::TempDir;

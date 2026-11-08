@@ -80,7 +80,6 @@ impl Extension for VideoThumbnails {
             .route("/apps/Video/i18n/i18n_en.properties", get(i18n_en))
             .with_state(state)
     }
-
 }
 
 const I18N_DEFAULT: &str = include_str!("../i18n/i18n.properties");
@@ -102,8 +101,6 @@ async fn i18n_de() -> Response {
 async fn i18n_en() -> Response {
     properties(I18N_EN)
 }
-
-
 
 /// Fehlerantwort mit Begruendung im Body und Log-Eintrag mit allen Details.
 fn fail(status: StatusCode, video: &str, n: u32, reason: impl std::fmt::Display) -> Response {
@@ -129,7 +126,14 @@ async fn thumbnail_inner(
     let user = user.map(|u| u.0 .0).unwrap_or_else(|| "-".into());
     let id = match Uuid::parse_str(&video_id) {
         Ok(id) => id,
-        Err(e) => return fail(StatusCode::BAD_REQUEST, &video_id, n, format!("keine gueltige UUID ({e})")),
+        Err(e) => {
+            return fail(
+                StatusCode::BAD_REQUEST,
+                &video_id,
+                n,
+                format!("keine gueltige UUID ({e})"),
+            )
+        }
     };
     tracing::debug!(%user, video = %id, n, "thumbnail requested");
 

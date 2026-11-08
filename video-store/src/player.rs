@@ -77,7 +77,6 @@ impl Extension for VideoPlayer {
     }
 }
 
-
 async fn stream(
     state: State<Arc<PlayerState>>,
     path: Path<String>,
@@ -164,7 +163,11 @@ async fn source_of(app: &AppState, id: Uuid) -> Option<(String, String)> {
         let volume_id = Uuid::parse_str(file.get("volume_ID")?.as_str()?).ok()?;
         let volume = app
             .store
-            .read_entity(VOLUME_SET, &EntityKey::new(volume_id, true), &ODataQuery::default())
+            .read_entity(
+                VOLUME_SET,
+                &EntityKey::new(volume_id, true),
+                &ODataQuery::default(),
+            )
             .await
             .ok()?;
         let mount = volume.get("mount_path")?.as_str()?.to_string();
@@ -193,16 +196,4 @@ fn absolute_path(mount: &str, relative: &str) -> String {
 }
 
 #[cfg(test)]
-mod path_tests {
-    use super::absolute_path;
-
-    #[test]
-    fn unix_mount_joins_with_slash() {
-        assert_eq!(absolute_path("/mnt/33/peter", "cb/a.mp4"), "/mnt/33/peter/cb/a.mp4");
-    }
-
-    #[test]
-    fn drive_mount_uses_backslashes() {
-        assert_eq!(absolute_path("F:\\", "d/chaturbate/x.mp4"), "F:\\d\\chaturbate\\x.mp4");
-    }
-}
+mod path_tests;

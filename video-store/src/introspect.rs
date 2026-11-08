@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::{Context, bail};
+use anyhow::{bail, Context};
 use serde_json::{Map, Value};
 use tokio_postgres::{Client, NoTls};
 
@@ -151,11 +151,7 @@ pub async fn read_catalog(client: &Client) -> anyhow::Result<PgCatalog> {
                 if src_cols.len() != 1 || tgt_cols.len() != 1 {
                     bail!("mehrspaltiger Fremdschluessel auf '{table}' wird nicht unterstuetzt");
                 }
-                let on_delete = row
-                    .get::<_, String>(5)
-                    .chars()
-                    .next()
-                    .unwrap_or('a');
+                let on_delete = row.get::<_, String>(5).chars().next().unwrap_or('a');
                 catalog.foreign_keys.push(PgForeignKey {
                     child: table,
                     child_col: src_cols[0].clone(),

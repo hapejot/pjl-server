@@ -4,10 +4,10 @@
 use std::collections::BTreeMap;
 
 use anyhow::{Context, Result, bail};
-use serde_json::Value;
+use quick_xml::Reader;
 use quick_xml::XmlVersion;
 use quick_xml::events::{BytesStart, Event};
-use quick_xml::Reader;
+use serde_json::Value;
 
 #[derive(Debug, Clone)]
 pub struct Navigation {
@@ -32,7 +32,11 @@ impl EntityType {
 
     /// Schluesselfelder ohne das Entwurfs-Flag `IsActiveEntity`.
     pub fn business_keys(&self) -> Vec<&str> {
-        self.keys.iter().map(String::as_str).filter(|k| *k != "IsActiveEntity").collect()
+        self.keys
+            .iter()
+            .map(String::as_str)
+            .filter(|k| *k != "IsActiveEntity")
+            .collect()
     }
 
     /// OData-Schluesselausdruck fuer einen Satz, z. B. `'planned'`, `<guid>` oder
@@ -40,9 +44,15 @@ impl EntityType {
     pub fn key_expr(&self, record: &Value, active: bool) -> Result<String> {
         let keys = self.business_keys();
         if keys == ["ID"] {
-            let id = record.get("ID").and_then(Value::as_str).context("ID fehlt")?;
+            let id = record
+                .get("ID")
+                .and_then(Value::as_str)
+                .context("ID fehlt")?;
             return Ok(if self.is_draft() {
-                format!("ID={id},IsActiveEntity={}", if active { "true" } else { "false" })
+                format!(
+                    "ID={id},IsActiveEntity={}",
+                    if active { "true" } else { "false" }
+                )
             } else {
                 id.to_string()
             });
@@ -55,7 +65,10 @@ impl EntityType {
                 _ => bail!("{}: Schluesselfeld '{key}' fehlt", self.name),
             };
         }
-        bail!("{}: zusammengesetzter Schluessel {keys:?} wird nicht unterstuetzt", self.name)
+        bail!(
+            "{}: zusammengesetzter Schluessel {keys:?} wird nicht unterstuetzt",
+            self.name
+        )
     }
 }
 
@@ -79,7 +92,14 @@ impl Model {
             match event {
                 Event::Eof => break,
                 Event::Start(e) | Event::Empty(e) => {
-                    handle_start(&e, decoder, &mut model, &mut current, &mut in_key, &mut last_nav)?;
+                    handle_start(
+                        &e,
+                        decoder,
+                        &mut model,
+                        &mut current,
+                        &mut in_key,
+                        &mut last_nav,
+                    )?;
                 }
                 Event::End(e) => match e.local_name().as_ref() {
                     b"EntityType" => {
@@ -96,7 +116,11 @@ impl Model {
         for t in model.types.values() {
             for nav in t.navigations.values() {
                 if !model.types.contains_key(&nav.target) {
-                    bail!("{}: Navigationsziel '{}' fehlt in $metadata", t.name, nav.target);
+                    bail!(
+                        "{}: Navigationsziel '{}' fehlt in $metadata",
+                        t.name,
+                        nav.target
+                    );
                 }
             }
         }
@@ -109,7 +133,10 @@ impl Model {
 
     /// Setname des Typs, falls vorhanden.
     pub fn set_for_type(&self, type_name: &str) -> Option<&str> {
-        self.sets.iter().find(|(_, t)| t.as_str() == type_name).map(|(s, _)| s.as_str())
+        self.sets
+            .iter()
+            .find(|(_, t)| t.as_str() == type_name)
+            .map(|(s, _)| s.as_str())
     }
 
     /// Reihenfolge: ein Set kommt nach allen Sets, auf die es per Fremdschluessel zeigt.
@@ -117,7 +144,9 @@ impl Model {
     pub fn order(&self, sets: &[String]) -> Result<Vec<String>> {
         let mut remaining: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for s in sets {
-            let t = self.set_type(s).with_context(|| format!("Set {s} ohne Typ"))?;
+            let t = self
+                .set_type(s)
+                .with_context(|| format!("Set {s} ohne Typ"))?;
             let deps = t
                 .navigations
                 .values()
@@ -135,7 +164,10 @@ impl Model {
                 .map(|(s, _)| s.clone())
                 .collect();
             if ready.is_empty() {
-                bail!("zyklische Abhaengigkeit zwischen Sets: {:?}", remaining.keys().collect::<Vec<_>>());
+                bail!(
+                    "zyklische Abhaengigkeit zwischen Sets: {:?}",
+                    remaining.keys().collect::<Vec<_>>()
+                );
             }
             for s in &ready {
                 remaining.remove(s);
@@ -186,7 +218,11 @@ fn handle_start(
                 *last_nav = Some(name.clone());
                 t.navigations.insert(
                     name,
-                    Navigation { target, to_one: !collection, refs: Vec::new() },
+                    Navigation {
+                        target,
+                        to_one: !collection,
+                        refs: Vec::new(),
+                    },
                 );
             }
         }
@@ -203,7 +239,9 @@ fn handle_start(
             }
         }
         b"EntitySet" => {
-            if let (Some(name), Some(typ)) = (attr(e, "Name", decoder)?, attr(e, "EntityType", decoder)?) {
+            if let (Some(name), Some(typ)) =
+                (attr(e, "Name", decoder)?, attr(e, "EntityType", decoder)?)
+            {
                 model.sets.insert(name, strip_type(&typ));
             }
         }
@@ -212,12 +250,17 @@ fn handle_start(
     Ok(())
 }
 
-fn attr(e: &BytesStart, name: &str, decoder: quick_xml::encoding::Decoder) -> Result<Option<String>> {
+fn attr(
+    e: &BytesStart,
+    name: &str,
+    decoder: quick_xml::encoding::Decoder,
+) -> Result<Option<String>> {
     for a in e.attributes() {
         let a = a?;
         if a.key.local_name().as_ref() == name.as_bytes() {
             return Ok(Some(
-                a.decoded_and_normalized_value(XmlVersion::Implicit1_0, decoder)?.into_owned(),
+                a.decoded_and_normalized_value(XmlVersion::Implicit1_0, decoder)?
+                    .into_owned(),
             ));
         }
     }

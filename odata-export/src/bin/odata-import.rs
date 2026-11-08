@@ -84,7 +84,10 @@ fn run() -> Result<()> {
     let args = Args::parse();
     let manifest: Value = read_json(&args.source.join("manifest.json"))?;
     if manifest.get("format").and_then(Value::as_u64) != Some(FORMAT_VERSION) {
-        bail!("unbekanntes Exportformat: {}", manifest.get("format").unwrap_or(&Value::Null));
+        bail!(
+            "unbekanntes Exportformat: {}",
+            manifest.get("format").unwrap_or(&Value::Null)
+        );
     }
     let sources = source_sets(&manifest)?;
 
@@ -101,8 +104,9 @@ fn run() -> Result<()> {
         .iter()
         .filter_map(|v| v.as_str().map(str::to_string))
         .collect();
-    let (sets, skipped): (Vec<String>, Vec<String>) =
-        order_names.into_iter().partition(|s| model.sets.contains_key(s));
+    let (sets, skipped): (Vec<String>, Vec<String>) = order_names
+        .into_iter()
+        .partition(|s| model.sets.contains_key(s));
     for s in &skipped {
         println!("uebersprungen (Ziel kennt das Set nicht): {s}");
     }
@@ -120,13 +124,27 @@ fn run() -> Result<()> {
         source_index.insert(set.clone(), index);
     }
 
-    let mut report = Report { per_set: Vec::new(), errors: Vec::new() };
+    let mut report = Report {
+        per_set: Vec::new(),
+        errors: Vec::new(),
+    };
     for set in &order {
         let etype = model.set_type(set).context("Typ fehlt")?.clone();
         let records = read_records(&args.source, &sources[set])?;
         for record in records {
-            let Some(record) = record.as_object() else { continue };
-            import_record(&client, &model, &etype, set, record, &source_index, &mut report, args.dry_run);
+            let Some(record) = record.as_object() else {
+                continue;
+            };
+            import_record(
+                &client,
+                &model,
+                &etype,
+                set,
+                record,
+                &source_index,
+                &mut report,
+                args.dry_run,
+            );
         }
         let s = report.stats(set);
         println!(
@@ -142,7 +160,10 @@ fn run() -> Result<()> {
         println!("  {message}");
     }
     if report.errors.len() > MAX_REPORTED_ERRORS {
-        println!("  ... {} weitere", report.errors.len() - MAX_REPORTED_ERRORS);
+        println!(
+            "  ... {} weitere",
+            report.errors.len() - MAX_REPORTED_ERRORS
+        );
     }
     if total_errors > 0 {
         std::process::exit(1);
@@ -166,14 +187,20 @@ fn import_record(
         .filter(|(k, _)| etype.properties.contains(k) && !DRAFT_PROPERTIES.contains(&k.as_str()))
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
-    let satz = record.get("ID").map(value_to_key).unwrap_or_else(|| "?".into());
+    let satz = record
+        .get("ID")
+        .map(value_to_key)
+        .unwrap_or_else(|| "?".into());
     if let Err(message) = translate_foreign_keys(model, etype, record, source_index, &mut body) {
         report.error(set, format!("{satz}: {message}"));
         return;
     }
     let business = etype.business_keys();
     if business.iter().any(|k| !body.contains_key(*k)) {
-        report.error(set, format!("{satz}: Schluessel {business:?} fehlt im Satz"));
+        report.error(
+            set,
+            format!("{satz}: Schluessel {business:?} fehlt im Satz"),
+        );
         return;
     }
     let outcome = write_record(client, etype, set, &body, dry_run);
@@ -231,7 +258,8 @@ fn write_record(
             // Der Export enthaelt nur aktive Saetze: direkt aktiv anlegen, kein Entwurf.
             create.insert("IsActiveEntity".into(), Value::Bool(true));
         }
-        let (status, text) = client.request("POST", &format!("/{set}"), Some(&Value::Object(create)))?;
+        let (status, text) =
+            client.request("POST", &format!("/{set}"), Some(&Value::Object(create)))?;
         check(status, &text)?;
     }
     Ok(Write::Created)
@@ -241,7 +269,10 @@ fn check(status: u16, text: &[u8]) -> Result<()> {
     if (200..300).contains(&status) {
         Ok(())
     } else {
-        bail!("HTTP {status}: {}", String::from_utf8_lossy(&text[..text.len().min(400)]))
+        bail!(
+            "HTTP {status}: {}",
+            String::from_utf8_lossy(&text[..text.len().min(400)])
+        )
     }
 }
 
@@ -306,6 +337,7 @@ fn read_records(dir: &Path, file: &str) -> Result<Vec<Value>> {
 }
 
 fn read_json(path: &Path) -> Result<Value> {
-    let text = fs::read_to_string(path).with_context(|| format!("{} nicht lesbar", path.display()))?;
+    let text =
+        fs::read_to_string(path).with_context(|| format!("{} nicht lesbar", path.display()))?;
     serde_json::from_str(&text).with_context(|| format!("{} kein gueltiges JSON", path.display()))
 }

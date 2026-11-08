@@ -10,19 +10,19 @@ pub mod sql_value;
 #[cfg(any(test, feature = "conformance"))]
 pub mod conformance;
 
+#[cfg(any(test, feature = "debug-tools"))]
+pub use datastore::DataStoreDebugExt;
 pub use datastore::{
     DataRecord, DataStore, DraftAction, DraftAdministrativeData, DraftMessage, Navigation, WriteOp,
 };
-pub use nav::{DRAFT_ADMIN_SET, NavLink, nav_links};
+pub use error::StoreError;
+pub use key::EntityKey;
+pub use nav::{nav_links, NavLink, DRAFT_ADMIN_SET};
 pub use schema::{
     Association, Cardinality, Column, ColumnRole, DataType, EntitySet, ForeignKeySide, Ownership,
     Schema, SchemaError, SchemaRevision, SchemaSource, StaticSchema,
 };
-#[cfg(any(test, feature = "debug-tools"))]
-pub use datastore::DataStoreDebugExt;
-pub use error::StoreError;
 pub use sql_value::{json_to_param, json_to_param_loose, param_to_json, SqlParam};
-pub use key::EntityKey;
 
 #[async_trait::async_trait]
 pub trait DraftDataStore: DataStore {

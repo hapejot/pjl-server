@@ -51,14 +51,23 @@ impl FakeCatalog {
         self
     }
 
-    pub fn with_foreign_key(mut self, table: &str, name: &str, columns: &[&str], target: &str) -> Self {
+    pub fn with_foreign_key(
+        mut self,
+        table: &str,
+        name: &str,
+        columns: &[&str],
+        target: &str,
+    ) -> Self {
         let mut columns: Vec<String> = columns.iter().map(|c| c.to_string()).collect();
         columns.sort();
-        self.foreign_keys.entry(table.to_string()).or_default().push(ExistingForeignKey {
-            name: name.to_string(),
-            columns,
-            target_table: target.to_string(),
-        });
+        self.foreign_keys
+            .entry(table.to_string())
+            .or_default()
+            .push(ExistingForeignKey {
+                name: name.to_string(),
+                columns,
+                target_table: target.to_string(),
+            });
         self
     }
 }

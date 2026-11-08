@@ -26,7 +26,14 @@ fn ms(started: Instant) -> f64 {
     started.elapsed().as_secs_f64() * 1000.0
 }
 
-fn log_statement(op: &'static str, sql: &str, started: Instant, params: usize, rows: Option<usize>, err: Option<String>) {
+fn log_statement(
+    op: &'static str,
+    sql: &str,
+    started: Instant,
+    params: usize,
+    rows: Option<usize>,
+    err: Option<String>,
+) {
     let duration_ms = ms(started);
     let sql = compact(sql);
     match err {
@@ -124,8 +131,12 @@ pub async fn conn(pool: &Pool) -> Result<Object, PoolError> {
     let started = Instant::now();
     let r = pool.get().await;
     match &r {
-        Ok(_) => trace!(target: TARGET, op = "pool.get", duration_ms = ms(started), "Verbindung aus Pool"),
-        Err(e) => warn!(target: TARGET, op = "pool.get", duration_ms = ms(started), error = %e, "Pool-Fehler"),
+        Ok(_) => {
+            trace!(target: TARGET, op = "pool.get", duration_ms = ms(started), "Verbindung aus Pool")
+        }
+        Err(e) => {
+            warn!(target: TARGET, op = "pool.get", duration_ms = ms(started), error = %e, "Pool-Fehler")
+        }
     }
     r
 }
@@ -133,13 +144,27 @@ pub async fn conn(pool: &Pool) -> Result<Object, PoolError> {
 pub async fn begin(conn: &mut ClientWrapper) -> Result<Transaction<'_>, Error> {
     let started = Instant::now();
     let r = conn.transaction().await;
-    log_statement("begin", "BEGIN", started, 0, None, r.as_ref().err().map(|e| e.to_string()));
+    log_statement(
+        "begin",
+        "BEGIN",
+        started,
+        0,
+        None,
+        r.as_ref().err().map(|e| e.to_string()),
+    );
     r
 }
 
 pub async fn commit(tx: Transaction<'_>) -> Result<(), Error> {
     let started = Instant::now();
     let r = tx.commit().await;
-    log_statement("commit", "COMMIT", started, 0, None, r.as_ref().err().map(|e| e.to_string()));
+    log_statement(
+        "commit",
+        "COMMIT",
+        started,
+        0,
+        None,
+        r.as_ref().err().map(|e| e.to_string()),
+    );
     r
 }

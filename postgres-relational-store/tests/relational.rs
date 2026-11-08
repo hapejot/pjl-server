@@ -252,9 +252,19 @@ async fn any_lambda_selects_parents_with_a_matching_child() {
 async fn all_lambda_requires_every_child_to_match() {
     let store = seeded().await;
     let all_qty_one = lambda_query("_Items/all(i: i/Qty eq 1)");
-    assert_eq!(store.get_collection(ORDERS, &all_qty_one).await.unwrap().len(), 1);
+    assert_eq!(
+        store
+            .get_collection(ORDERS, &all_qty_one)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
     let all_m100 = lambda_query("_Items/all(i: i/Material eq 'M-100')");
-    assert_eq!(store.get_collection(ORDERS, &all_m100).await.unwrap().len(), 0);
+    assert_eq!(
+        store.get_collection(ORDERS, &all_m100).await.unwrap().len(),
+        0
+    );
 }
 
 #[tokio::test]
@@ -309,7 +319,10 @@ async fn sibling_lambdas_are_anded_on_the_same_parent() {
     let same_var = lambda_query(
         "_Items/any(i: i/Material eq 'M-100') and _Items/any(i: i/Material eq 'M-200')",
     );
-    assert_eq!(store.get_collection(ORDERS, &same_var).await.unwrap().len(), 1);
+    assert_eq!(
+        store.get_collection(ORDERS, &same_var).await.unwrap().len(),
+        1
+    );
     let one = lambda_query("_Items/any(i: i/Material eq 'M-100')");
     assert_eq!(store.get_collection(ORDERS, &one).await.unwrap().len(), 2);
 }
@@ -318,9 +331,18 @@ async fn sibling_lambdas_are_anded_on_the_same_parent() {
 async fn string_functions_translate_to_sql() {
     let store = seeded().await;
     let cases = vec![
-        ("contains", vec![Expr::Identifier("Status".into()), Expr::String("e".into())]),
-        ("startswith", vec![Expr::Identifier("Status".into()), Expr::String("Ne".into())]),
-        ("endswith", vec![Expr::Identifier("Status".into()), Expr::String("ew".into())]),
+        (
+            "contains",
+            vec![Expr::Identifier("Status".into()), Expr::String("e".into())],
+        ),
+        (
+            "startswith",
+            vec![Expr::Identifier("Status".into()), Expr::String("Ne".into())],
+        ),
+        (
+            "endswith",
+            vec![Expr::Identifier("Status".into()), Expr::String("ew".into())],
+        ),
     ];
     for (name, args) in cases {
         let query = ODataQuery::new().filter(Expr::FunctionCall {
@@ -376,7 +398,10 @@ async fn not_and_null_comparison_translate() {
         Expr::Identifier("Status".into()),
         Expr::Null,
     ));
-    assert_eq!(store.get_collection(ORDERS, &is_null).await.unwrap().len(), 0);
+    assert_eq!(
+        store.get_collection(ORDERS, &is_null).await.unwrap().len(),
+        0
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -469,7 +494,12 @@ fn schema_v1() -> Schema {
         .set(
             EntitySet::new("ThingSet", "Thing")
                 .drafts()
-                .column(Column::new("Name", DataType::String { max_length: Some(10) })),
+                .column(Column::new(
+                    "Name",
+                    DataType::String {
+                        max_length: Some(10),
+                    },
+                )),
         )
         .build()
         .unwrap()
@@ -480,8 +510,18 @@ fn schema_v2() -> Schema {
         .set(
             EntitySet::new("ThingSet", "Thing")
                 .drafts()
-                .column(Column::new("Name", DataType::String { max_length: Some(10) }))
-                .column(Column::new("Note", DataType::String { max_length: Some(99) })),
+                .column(Column::new(
+                    "Name",
+                    DataType::String {
+                        max_length: Some(10),
+                    },
+                ))
+                .column(Column::new(
+                    "Note",
+                    DataType::String {
+                        max_length: Some(99),
+                    },
+                )),
         )
         .build()
         .unwrap()
@@ -532,7 +572,10 @@ async fn destructive_changes_are_reported_not_applied() {
 #[tokio::test]
 async fn reopening_with_the_same_revision_is_a_no_op() {
     let store = store().await;
-    assert!(!store.refresh_schema().await.unwrap(), "keine Migration noetig");
+    assert!(
+        !store.refresh_schema().await.unwrap(),
+        "keine Migration noetig"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -543,13 +586,15 @@ async fn reopening_with_the_same_revision_is_a_no_op() {
 async fn decimals_keep_their_precision() {
     let schema = Schema::builder()
         .set(
-            EntitySet::new("MoneySet", "Money").drafts().column(Column::new(
-                "Amount",
-                DataType::Decimal {
-                    precision: 15,
-                    scale: 2,
-                },
-            )),
+            EntitySet::new("MoneySet", "Money")
+                .drafts()
+                .column(Column::new(
+                    "Amount",
+                    DataType::Decimal {
+                        precision: 15,
+                        scale: 2,
+                    },
+                )),
         )
         .build()
         .unwrap();

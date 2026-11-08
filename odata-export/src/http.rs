@@ -47,7 +47,12 @@ impl Client {
     }
 
     /// Sendet `method` mit optionalem JSON-Rumpf auf `prefix + path`.
-    pub fn request(&self, method: &str, path: &str, body: Option<&Value>) -> Result<(u16, Vec<u8>)> {
+    pub fn request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+    ) -> Result<(u16, Vec<u8>)> {
         let target = format!("{}{}", self.prefix, path);
         let mut stream = TcpStream::connect(&self.host_port)
             .with_context(|| format!("Verbindung zu {} fehlgeschlagen", self.host_port))?;
@@ -99,7 +104,11 @@ fn parse_response(raw: &[u8]) -> Result<(u16, Vec<u8>)> {
             }
         }
     }
-    let body = if chunked { dechunk(body)? } else { body.to_vec() };
+    let body = if chunked {
+        dechunk(body)?
+    } else {
+        body.to_vec()
+    };
     Ok((status, body))
 }
 

@@ -16,10 +16,10 @@ use serde_json::Value;
 use srv_3270::{Action, Aid, App, Color, FieldAttribute, FieldId, Screen, Server, View};
 use tracing::{error, info};
 
+use crate::AppState;
 use crate::config::ServerConfig;
 use crate::extension::Extension;
-use crate::status::{hub, StatusHub};
-use crate::AppState;
+use crate::status::{StatusHub, hub};
 
 /// Geteilter Zustand jeder 3270-Sitzung.
 pub type Hub = Arc<StatusHub>;
@@ -96,7 +96,13 @@ impl View<Hub> for Page {
         } else {
             self.title.clone()
         };
-        s.text(0, 0, &title, FieldAttribute::protected_intensified(), Some(Color::Blue));
+        s.text(
+            0,
+            0,
+            &title,
+            FieldAttribute::protected_intensified(),
+            Some(Color::Blue),
+        );
 
         for (i, (label, value)) in lines.iter().take(max).enumerate() {
             let row = 2 + i as u16;
@@ -104,12 +110,24 @@ impl View<Hub> for Page {
                 s.text(row, 0, value, FieldAttribute::normal(), Some(Color::Green));
             } else {
                 s.text(row, 0, label, FieldAttribute::normal(), Some(Color::Blue));
-                s.text(row, VAL_COL, value, FieldAttribute::normal(), Some(Color::Green));
+                s.text(
+                    row,
+                    VAL_COL,
+                    value,
+                    FieldAttribute::normal(),
+                    Some(Color::Green),
+                );
             }
         }
 
         let cmd_row = rows.saturating_sub(3);
-        s.text(cmd_row, 0, "Befehl ==>", FieldAttribute::normal(), Some(Color::Blue));
+        s.text(
+            cmd_row,
+            0,
+            "Befehl ==>",
+            FieldAttribute::normal(),
+            Some(Color::Blue),
+        );
         s.input(FieldId::Command, cmd_row, 11, cols.saturating_sub(12), "");
         s.focus(FieldId::Command);
 
@@ -127,7 +145,13 @@ impl View<Hub> for Page {
         } else {
             "PF3=Zurueck PF12=Ende Enter=Aktualisieren  Befehl: Seitenname"
         };
-        s.text(rows.saturating_sub(1), 0, help, FieldAttribute::normal(), Some(Color::Blue));
+        s.text(
+            rows.saturating_sub(1),
+            0,
+            help,
+            FieldAttribute::normal(),
+            Some(Color::Blue),
+        );
 
         s
     }
@@ -159,7 +183,10 @@ impl View<Hub> for Page {
                 }
                 let cmd = raw.to_lowercase();
                 match self.names.iter().find(|n| **n == cmd).copied() {
-                    Some(view) => Action::Open { view, params: Value::Null },
+                    Some(view) => Action::Open {
+                        view,
+                        params: Value::Null,
+                    },
                     None => {
                         app.msg = format!("Unbekannter Befehl: {cmd}");
                         Action::Stay
@@ -192,12 +219,21 @@ fn uptime(secs: u64) -> String {
     format!("{}:{:02}:{:02}", secs / 3600, (secs / 60) % 60, secs % 60)
 }
 
-fn home(_hub: &Hub, snap: &Value, _max: usize, _scroll: usize, names: &[&'static str]) -> Vec<(String, String)> {
+fn home(
+    _hub: &Hub,
+    snap: &Value,
+    _max: usize,
+    _scroll: usize,
+    names: &[&'static str],
+) -> Vec<(String, String)> {
     let c = &snap["config"];
     vec![
         ("Modus".into(), txt(&c["mode"])),
         ("3270-Adresse".into(), txt(&c["term3270"])),
-        ("Laufzeit".into(), uptime(snap["server"]["uptime_s"].as_u64().unwrap_or(0))),
+        (
+            "Laufzeit".into(),
+            uptime(snap["server"]["uptime_s"].as_u64().unwrap_or(0)),
+        ),
         ("PID".into(), txt(&snap["server"]["pid"])),
         ("Anfragen gesamt".into(), txt(&snap["requests"]["total"])),
         ("Fehler 5xx".into(), txt(&snap["requests"]["errors_5xx"])),
@@ -207,25 +243,54 @@ fn home(_hub: &Hub, snap: &Value, _max: usize, _scroll: usize, names: &[&'static
 }
 
 /// Log-Fenster: `scroll` Eintraege vom neuesten Ende aus.
-fn logs(hub: &Hub, _snap: &Value, max: usize, scroll: usize, _names: &[&'static str]) -> Vec<(String, String)> {
+fn logs(
+    hub: &Hub,
+    _snap: &Value,
+    max: usize,
+    scroll: usize,
+    _names: &[&'static str],
+) -> Vec<(String, String)> {
     hub.logs_window(scroll, max)
         .into_iter()
         .map(|e| {
             let secs = (e.ts_ms / 1000) % 86_400;
-            let ts = format!("{:02}:{:02}:{:02}", secs / 3600, (secs / 60) % 60, secs % 60);
-            (format!("{ts} {:<5}", e.level), format!("{}: {}", e.target, e.message))
+            let ts = format!(
+                "{:02}:{:02}:{:02}",
+                secs / 3600,
+                (secs / 60) % 60,
+                secs % 60
+            );
+            (
+                format!("{ts} {:<5}", e.level),
+                format!("{}: {}", e.target, e.message),
+            )
         })
         .collect()
 }
 
-fn ext(_hub: &Hub, snap: &Value, _max: usize, _scroll: usize, _names: &[&'static str]) -> Vec<(String, String)> {
+fn ext(
+    _hub: &Hub,
+    snap: &Value,
+    _max: usize,
+    _scroll: usize,
+    _names: &[&'static str],
+) -> Vec<(String, String)> {
     match snap["extensions"].as_object() {
-        Some(map) if !map.is_empty() => map.iter().map(|(k, v)| (k.clone(), v.to_string())).collect(),
+        Some(map) if !map.is_empty() => map
+            .iter()
+            .map(|(k, v)| (k.clone(), v.to_string()))
+            .collect(),
         _ => vec![(String::new(), "Keine Erweiterung liefert Status.".into())],
     }
 }
 
-fn config_page(_hub: &Hub, snap: &Value, _max: usize, _scroll: usize, _names: &[&'static str]) -> Vec<(String, String)> {
+fn config_page(
+    _hub: &Hub,
+    snap: &Value,
+    _max: usize,
+    _scroll: usize,
+    _names: &[&'static str],
+) -> Vec<(String, String)> {
     snap["config"]
         .as_object()
         .map(|map| map.iter().map(|(k, v)| (k.clone(), txt(v))).collect())
@@ -244,12 +309,24 @@ impl View<Hub> for SectionPage {
     fn render(&self, app: &App<Hub>) -> Screen {
         let (rows, cols) = (app.rows, app.cols);
         let mut s = Screen::new(rows, cols);
-        s.text(0, 0, self.title, FieldAttribute::protected_intensified(), Some(Color::Blue));
+        s.text(
+            0,
+            0,
+            self.title,
+            FieldAttribute::protected_intensified(),
+            Some(Color::Blue),
+        );
         let max = (rows as usize).saturating_sub(4);
         for (i, (label, value)) in flatten((self.source)()).iter().take(max).enumerate() {
             let row = 2 + i as u16;
             s.text(row, 0, label, FieldAttribute::normal(), Some(Color::Blue));
-            s.text(row, VAL_COL, value, FieldAttribute::normal(), Some(Color::Green));
+            s.text(
+                row,
+                VAL_COL,
+                value,
+                FieldAttribute::normal(),
+                Some(Color::Green),
+            );
         }
         s.text(
             rows.saturating_sub(1),
@@ -261,7 +338,12 @@ impl View<Hub> for SectionPage {
         s
     }
 
-    async fn handle(&mut self, _app: &mut App<Hub>, aid: Aid, _values: &[(FieldId, String)]) -> Action {
+    async fn handle(
+        &mut self,
+        _app: &mut App<Hub>,
+        aid: Aid,
+        _values: &[(FieldId, String)],
+    ) -> Action {
         match aid {
             Aid::Pf(3) => Action::Back,
             Aid::Pf(12) => Action::Exit,

@@ -26,17 +26,25 @@ async fn main() -> anyhow::Result<()> {
     let cust_mueller = to_uuid(100);
     let cust_schmidt = to_uuid(101);
 
-    store.create_entity(
-        CUSTOMERS,
-        &json!({"ID": cust_mueller, "Name": "Müller GmbH"}),
-    ).await?;
-    store.draft_activate(CUSTOMERS, &EntityKey::new(cust_mueller, false)).await?;
+    store
+        .create_entity(
+            CUSTOMERS,
+            &json!({"ID": cust_mueller, "Name": "Müller GmbH"}),
+        )
+        .await?;
+    store
+        .draft_activate(CUSTOMERS, &EntityKey::new(cust_mueller, false))
+        .await?;
 
-    store.create_entity(
-        CUSTOMERS,
-        &json!({"ID": cust_schmidt, "Name": "Schmidt AG"}),
-    ).await?;
-    store.draft_activate(CUSTOMERS, &EntityKey::new(cust_schmidt, false)).await?;
+    store
+        .create_entity(
+            CUSTOMERS,
+            &json!({"ID": cust_schmidt, "Name": "Schmidt AG"}),
+        )
+        .await?;
+    store
+        .draft_activate(CUSTOMERS, &EntityKey::new(cust_schmidt, false))
+        .await?;
     store.persist()?;
 
     store.create_entity(
@@ -51,33 +59,43 @@ async fn main() -> anyhow::Result<()> {
         ORDERS,
         &json!({ "ID": to_uuid(3), "Customer_ID": cust_schmidt, "Amount": 4200, "Status": "In Process" }),
     ).await?;
-    store.create_entity(
-        ITEMS,
-        &json!({ "ID": to_uuid(10), "Order_ID": to_uuid(1), "Material": "M-100", "Qty": 5 }),
-    ).await?;
-    store.create_entity(
-        ITEMS,
-        &json!({ "ID": to_uuid(11), "Order_ID": to_uuid(1), "Material": "M-200", "Qty": 2 }),
-    ).await?;
-    let _ = store.create_entity(
-        ITEMS,
-        &json!({ "ID": to_uuid(12), "Order_ID": to_uuid(2), "Material": "M-200", "Qty": 2 }),
-    ).await;
+    store
+        .create_entity(
+            ITEMS,
+            &json!({ "ID": to_uuid(10), "Order_ID": to_uuid(1), "Material": "M-100", "Qty": 5 }),
+        )
+        .await?;
+    store
+        .create_entity(
+            ITEMS,
+            &json!({ "ID": to_uuid(11), "Order_ID": to_uuid(1), "Material": "M-200", "Qty": 2 }),
+        )
+        .await?;
+    let _ = store
+        .create_entity(
+            ITEMS,
+            &json!({ "ID": to_uuid(12), "Order_ID": to_uuid(2), "Material": "M-200", "Qty": 2 }),
+        )
+        .await;
 
     // ------------------------------------------------------------------------------------------------
     // Tests on Data
     let key = EntityKey::new(to_uuid(1), false);
 
     info!("Lese Auftrag {key:?} mit `Customer` erweitert.");
-    let order = store.read_entity(
-        ORDERS,
-        &key,
-        &ODataQuery::new().expand("_Items").expand("Customer"),
-    ).await?;
+    let order = store
+        .read_entity(
+            ORDERS,
+            &key,
+            &ODataQuery::new().expand("_Items").expand("Customer"),
+        )
+        .await?;
     info!("Gelesene Order: {}", serde_json::to_string_pretty(&order)?);
 
     info!("PATCH Auftrag {key:?}");
-    store.patch_entity(ORDERS, &key, &json!({ "Status": "Released" })).await?;
+    store
+        .patch_entity(ORDERS, &key, &json!({ "Status": "Released" }))
+        .await?;
 
     let key2 = EntityKey::new(to_uuid(2), false);
     info!("DRAFT ACTIVATE {key2:?}");
@@ -85,7 +103,9 @@ async fn main() -> anyhow::Result<()> {
     info!("EDIT DRAFT {key2:?}");
     store.draft_edit(ORDERS, &key2.sibling()).await?;
     info!("PATCH {key2:?}");
-    store.patch_entity(ORDERS, &key2, &json!({"Status": "In Progress"})).await?;
+    store
+        .patch_entity(ORDERS, &key2, &json!({"Status": "In Progress"}))
+        .await?;
 
     info!("DRAFT ACTIVATE {key:?}");
     store.draft_activate(ORDERS, &key).await?;

@@ -35,9 +35,19 @@ pub const TRACK_USAGE_ANALYTICS: &str = "trackUsageAnalytics";
 
 /// Alle Profil- und Einstellungsfelder (ohne `name`, `fullname`, `active`).
 pub const PROFILE_FIELDS: &[&str] = &[
-    EMAIL, THEME, CONTENT_DENSITY, ACCESSIBILITY, DETECT_DARK_MODE, LANGUAGE, TIME_ZONE,
-    CALENDAR_WEEK_NUMBERING, TRACK_USER_ACTIVITIES, SHOW_MY_HOME, IMPORT_BOOKMARKS,
-    IMAGE_CONSENT, TRACK_USAGE_ANALYTICS,
+    EMAIL,
+    THEME,
+    CONTENT_DENSITY,
+    ACCESSIBILITY,
+    DETECT_DARK_MODE,
+    LANGUAGE,
+    TIME_ZONE,
+    CALENDAR_WEEK_NUMBERING,
+    TRACK_USER_ACTIVITIES,
+    SHOW_MY_HOME,
+    IMPORT_BOOKMARKS,
+    IMAGE_CONSENT,
+    TRACK_USAGE_ANALYTICS,
 ];
 
 pub const OWNER: &str = "Owner";
@@ -105,22 +115,4 @@ pub fn fk_column(navigation: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_user_id_is_stable() {
-        // Festwert: aendert sich nur, wenn Namespace oder Username geaendert werden.
-        assert_eq!(
-            default_user_id().to_string(),
-            Uuid::new_v5(&Uuid::new_v5(&Uuid::NAMESPACE_DNS, b"SystemUser"), b"none@localhost")
-                .to_string()
-        );
-        assert_eq!(default_user_id(), default_user_id());
-    }
-
-    #[test]
-    fn fk_column_suffix() {
-        assert_eq!(fk_column("Owner"), "Owner_ID");
-    }
-}
+mod tests;

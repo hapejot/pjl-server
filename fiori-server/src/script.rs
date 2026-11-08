@@ -26,10 +26,13 @@ pub fn bind_components(
             .components()
             .iter()
             .find(|c| c.name == usage.component)
-            .ok_or_else(|| anyhow::anyhow!("verwendung {}: unbekannte Komponente", usage.instance))?;
-        let script = component.script.as_deref().ok_or_else(|| {
-            anyhow::anyhow!("komponente '{}' hat kein Skript", component.name)
-        })?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("verwendung {}: unbekannte Komponente", usage.instance)
+            })?;
+        let script = component
+            .script
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("komponente '{}' hat kein Skript", component.name))?;
         let entity = entities
             .iter()
             .find(|e| e.name == usage.entity)
@@ -86,7 +89,9 @@ impl Hook for ScriptHook {
         op: Operation,
         value: &mut Value,
     ) -> Result<(), HookError> {
-        self.0.before(set_name, op_name(op), value).map_err(script_err)
+        self.0
+            .before(set_name, op_name(op), value)
+            .map_err(script_err)
     }
 
     async fn before_patch(
@@ -115,7 +120,9 @@ impl Hook for ScriptHook {
                 .after_read(set_name, "entity", None, None, &mut v)
                 .map_err(script_err)?;
         } else {
-            self.0.after(set_name, op_name(op), &mut v).map_err(script_err)?;
+            self.0
+                .after(set_name, op_name(op), &mut v)
+                .map_err(script_err)?;
         }
         *value = record_from_value(&v)?;
         Ok(())
@@ -151,7 +158,10 @@ impl Hook for ScriptHook {
         let Value::Array(items) = v else {
             return Err(HookError::Hook("after_read: Liste erwartet".into()));
         };
-        *records = items.iter().map(record_from_value).collect::<Result<_, _>>()?;
+        *records = items
+            .iter()
+            .map(record_from_value)
+            .collect::<Result<_, _>>()?;
         Ok(())
     }
 
@@ -202,10 +212,7 @@ impl Extension for ScriptExtension {
         let status = self.hooks.clone();
         let reload = self.hooks.clone();
         vec![
-            (
-                "scripts",
-                section_view("Skripte", move || status.status()),
-            ),
+            ("scripts", section_view("Skripte", move || status.status())),
             (
                 "reload",
                 Box::new(move || {

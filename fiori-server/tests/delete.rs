@@ -19,18 +19,24 @@ async fn app_state() -> (TempDir, AppState) {
         .create_entity(
             "PackageSet",
             &json!({ "ID": PACKAGE_ID, "IsActiveEntity": true, "name": "core" }),
-        ).await
+        )
+        .await
         .unwrap();
     store
         .create_entity(
             "EntitySet",
             &json!({ "ID": ENTITY_ID, "IsActiveEntity": true,
                      "name": "Order", "plural": "Orders", "package_ID": PACKAGE_ID }),
-        ).await
+        )
+        .await
         .unwrap();
-    let state = AppState::new(store, Arc::new(fiori_server::config::ServerConfig::defaults(
-        fiori_server::config::ServerMode::Runtime,
-    )), spec::data_dictionary::DataDictionary::new());
+    let state = AppState::new(
+        store,
+        Arc::new(fiori_server::config::ServerConfig::defaults(
+            fiori_server::config::ServerMode::Runtime,
+        )),
+        spec::data_dictionary::DataDictionary::new(),
+    );
     state.reload();
     (dir, state)
 }
@@ -68,7 +74,8 @@ async fn deletes_an_active_entity() {
     assert!(
         state
             .store
-            .read_entity("EntitySet", &active_key(), &Default::default()).await
+            .read_entity("EntitySet", &active_key(), &Default::default())
+            .await
             .is_err()
     );
 }
@@ -76,7 +83,11 @@ async fn deletes_an_active_entity() {
 #[tokio::test]
 async fn deleting_the_active_entity_removes_its_draft() {
     let (_dir, state) = app_state().await;
-    state.store.draft_edit("EntitySet", &active_key()).await.unwrap();
+    state
+        .store
+        .draft_edit("EntitySet", &active_key())
+        .await
+        .unwrap();
 
     let status = delete(
         &state,
@@ -88,7 +99,8 @@ async fn deleting_the_active_entity_removes_its_draft() {
     assert!(
         state
             .store
-            .read_entity("EntitySet", &active_key().sibling(), &Default::default()).await
+            .read_entity("EntitySet", &active_key().sibling(), &Default::default())
+            .await
             .is_err()
     );
 }
@@ -96,7 +108,11 @@ async fn deleting_the_active_entity_removes_its_draft() {
 #[tokio::test]
 async fn deleting_a_draft_keeps_the_active_entity() {
     let (_dir, state) = app_state().await;
-    state.store.draft_edit("EntitySet", &active_key()).await.unwrap();
+    state
+        .store
+        .draft_edit("EntitySet", &active_key())
+        .await
+        .unwrap();
 
     let status = delete(
         &state,
@@ -108,7 +124,8 @@ async fn deleting_a_draft_keeps_the_active_entity() {
     assert!(
         state
             .store
-            .read_entity("EntitySet", &active_key(), &Default::default()).await
+            .read_entity("EntitySet", &active_key(), &Default::default())
+            .await
             .is_ok()
     );
 }
@@ -129,7 +146,8 @@ async fn deletes_through_a_navigation_path() {
     assert!(
         state
             .store
-            .read_entity("EntitySet", &active_key(), &Default::default()).await
+            .read_entity("EntitySet", &active_key(), &Default::default())
+            .await
             .is_err()
     );
 }

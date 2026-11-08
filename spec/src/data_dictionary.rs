@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::value_list::{self, ValueList, CODE_FIELD, LABEL_FIELD, SORT_FIELD};
+use crate::value_list::{self, CODE_FIELD, LABEL_FIELD, SORT_FIELD, ValueList};
 use crate::{AtomValueList, EntitySpec, FieldSpec, Relationship, app::App, package::Package};
 use tracing::*;
 
@@ -71,13 +71,41 @@ impl DataDictionary {
             .field(FieldSpec::atom("kind", "Field Kind", "Edm.String"))
             .field(FieldSpec::atom("link", "Link", "Edm.Boolean"))
             .field(FieldSpec::bool_field("prefer_dialog", "Prefer Dialog"))
-            .field(FieldSpec::atom("value_help_type", "Value Help Type", "Edm.String"))
-            .field(FieldSpec::atom("entity_set", "Target Entity Set", "Edm.String"))
-            .field(FieldSpec::atom("key_property", "Key Property", "Edm.String"))
-            .field(FieldSpec::atom("display_property", "Display Property", "Edm.String"))
-            .field(FieldSpec::atom("display_format", "Display Format", "Edm.String"))
-            .field(FieldSpec::atom("unit_field", "Unit or Currency Field", "Edm.String"))
-            .field(FieldSpec::atom("measure_kind", "Measure Kind", "Edm.String"));
+            .field(FieldSpec::atom(
+                "value_help_type",
+                "Value Help Type",
+                "Edm.String",
+            ))
+            .field(FieldSpec::atom(
+                "entity_set",
+                "Target Entity Set",
+                "Edm.String",
+            ))
+            .field(FieldSpec::atom(
+                "key_property",
+                "Key Property",
+                "Edm.String",
+            ))
+            .field(FieldSpec::atom(
+                "display_property",
+                "Display Property",
+                "Edm.String",
+            ))
+            .field(FieldSpec::atom(
+                "display_format",
+                "Display Format",
+                "Edm.String",
+            ))
+            .field(FieldSpec::atom(
+                "unit_field",
+                "Unit or Currency Field",
+                "Edm.String",
+            ))
+            .field(FieldSpec::atom(
+                "measure_kind",
+                "Measure Kind",
+                "Edm.String",
+            ));
 
         let relation_ent = EntitySpec::new("Relation", core.name(), "Relations")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
@@ -93,7 +121,11 @@ impl DataDictionary {
                 "Edm.String",
             ))
             .field(FieldSpec::atom("package", "Package", "Edm.String"))
-            .field(FieldSpec::atom("one_label", "Collection Label", "Edm.String"))
+            .field(FieldSpec::atom(
+                "one_label",
+                "Collection Label",
+                "Edm.String",
+            ))
             .field(FieldSpec::atom("many_label", "Single Label", "Edm.String"));
 
         // `name` ist Titel und Listenspalte (Annotationen verweisen darauf); es traegt den Code.
@@ -129,7 +161,11 @@ impl DataDictionary {
         let component_use_ent = EntitySpec::new("ComponentUse", core.name(), "Component Uses")
             .field(FieldSpec::atom("instance", "Instance", "Edm.String"))
             .field(FieldSpec::atom("step_minutes", "Step Minutes", "Edm.Int64"))
-            .field(FieldSpec::atom("section_title", "Section Title", "Edm.String"));
+            .field(FieldSpec::atom(
+                "section_title",
+                "Section Title",
+                "Edm.String",
+            ));
 
         let list_view_ent = EntitySpec::new("EntityListView", core.name(), "List Views")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
@@ -142,15 +178,17 @@ impl DataDictionary {
             .field(FieldSpec::atom("width", "Width", "Edm.String"))
             .field(FieldSpec::atom("priority", "Priority", "Edm.String"))
             .without_audit();
-        let filter_default_ent = EntitySpec::new("EntityFilterDefault", core.name(), "Filter Defaults")
-            .field(FieldSpec::atom("field", "Field", "Edm.String"))
-            .field(FieldSpec::atom("value", "Value", "Edm.String"))
-            .field(FieldSpec::bool_field("is_boolean", "Boolean Value"))
-            .without_audit();
-        let selection_field_ent = EntitySpec::new("EntitySelectionField", core.name(), "Selection Fields")
-            .field(FieldSpec::atom("field", "Field", "Edm.String"))
-            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
-            .without_audit();
+        let filter_default_ent =
+            EntitySpec::new("EntityFilterDefault", core.name(), "Filter Defaults")
+                .field(FieldSpec::atom("field", "Field", "Edm.String"))
+                .field(FieldSpec::atom("value", "Value", "Edm.String"))
+                .field(FieldSpec::bool_field("is_boolean", "Boolean Value"))
+                .without_audit();
+        let selection_field_ent =
+            EntitySpec::new("EntitySelectionField", core.name(), "Selection Fields")
+                .field(FieldSpec::atom("field", "Field", "Edm.String"))
+                .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+                .without_audit();
         let facet_ent = EntitySpec::new("EntityFacet", core.name(), "Facets")
             .field(FieldSpec::atom("facet", "Facet", "Edm.String"))
             .field(FieldSpec::atom("view", "List View", "Edm.String"))
@@ -177,45 +215,65 @@ impl DataDictionary {
             .field(FieldSpec::atom("placement", "Placement", "Edm.String"))
             .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
             .without_audit();
-        let ui_column_ent = EntitySpec::new("EntityUiListColumn", core.name(), "Custom List Columns")
-            .field(FieldSpec::atom("key", "Key", "Edm.String"))
-            .field(FieldSpec::atom("header", "Header", "Edm.String"))
-            .field(FieldSpec::atom("fragment", "Fragment", "Edm.String"))
-            .field(FieldSpec::atom("anchor", "Anchor", "Edm.String"))
-            .field(FieldSpec::atom("placement", "Placement", "Edm.String"))
-            .field(FieldSpec::atom("width", "Width", "Edm.String"))
-            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
-            .without_audit();
-        let ui_template_ent = EntitySpec::new("EntityUiListTemplate", core.name(), "List Templates")
-            .field(FieldSpec::atom("key", "Key", "Edm.String"))
-            .field(FieldSpec::atom("label", "Label", "Edm.String"))
-            .field(FieldSpec::atom("fragment", "Fragment", "Edm.String"))
-            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
-            .without_audit();
+        let ui_column_ent =
+            EntitySpec::new("EntityUiListColumn", core.name(), "Custom List Columns")
+                .field(FieldSpec::atom("key", "Key", "Edm.String"))
+                .field(FieldSpec::atom("header", "Header", "Edm.String"))
+                .field(FieldSpec::atom("fragment", "Fragment", "Edm.String"))
+                .field(FieldSpec::atom("anchor", "Anchor", "Edm.String"))
+                .field(FieldSpec::atom("placement", "Placement", "Edm.String"))
+                .field(FieldSpec::atom("width", "Width", "Edm.String"))
+                .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+                .without_audit();
+        let ui_template_ent =
+            EntitySpec::new("EntityUiListTemplate", core.name(), "List Templates")
+                .field(FieldSpec::atom("key", "Key", "Edm.String"))
+                .field(FieldSpec::atom("label", "Label", "Edm.String"))
+                .field(FieldSpec::atom("fragment", "Fragment", "Edm.String"))
+                .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+                .without_audit();
         let field_side_effect_ent = EntitySpec::new("FieldSideEffect", core.name(), "Side Effects")
             .field(FieldSpec::atom("target", "Target Field", "Edm.String"))
             .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
             .without_audit();
-        let value_help_filter_ent = EntitySpec::new("ValueHelpFilter", core.name(), "Value Help Filters")
-            .field(FieldSpec::atom("local_property", "Local Field", "Edm.String"))
-            .field(FieldSpec::atom("target_property", "Target Field", "Edm.String"))
-            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
-            .without_audit();
+        let value_help_filter_ent =
+            EntitySpec::new("ValueHelpFilter", core.name(), "Value Help Filters")
+                .field(FieldSpec::atom(
+                    "local_property",
+                    "Local Field",
+                    "Edm.String",
+                ))
+                .field(FieldSpec::atom(
+                    "target_property",
+                    "Target Field",
+                    "Edm.String",
+                ))
+                .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+                .without_audit();
         let app_module_ent = EntitySpec::new("AppModule", core.name(), "App Modules")
             .field(FieldSpec::atom("module", "Module", "Edm.String"))
             .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
             .without_audit();
-        let app_extension_ent = EntitySpec::new("AppControllerExtension", core.name(), "Controller Extensions")
-            .field(FieldSpec::atom("target", "Target Controller", "Edm.String"))
-            .field(FieldSpec::atom("controller", "Extension Controller", "Edm.String"))
-            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
-            .without_audit();
-        let component_role_ent = EntitySpec::new("ComponentUseRole", core.name(), "Component Roles")
-            .field(FieldSpec::atom("role", "Role", "Edm.String"))
-            .field(FieldSpec::atom("field", "Field", "Edm.String"))
-            .field(FieldSpec::atom("label", "Label", "Edm.String"))
-            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
-            .without_audit();
+        let app_extension_ent = EntitySpec::new(
+            "AppControllerExtension",
+            core.name(),
+            "Controller Extensions",
+        )
+        .field(FieldSpec::atom("target", "Target Controller", "Edm.String"))
+        .field(FieldSpec::atom(
+            "controller",
+            "Extension Controller",
+            "Edm.String",
+        ))
+        .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+        .without_audit();
+        let component_role_ent =
+            EntitySpec::new("ComponentUseRole", core.name(), "Component Roles")
+                .field(FieldSpec::atom("role", "Role", "Edm.String"))
+                .field(FieldSpec::atom("field", "Field", "Edm.String"))
+                .field(FieldSpec::atom("label", "Label", "Edm.String"))
+                .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+                .without_audit();
 
         let rel = Relationship::new("entity_fields", core.name())
             .with_one("Entity", "_Fields")
@@ -243,24 +301,126 @@ impl DataDictionary {
             .with_one("ValueList", "_Fields")
             .with_many("Field", "value_list");
         let config_relationships = [
-            ("entity_list_views", "Entity", "_ListViews", "EntityListView", "entity"),
-            ("list_view_columns", "EntityListView", "_Columns", "EntityListColumn", "list_view"),
-            ("entity_filter_defaults", "Entity", "_FilterDefaults", "EntityFilterDefault", "entity"),
-            ("entity_selection_fields", "Entity", "_SelectionFields", "EntitySelectionField", "entity"),
-            ("entity_facets", "Entity", "_Facets", "EntityFacet", "entity"),
-            ("facet_fields", "EntityFacet", "_Fields", "EntityFacetField", "facet"),
-            ("entity_hidden_fields", "Entity", "_HiddenFields", "EntityHiddenField", "entity"),
-            ("entity_hidden_facets", "Entity", "_HiddenFacets", "EntityHiddenFacet", "entity"),
-            ("entity_ui_sections", "Entity", "_UiSections", "EntityUiSection", "entity"),
-            ("entity_ui_columns", "Entity", "_UiColumns", "EntityUiListColumn", "entity"),
-            ("entity_ui_templates", "Entity", "_UiTemplates", "EntityUiListTemplate", "entity"),
-            ("field_side_effects", "Field", "_SideEffects", "FieldSideEffect", "field"),
-            ("value_help_filters", "Field", "_ValueHelpFilters", "ValueHelpFilter", "field"),
+            (
+                "entity_list_views",
+                "Entity",
+                "_ListViews",
+                "EntityListView",
+                "entity",
+            ),
+            (
+                "list_view_columns",
+                "EntityListView",
+                "_Columns",
+                "EntityListColumn",
+                "list_view",
+            ),
+            (
+                "entity_filter_defaults",
+                "Entity",
+                "_FilterDefaults",
+                "EntityFilterDefault",
+                "entity",
+            ),
+            (
+                "entity_selection_fields",
+                "Entity",
+                "_SelectionFields",
+                "EntitySelectionField",
+                "entity",
+            ),
+            (
+                "entity_facets",
+                "Entity",
+                "_Facets",
+                "EntityFacet",
+                "entity",
+            ),
+            (
+                "facet_fields",
+                "EntityFacet",
+                "_Fields",
+                "EntityFacetField",
+                "facet",
+            ),
+            (
+                "entity_hidden_fields",
+                "Entity",
+                "_HiddenFields",
+                "EntityHiddenField",
+                "entity",
+            ),
+            (
+                "entity_hidden_facets",
+                "Entity",
+                "_HiddenFacets",
+                "EntityHiddenFacet",
+                "entity",
+            ),
+            (
+                "entity_ui_sections",
+                "Entity",
+                "_UiSections",
+                "EntityUiSection",
+                "entity",
+            ),
+            (
+                "entity_ui_columns",
+                "Entity",
+                "_UiColumns",
+                "EntityUiListColumn",
+                "entity",
+            ),
+            (
+                "entity_ui_templates",
+                "Entity",
+                "_UiTemplates",
+                "EntityUiListTemplate",
+                "entity",
+            ),
+            (
+                "field_side_effects",
+                "Field",
+                "_SideEffects",
+                "FieldSideEffect",
+                "field",
+            ),
+            (
+                "value_help_filters",
+                "Field",
+                "_ValueHelpFilters",
+                "ValueHelpFilter",
+                "field",
+            ),
             ("app_modules", "App", "_Modules", "AppModule", "app"),
-            ("app_controller_extensions", "App", "_ControllerExtensions", "AppControllerExtension", "app"),
-            ("entity_component_uses", "Entity", "_ComponentUses", "ComponentUse", "entity"),
-            ("component_uses_component", "Component", "_Uses", "ComponentUse", "component"),
-            ("component_use_roles", "ComponentUse", "_Roles", "ComponentUseRole", "component_use"),
+            (
+                "app_controller_extensions",
+                "App",
+                "_ControllerExtensions",
+                "AppControllerExtension",
+                "app",
+            ),
+            (
+                "entity_component_uses",
+                "Entity",
+                "_ComponentUses",
+                "ComponentUse",
+                "entity",
+            ),
+            (
+                "component_uses_component",
+                "Component",
+                "_Uses",
+                "ComponentUse",
+                "component",
+            ),
+            (
+                "component_use_roles",
+                "ComponentUse",
+                "_Roles",
+                "ComponentUseRole",
+                "component_use",
+            ),
         ]
         .into_iter()
         .map(|(name, one, one_field, many, many_property)| {
@@ -442,7 +602,12 @@ impl DataDictionary {
                 .find(|f| f.name() == key)
                 .ok_or_else(|| format!("{ctx}: Feld existiert nicht"))?;
             match field {
-                FieldSpec::Atom { computed, value_list, edm_type, .. } => {
+                FieldSpec::Atom {
+                    computed,
+                    value_list,
+                    edm_type,
+                    ..
+                } => {
                     if *computed {
                         return Err(format!("{ctx}: berechnetes Feld kann kein Schluessel sein"));
                     }
@@ -501,7 +666,11 @@ impl DataDictionary {
         let own_key = self
             .resolve_entity_any(target)
             .is_some_and(|e| e.primary_key.is_some());
-        if own_key { format!("{field}{CODE_FK_SUFFIX}") } else { format!("{field}_ID") }
+        if own_key {
+            format!("{field}{CODE_FK_SUFFIX}")
+        } else {
+            format!("{field}_ID")
+        }
     }
 
     /// Entitaet nach Name, aktiv falls vorhanden, sonst im Entwurfsstand.
@@ -615,8 +784,7 @@ impl DataDictionary {
                 }
             }
             None => {
-                let mut entity =
-                    EntitySpec::new(su::SYSTEM_USER, su::PACKAGE, "System Users");
+                let mut entity = EntitySpec::new(su::SYSTEM_USER, su::PACKAGE, "System Users");
                 for field in user_fields {
                     entity = entity.field(field);
                 }
@@ -712,7 +880,8 @@ impl DataDictionary {
     /// Register a package unless one with the same name already exists.
     /// Festwertliste registrieren (ersetzt eine Liste gleicher ID).
     pub fn add_value_list(&mut self, list: ValueList) {
-        self.value_lists.retain(|l| !l.id.eq_ignore_ascii_case(&list.id));
+        self.value_lists
+            .retain(|l| !l.id.eq_ignore_ascii_case(&list.id));
         self.value_lists.push(list);
     }
 
@@ -899,7 +1068,7 @@ impl DataDictionary {
             let mut seen_names: HashSet<&str> = HashSet::new();
             for view in entity.list_views() {
                 let ctx = format!("{}.list_views['{}']", entity.name(), view.name);
-              info!("validiere ListView {}", ctx);
+                info!("validiere ListView {}", ctx);
                 if view.name.trim().is_empty()
                     || view.name.contains('#')
                     || view.name.chars().any(char::is_whitespace)
@@ -962,89 +1131,7 @@ impl Default for DataDictionary {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn activate_exposes_lookup_fields_with_cardinality() {
-        let mut ddic = DataDictionary::new();
-        ddic.activate();
-
-        let package = ddic
-            .active_entity_by_setname("PackageSet")
-            .expect("active entity by set name");
-        let package_fields = package.fields().collect::<Vec<_>>();
-
-        assert!(package_fields.iter().any(|field| matches!(
-            field,
-            FieldSpec::Lookup { name, entity, collection, owned, .. }
-                if name == "_Entities" && entity == "Entity" && *collection
-        )));
-
-        let entity = ddic
-            .active_entity_by_setname("EntitySet")
-            .expect("active entity by set name");
-        let entity_fields = entity.fields().collect::<Vec<_>>();
-
-        assert!(entity_fields.iter().any(|field| matches!(
-            field,
-            FieldSpec::Lookup { name, entity, collection, owned, .. }
-                if name == "_Fields" && entity == "Field" && *collection
-        )));
-        assert!(entity_fields.iter().any(|field| matches!(
-            field,
-            FieldSpec::Lookup { name, entity, collection, owned, .. }
-                if name == "_Many" && entity == "Relation" && *collection
-        )));
-        assert!(entity_fields.iter().any(|field| matches!(
-            field,
-            FieldSpec::Lookup { name, entity, collection, owned, .. }
-                if name == "package" && entity == "Package" && !*collection
-        )));
-
-        let field = ddic
-            .active_entity_by_setname("FieldSet")
-            .expect("active field by set name");
-        let field_fields = field.fields().collect::<Vec<_>>();
-
-        assert!(field_fields.iter().any(|field| matches!(
-            field,
-            FieldSpec::Lookup { name, entity, collection, owned, .. }
-                if name == "entity" && entity == "Entity" && !*collection
-        )));
-
-        let package_by_name = ddic
-            .active_entity("Package")
-            .expect("active entity by name");
-        assert_eq!(package_by_name.setname(), "PackageSet");
-    }
-
-    #[test]
-    fn derives_foreign_key_field_from_active_entities() {
-        let mut ddic = DataDictionary::new();
-        ddic.activate();
-
-        let entity = ddic.active_entity("Entity").expect("active entity");
-        let fields_lookup = entity
-            .fields()
-            .find(|f| matches!(f, FieldSpec::Lookup { name, .. } if name == "_Fields"))
-            .expect("_Fields lookup");
-        assert_eq!(
-            ddic.foreign_key_field(entity, fields_lookup).as_deref(),
-            Some("entity"),
-        );
-
-        let field = ddic.active_entity("Field").expect("active field");
-        let parent_lookup = field
-            .fields()
-            .find(|f| matches!(f, FieldSpec::Lookup { name, .. } if name == "entity"))
-            .expect("entity lookup");
-        assert_eq!(
-            ddic.foreign_key_field(field, parent_lookup).as_deref(),
-            Some("entity"),
-        );
-    }
-}
+mod tests;
 
 /// Ersetzt ein gleichnamiges Feld oder haengt es an.
 fn replace_field(fields: &mut Vec<FieldSpec>, field: FieldSpec) {
@@ -1080,7 +1167,9 @@ fn check_list_column(active: &DataDictionary, entity: &str, col: &str) -> Result
         FieldSpec::Lookup { .. } => Err(format!(
             "'{col}' ist eine Sammelnavigation und kann keine Listenspalte sein"
         )),
-        FieldSpec::Measure { .. } => Err(format!("Measure '{col}' wird nicht als Spalte unterstuetzt")),
+        FieldSpec::Measure { .. } => Err(format!(
+            "Measure '{col}' wird nicht als Spalte unterstuetzt"
+        )),
     }
 }
 
@@ -1101,315 +1190,13 @@ pub fn is_valid_css_width(width: &str) -> bool {
 }
 
 #[cfg(test)]
-mod list_view_tests {
-    use super::*;
-    use crate::package::Package;
-    use crate::ListView;
-
-    fn atom(name: &str) -> FieldSpec {
-        FieldSpec::Atom {
-            name: name.into(),
-            label: name.into(),
-            edm_type: "Edm.String".into(),
-            package: None,
-            max_length: None,
-            precision: None,
-            scale: None,
-            computed: false,
-            immutable: false,
-            value_list: None,
-            unit_scale_field: None,
-            code_list: None,
-            link: false,
-            multiline: false,
-            side_effects: Vec::new(),
-            ui: None,
-        }
-    }
-
-    /// Agent 1:n Video (Video.agent einwertig), Video 1:n Tag (Video._Tags Sammelnavigation).
-    fn ddic(views: Vec<ListView>) -> DataDictionary {
-        let mut ddic = DataDictionary::empty();
-        ddic.add_package(Package::new("core"));
-        ddic.add_entity(EntitySpec::new("Agent", "core", "Agents").field(atom("name")));
-        let mut video = EntitySpec::new("Video", "core", "Videos")
-            .field(atom("name"))
-            .field(atom("file_size"));
-        for v in views {
-            video = video.list_view(v);
-        }
-        ddic.add_entity(video);
-        ddic.add_entity(EntitySpec::new("Tag", "core", "Tags").field(atom("name")));
-        ddic.add_relationship(
-            Relationship::new("videos_agent_id", "core")
-                .with_one("Agent", "_Videos")
-                .with_many("Video", "agent"),
-        );
-        ddic.add_relationship(
-            Relationship::new("tags_video_id", "core")
-                .with_one("Video", "_Tags")
-                .with_many("Tag", "video"),
-        );
-        ddic
-    }
-
-    #[test]
-    fn valid_views_pass() {
-        let d = ddic(vec![
-            ListView::new("default", &["name", "agent", "file_size"]),
-            ListView::new("review", &["file_size"]),
-        ]);
-        assert!(d.validate_list_views().is_ok());
-    }
-
-    #[test]
-    fn unknown_column_is_rejected() {
-        let d = ddic(vec![ListView::new("default", &["nope"])]);
-        let err = d.validate_list_views().unwrap_err();
-        assert!(err.contains("'nope' existiert nicht"), "{err}");
-    }
-
-    #[test]
-    fn to_many_navigation_is_rejected_as_column() {
-        let d = ddic(vec![ListView::new("default", &["_Tags"])]);
-        let err = d.validate_list_views().unwrap_err();
-        assert!(err.contains("Sammelnavigation"), "{err}");
-    }
-
-    #[test]
-    fn duplicate_view_name_and_column_are_rejected() {
-        let d = ddic(vec![
-            ListView::new("default", &["name"]),
-            ListView::new("default", &["name"]),
-        ]);
-        assert!(d.validate_list_views().unwrap_err().contains("doppelt"));
-
-        let d = ddic(vec![ListView::new("x", &["name", "name"])]);
-        assert!(d.validate_list_views().unwrap_err().contains("doppelt"));
-    }
-
-    #[test]
-    fn column_width_is_validated() {
-        use crate::{ListColumn, Priority};
-        for ok in ["120px", "15rem", "2.5em", "20%", "auto"] {
-            let d = ddic(vec![ListView::with_columns(
-                "default",
-                vec![ListColumn::new("name").width(ok).priority(Priority::Low)],
-            )]);
-            assert!(d.validate_list_views().is_ok(), "{ok}");
-        }
-        for bad in ["", "px", "12", "12pt", "abc", "1.2.3px", "-5px", "10 px"] {
-            let d = ddic(vec![ListView::with_columns(
-                "default",
-                vec![ListColumn::new("name").width(bad)],
-            )]);
-            let err = d.validate_list_views().unwrap_err();
-            assert!(err.contains("Breite"), "{bad}: {err}");
-        }
-    }
-
-    #[test]
-    fn invalid_name_and_empty_columns_are_rejected() {
-        let d = ddic(vec![ListView::new("a#b", &["name"])]);
-        assert!(d.validate_list_views().unwrap_err().contains("Ansichtsname"));
-
-        let d = ddic(vec![ListView::new("x", &[])]);
-        assert!(d.validate_list_views().unwrap_err().contains("keine Spalten"));
-    }
-}
+mod list_view_tests;
 
 #[cfg(test)]
-mod value_list_tests {
-    use super::*;
-    use crate::value_list::{entry_id, is_valid_entity_name, ValueEntry, ValueList};
-    use crate::{AtomValueList, EntitySpec, FieldSpec};
-    use uuid::Uuid;
-
-    const LIST: &str = "79714635-4b3e-51a6-be78-dc009beb5f3c";
-
-    fn dictionary() -> DataDictionary {
-        let mut dd = DataDictionary::empty();
-        dd.value_lists = vec![ValueList {
-            id: LIST.into(),
-            name: "ProjectStatus".into(),
-            values: vec![
-                ValueEntry { code: "open".into(), label: "Offen".into(), sort: 1 },
-                ValueEntry { code: "done".into(), label: "Erledigt".into(), sort: 2 },
-            ],
-            code_key: false,
-        }];
-        dd.entities.push(
-            EntitySpec::new("Project", "core", "Projects").field(
-                FieldSpec::atom("status", "Status", "Edm.String")
-                    .with_value_list(AtomValueList::FieldValueList {
-                        list_id: LIST.into(),
-                        prefer_dialog: false,
-                    }),
-            ),
-        );
-        dd
-    }
-
-    #[test]
-    fn entry_id_is_stable_and_depends_on_list_and_code() {
-        assert_eq!(entry_id(LIST, "open"), entry_id(LIST, "open"));
-        assert_ne!(entry_id(LIST, "open"), entry_id(LIST, "done"));
-        assert_ne!(entry_id(LIST, "open"), entry_id(&Uuid::new_v4().to_string(), "open"));
-    }
-
-    #[test]
-    fn value_list_becomes_entity_per_list() {
-        let dd = dictionary();
-        let names: Vec<String> = dd.entities().iter().map(|e| e.name.clone()).collect();
-        assert!(names.contains(&"ProjectStatus".to_string()));
-        assert!(!names.contains(&"FieldValueListItems".to_string()));
-    }
-
-    #[test]
-    fn atom_with_value_list_becomes_lookup_in_memory_only() {
-        let mut dd = dictionary();
-        dd.apply_value_list_lookups().unwrap();
-        let project = dd.entities().into_iter().find(|e| e.name == "Project").unwrap();
-        let field = project.fields().find(|f| f.name() == "status").unwrap().clone();
-        assert!(matches!(
-            field,
-            FieldSpec::Lookup { ref entity, collection: false, .. } if entity == "ProjectStatus"
-        ));
-        assert_eq!(dd.converted_value_fields().len(), 1);
-        // Die Quelle (ddic.json) kennt weiterhin das Atom mit Festwertliste.
-        let source = serde_json::to_string(&dictionary()).unwrap();
-        assert!(source.contains("FieldValueList"));
-    }
-
-    #[test]
-    fn unknown_list_is_an_error() {
-        let mut dd = dictionary();
-        dd.value_lists.clear();
-        assert!(dd.apply_value_list_lookups().is_err());
-    }
-
-    #[test]
-    fn list_name_must_be_an_entity_name() {
-        assert!(is_valid_entity_name("ProjectStatus"));
-        assert!(!is_valid_entity_name("Project Status"));
-        assert!(!is_valid_entity_name("1Status"));
-    }
-}
+mod value_list_tests;
 
 #[cfg(test)]
-mod primary_key_tests {
-    use super::*;
-
-    fn dd_with(entity: EntitySpec) -> DataDictionary {
-        let mut dd = DataDictionary::new();
-        dd.entities.push(entity);
-        dd
-    }
-
-    fn code_entity() -> EntitySpec {
-        EntitySpec::new("Code", "core", "Codes")
-            .without_drafts()
-            .without_audit()
-            .field(FieldSpec::string("code", "Code", 10))
-            .field(FieldSpec::atom("name", "Bezeichnung", "Edm.String"))
-            .with_primary_key("code")
-    }
-
-    #[test]
-    fn valid_string_key_is_accepted() {
-        let dd = dd_with(code_entity());
-        assert!(dd.validate_primary_keys().is_ok());
-        let e = code_entity();
-        assert_eq!(e.primary_key_name(), "code");
-        assert_eq!(e.primary_key_type(), "Edm.String");
-    }
-
-    #[test]
-    fn default_key_is_id_guid() {
-        let e = EntitySpec::new("X", "core", "Xs");
-        assert_eq!(e.primary_key_name(), "ID");
-        assert_eq!(e.primary_key_type(), "Edm.Guid");
-    }
-
-    #[test]
-    fn key_with_drafts_is_rejected() {
-        let dd = dd_with(code_entity().field(FieldSpec::atom("x", "X", "Edm.String")));
-        let mut dd = dd;
-        dd.entities.last_mut().unwrap().draft_enabled = true;
-        assert!(dd.validate_primary_keys().unwrap_err().contains("ohne Drafts"));
-    }
-
-    #[test]
-    fn missing_or_wrong_field_is_rejected() {
-        let dd = dd_with(code_entity().with_primary_key("nope"));
-        assert!(dd.validate_primary_keys().unwrap_err().contains("existiert nicht"));
-
-        let dd = dd_with(code_entity().with_primary_key("name").field(FieldSpec::int("n", "N")));
-        assert!(dd.validate_primary_keys().is_ok());
-    }
-
-    #[test]
-    fn computed_or_value_list_key_is_rejected() {
-        let e = EntitySpec::new("Code", "core", "Codes")
-            .without_drafts()
-            .field(FieldSpec::string("code", "Code", 10).computed())
-            .with_primary_key("code");
-        assert!(dd_with(e).validate_primary_keys().unwrap_err().contains("berechnet"));
-    }
-
-    #[test]
-    fn unsupported_type_is_rejected() {
-        let e = EntitySpec::new("Code", "core", "Codes")
-            .without_drafts()
-            .field(FieldSpec::atom("d", "D", "Edm.DateTimeOffset"))
-            .with_primary_key("d");
-        assert!(dd_with(e).validate_primary_keys().unwrap_err().contains("nicht als Schluessel"));
-    }
-}
+mod primary_key_tests;
 
 #[cfg(test)]
-mod code_key_tests {
-    use super::*;
-
-    const LIST: &str = "79714635-4b3e-51a6-be78-dc009beb5f3c";
-
-    fn dictionary(code_key: bool) -> DataDictionary {
-        let mut dd = DataDictionary::empty();
-        dd.value_lists = vec![ValueList {
-            id: LIST.into(),
-            name: "ProjectStatus".into(),
-            values: vec![crate::value_list::ValueEntry { code: "open".into(), label: "Offen".into(), sort: 1 }],
-            code_key,
-        }];
-        dd.entities.push(
-            EntitySpec::new("Project", "core", "Projects").field(
-                FieldSpec::atom("status", "Status", "Edm.String").with_value_list(
-                    AtomValueList::FieldValueList { list_id: LIST.into(), prefer_dialog: false },
-                ),
-            ),
-        );
-        dd.apply_value_list_lookups().unwrap();
-        dd.activate();
-        dd
-    }
-
-    #[test]
-    fn code_key_list_is_keyed_by_code_without_drafts() {
-        let dd = dictionary(true);
-        let list = dd.active_entity("ProjectStatus").expect("list entity");
-        assert_eq!(list.primary_key_name(), "value");
-        assert_eq!(list.primary_key_type(), "Edm.String");
-        assert_eq!(list.key_fields(), vec!["value"]);
-        assert!(!list.draft_enabled);
-        assert_eq!(dd.fk_column("ProjectStatus", "status"), "status_code");
-        assert!(dd.validate_primary_keys().is_ok());
-    }
-
-    #[test]
-    fn guid_list_keeps_id_and_fk_suffix() {
-        let dd = dictionary(false);
-        let list = dd.active_entity("ProjectStatus").expect("list entity");
-        assert_eq!(list.key_fields(), vec!["ID", "IsActiveEntity"]);
-        assert_eq!(dd.fk_column("ProjectStatus", "status"), "status_ID");
-    }
-}
+mod code_key_tests;

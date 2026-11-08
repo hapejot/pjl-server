@@ -9,26 +9,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = YamlStore::open("data").unwrap();
 
     // 2. Entities anlegen
-    let _ = store.create_entity(
-        entity_configs,
-        &json!({ "ID": "entity-1", "Name": "Entity" }),
-    ).await;
-    let _ = store.create_entity(
-        entity_configs,
-        &json!({ "ID": "entity-2", "Name": "FioriApp" }),
-    ).await;
-    let _ = store.create_entity(
-        entity_configs,
-        &json!({ "ID": "entity-3", "Name": "Relation" }),
-    ).await;
-    let _ = store.create_entity(
-        entity_configs,
-        &json!({ "ID": "entity-4", "Name": "Field" } ),
-    ).await;
-    let _ = store.create_entity(
-        entity_configs,
-        &json!({ "ID": "entity-3", "Name": "Relation" }),
-    ).await;
+    let _ = store
+        .create_entity(
+            entity_configs,
+            &json!({ "ID": "entity-1", "Name": "Entity" }),
+        )
+        .await;
+    let _ = store
+        .create_entity(
+            entity_configs,
+            &json!({ "ID": "entity-2", "Name": "FioriApp" }),
+        )
+        .await;
+    let _ = store
+        .create_entity(
+            entity_configs,
+            &json!({ "ID": "entity-3", "Name": "Relation" }),
+        )
+        .await;
+    let _ = store
+        .create_entity(
+            entity_configs,
+            &json!({ "ID": "entity-4", "Name": "Field" } ),
+        )
+        .await;
+    let _ = store
+        .create_entity(
+            entity_configs,
+            &json!({ "ID": "entity-3", "Name": "Relation" }),
+        )
+        .await;
 
     let _ = store.create_entity(
         app,

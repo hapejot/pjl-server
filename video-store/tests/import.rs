@@ -4,7 +4,7 @@ mod common;
 use data_store::DataStore;
 #[cfg(feature = "docker-tests")]
 use odata::query::ODataQuery;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 #[cfg(feature = "docker-tests")]
 use std::sync::Arc;
 use video_store::{import, map};
@@ -73,7 +73,6 @@ mod pg_test {
     }
 }
 
-
 const AGENT: &str = "11111111-1111-4111-8111-111111111111";
 const VIDEO: &str = "22222222-2222-4222-8222-222222222222";
 #[cfg(feature = "docker-tests")]
@@ -99,8 +98,14 @@ fn uuid_pk_is_kept_and_fk_column_is_remapped() {
     assert_eq!(r["agent_ID"], AGENT);
     assert_eq!(r["duration_seconds"], 12.5);
     assert_eq!(r["scene_ID"], Value::Null);
-    assert!(r.get("agent_id").is_none(), "Quell-FK darf nicht als Atom bleiben");
-    assert!(r.get("id").is_none(), "Quell-PK wird nicht als Atom gefuehrt");
+    assert!(
+        r.get("agent_id").is_none(),
+        "Quell-FK darf nicht als Atom bleiben"
+    );
+    assert!(
+        r.get("id").is_none(),
+        "Quell-PK wird nicht als Atom gefuehrt"
+    );
 }
 
 #[test]
@@ -130,7 +135,10 @@ fn name_is_renamed_from_source_column() {
         json!([{"id": VIDEO, "agent_id": AGENT, "file_name": "a.mp4", "file_size": 1}]),
     );
     assert_eq!(v[0]["name"], "a.mp4");
-    assert!(v[0].get("file_name").is_none(), "Quellspalte darf nicht bleiben");
+    assert!(
+        v[0].get("file_name").is_none(),
+        "Quellspalte darf nicht bleiben"
+    );
     let s = records_of(&m, "scenes", json!([{"id": "s-1", "title": "scene"}]));
     assert_eq!(s[0]["name"], "scene");
 }
@@ -138,7 +146,11 @@ fn name_is_renamed_from_source_column() {
 #[test]
 fn name_is_derived_from_fk_values_without_key_or_name_column() {
     let m = model();
-    let r = records_of(&m, "actor_tag_map", json!([{"actor_id": "a", "tag_id": "t"}]));
+    let r = records_of(
+        &m,
+        "actor_tag_map",
+        json!([{"actor_id": "a", "tag_id": "t"}]),
+    );
     assert_eq!(r[0]["name"], "a / t");
 }
 
@@ -190,15 +202,30 @@ async fn full_write_in_parent_first_order_into_postgres() {
     let store = &pg.store;
 
     let fixtures: Vec<(&str, Value)> = vec![
-        ("agents", json!([{"id": AGENT, "name": "a", "status": "online"}])),
+        (
+            "agents",
+            json!([{"id": AGENT, "name": "a", "status": "online"}]),
+        ),
         ("tags", json!([{"id": TAG, "name": "action"}])),
-        ("videos", json!([{"id": VIDEO, "agent_id": AGENT, "file_size": 9, "scene_id": "s-1"}])),
-        ("video_tags", json!([{"id": "44444444-4444-4444-8444-444444444444",
-            "video_id": VIDEO, "tag_id": TAG, "source": "path"}])),
-        ("video_jobs", json!([{"id": "55555555-5555-4555-8555-555555555555",
-            "video_id": null, "agent_id": AGENT, "parameters": {"a": 1}}])),
+        (
+            "videos",
+            json!([{"id": VIDEO, "agent_id": AGENT, "file_size": 9, "scene_id": "s-1"}]),
+        ),
+        (
+            "video_tags",
+            json!([{"id": "44444444-4444-4444-8444-444444444444",
+            "video_id": VIDEO, "tag_id": TAG, "source": "path"}]),
+        ),
+        (
+            "video_jobs",
+            json!([{"id": "55555555-5555-4555-8555-555555555555",
+            "video_id": null, "agent_id": AGENT, "parameters": {"a": 1}}]),
+        ),
         ("scenes", json!([{"id": "s-1", "title": "scene"}])),
-        ("faces", json!([{"id": 3, "name": "n", "image_data": "\\x00ff"}])),
+        (
+            "faces",
+            json!([{"id": 3, "name": "n", "image_data": "\\x00ff"}]),
+        ),
     ];
     let mut expected_video_tags = 0;
     let order = store_order(&m);
@@ -239,8 +266,22 @@ async fn full_write_in_parent_first_order_into_postgres() {
         ),
         ..ODataQuery::default()
     };
-    assert_eq!(store.get_collection("VideoSet", &by_tag("action")).await.unwrap().len(), 1);
-    assert_eq!(store.get_collection("VideoSet", &by_tag("Karolynesyera")).await.unwrap().len(), 0);
+    assert_eq!(
+        store
+            .get_collection("VideoSet", &by_tag("action"))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        store
+            .get_collection("VideoSet", &by_tag("Karolynesyera"))
+            .await
+            .unwrap()
+            .len(),
+        0
+    );
 }
 
 #[cfg(feature = "docker-tests")]
@@ -252,7 +293,12 @@ fn active_only() -> ODataQuery {
 }
 
 fn records_of(m: &map::Model, table: &str, rows: Value) -> Vec<Value> {
-    let rows: Vec<Map<String, Value>> = rows.as_array().unwrap().iter().map(|x| obj(x.clone())).collect();
+    let rows: Vec<Map<String, Value>> = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| obj(x.clone()))
+        .collect();
     import::records_for_table(m, &m.tables[table], &rows).unwrap()
 }
 

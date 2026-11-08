@@ -643,7 +643,11 @@ impl RelationalStore {
 
     /// Entfernt die Verwaltungszeile, sobald kein Satz in einem Draft-Set mehr
     /// darauf verweist.
-    fn purge_orphan_draft_admin(&self, conn: &Connection, draft_uuid: &str) -> Result<(), StoreError> {
+    fn purge_orphan_draft_admin(
+        &self,
+        conn: &Connection,
+        draft_uuid: &str,
+    ) -> Result<(), StoreError> {
         let schema = self.schema();
         let unreferenced: Vec<String> = schema
             .sets()
@@ -664,7 +668,8 @@ impl RelationalStore {
             quote(DRAFT_ADMIN_TABLE),
             unreferenced.join(" AND ")
         );
-        conn.execute(&sql, [draft_uuid]).map_err(|e| sql_err!(Metadata, e))?;
+        conn.execute(&sql, [draft_uuid])
+            .map_err(|e| sql_err!(Metadata, e))?;
         Ok(())
     }
 
@@ -1163,8 +1168,10 @@ impl DataStore for RelationalStore {
 #[async_trait::async_trait]
 impl DraftDataStore for RelationalStore {
     async fn draft_edit(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
-        self.entity_set(set_name)?.set(set_name)
-            .map_err(|e| StoreError::Metadata(e.to_string()))?.require_drafts()?;
+        self.entity_set(set_name)?
+            .set(set_name)
+            .map_err(|e| StoreError::Metadata(e.to_string()))?
+            .require_drafts()?;
         if !key.is_active_entity {
             return Err(StoreError::InvalidState);
         }
@@ -1213,8 +1220,10 @@ impl DraftDataStore for RelationalStore {
     /// Kinder sonst einen Foreign-Key Fehler bekommen, da sie ja auf die
     /// Eltern zeigen.
     async fn draft_activate(&self, set_name: &str, key: &EntityKey) -> Result<Value, StoreError> {
-        self.entity_set(set_name)?.set(set_name)
-            .map_err(|e| StoreError::Metadata(e.to_string()))?.require_drafts()?;
+        self.entity_set(set_name)?
+            .set(set_name)
+            .map_err(|e| StoreError::Metadata(e.to_string()))?
+            .require_drafts()?;
         if key.is_active_entity {
             return Err(StoreError::InvalidState);
         }

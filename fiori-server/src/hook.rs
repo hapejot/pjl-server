@@ -61,6 +61,7 @@ pub trait Hook: Send + Sync {
         debug!(set_name, ?op, ?value);
         Ok(())
     }
+
     async fn after(
         &self,
         store: &Extender,
@@ -232,7 +233,10 @@ impl DraftDataStore for Extender {
         set_name: &str,
         key: &EntityKey,
     ) -> Result<serde_json::Value, StoreError> {
-        let mut value = Self::key_value(key);
+        let mut value = json!( { "key": Self::key_value(key),
+                "current": &self.inner.read_entity(set_name, key, &ODataQuery::default()).await?
+        });
+
         self.hook
             .before(self, set_name, Operation::DraftPrepare, &mut value)
             .await?;

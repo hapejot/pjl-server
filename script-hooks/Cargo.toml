@@ -15,3 +15,6 @@ serde = "1.0"
 serde_json = "1.0"
 thiserror = "2.0.20"
 tracing = "0.1"
+
+[dev-dependencies]
+tracing-subscriber = "0.3"

@@ -364,9 +364,13 @@ fn load_dictionary(
         ddic.apps().count()
     );
     {
-        // Write the active data dictionary to a JSON file for debugging purposes.
-        let f = std::fs::File::create("active-ddic.json")?;
-        serde_json::to_writer_pretty(f, &ddic)?;
+        std::fs::create_dir_all(&config.data_dir)
+            .with_context(|| format!("cannot create data dir '{}'", config.data_dir.display()))?;
+        let path = config.data_dir.join("active-ddic.json");
+        let f = std::fs::File::create(&path)
+            .with_context(|| format!("cannot create active dictionary '{}'", path.display()))?;
+        serde_json::to_writer_pretty(f, &ddic)
+            .with_context(|| format!("cannot write active dictionary '{}'", path.display()))?;
     }
     Ok(ddic)
 }
@@ -491,4 +495,31 @@ fn router(
             crate::auth::identity,
         ))
         .layer(axum::middleware::from_fn(crate::status::count_requests))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn active_dictionary_is_written_to_data_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = ServerConfig::defaults(crate::config::ServerMode::Runtime);
+        config.ddic = Some(dir.path().join("ddic.json"));
+        config.data_dir = dir.path().join("data");
+        std::fs::write(
+            config.ddic.as_ref().unwrap(),
+            r#"{"packages":[],"entities":[],"relationships":[],"apps":[]}"#,
+        )
+        .unwrap();
+        let sources = crate::sources::resolve(&config).unwrap();
+
+        let ddic = load_dictionary(&config, &sources).unwrap();
+
+        let exported: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(config.data_dir.join("active-ddic.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(exported, serde_json::to_value(ddic).unwrap());
+    }
 }

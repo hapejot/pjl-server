@@ -1,5 +1,37 @@
 use super::*;
 use std::fs;
+use std::sync::{Arc, Mutex};
+use tracing::{
+    field::{Field, Visit},
+    Event, Subscriber,
+};
+use tracing_subscriber::{layer::Context, prelude::*, Layer};
+
+#[derive(Clone)]
+struct CapturedLogs(Arc<Mutex<Vec<(tracing::Level, String)>>>);
+
+impl<S: Subscriber> Layer<S> for CapturedLogs {
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        struct ScriptMessage(Option<String>);
+
+        impl Visit for ScriptMessage {
+            fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+                if field.name() == "script_message" {
+                    self.0 = Some(format!("{value:?}"));
+                }
+            }
+        }
+
+        let mut message = ScriptMessage(None);
+        event.record(&mut message);
+        if let Some(message) = message.0 {
+            self.0
+                .lock()
+                .unwrap()
+                .push((*event.metadata().level(), message));
+        }
+    }
+}
 
 fn dir_with(files: &[(&str, &str)]) -> tempdir::Dir {
     let d = tempdir::Dir::new();
@@ -175,6 +207,73 @@ fn function_without_ctx_return_is_error() {
     let mut p = json!({});
     let err = hooks.after("Item", "create", &mut p).unwrap_err();
     assert!(err.to_string().contains("zurueckgeben"));
+}
+
+#[test]
+fn script_log_writes_to_tracing() {
+    let d = dir_with(&[(
+        "Order.rhai",
+        r#"
+        fn before_create(ctx) {
+            log("created from script");
+            ctx
+        }
+        "#,
+    )]);
+    let hooks = ScriptHooks::load(d.path()).unwrap();
+    let logs = CapturedLogs(Arc::new(Mutex::new(Vec::new())));
+    let subscriber = tracing_subscriber::registry().with(logs.clone());
+
+    tracing::subscriber::with_default(subscriber, || {
+        let mut payload = json!({});
+        hooks.before("Order", "create", &mut payload).unwrap();
+    });
+
+    let logs = logs.0.lock().unwrap();
+    assert_eq!(
+        *logs,
+        vec![(tracing::Level::INFO, "created from script".into())]
+    );
+}
+
+#[test]
+fn script_log_writes_context_and_arrays_as_json_without_changing_payload() {
+    let d = dir_with(&[(
+        "Order.rhai",
+        r#"
+        fn before_create(ctx) {
+            log(ctx);
+            log(ctx.payload.items);
+            ctx
+        }
+        "#,
+    )]);
+    let hooks = ScriptHooks::load(d.path()).unwrap();
+    let logs = CapturedLogs(Arc::new(Mutex::new(Vec::new())));
+    let subscriber = tracing_subscriber::registry().with(logs.clone());
+    let original = json!({
+        "name": "Order \"demo\"\nsecond line",
+        "items": [{"qty": 2, "price": 1.5, "active": true, "note": null}]
+    });
+    let mut payload = original.clone();
+
+    tracing::subscriber::with_default(subscriber, || {
+        hooks.before("Order", "create", &mut payload).unwrap();
+    });
+
+    assert_eq!(payload, original);
+    let logs = logs.0.lock().unwrap();
+    assert_eq!(logs.len(), 2);
+    for (level, _) in logs.iter() {
+        assert_eq!(*level, tracing::Level::INFO);
+    }
+    let ctx: Value = serde_json::from_str(&logs[0].1).unwrap();
+    assert_eq!(ctx["set"], "Order");
+    assert_eq!(ctx["op"], "create");
+    assert_eq!(ctx["kind"], "write");
+    assert_eq!(ctx["payload"], original);
+    let items: Value = serde_json::from_str(&logs[1].1).unwrap();
+    assert_eq!(items, original["items"]);
 }
 
 #[test]

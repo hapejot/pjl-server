@@ -63,6 +63,9 @@ Andere Sets sind nur flüchtig im Speicher.
 **Wirksamkeit**
 
 Die Runtime liest `ddic.json` nur beim Start. Nach Änderungen im Designer den Runtime-Server neu starten.
+Das aufbereitete Dictionary wird zur Diagnose nach `DATA_DIR/active-ddic.json`
+geschrieben. `DATA_DIR` muss daher auch beim PostgreSQL-Betrieb beschreibbar sein;
+das Arbeitsverzeichnis des Servers muss nicht beschreibbar sein.
 
 ## 2b. Festwertlisten
 
@@ -99,6 +102,10 @@ Mit `--scripts-dir` (Env `SCRIPTS_DIR`) lädt die Runtime Rhai-Skripte, eine Dat
 - `before_<op>` / `after_<op>` für `create`, `patch`, `delete`, `draft_edit`, `draft_activate`, `draft_prepare`
 - `before_read` (Query, z. B. `$filter` ergänzen oder reduzieren) und `after_read` (einmal pro Request; Listen dürfen Sätze ändern oder entfernen)
 - `throw "Meldung"` bricht den Request mit Fehler ab. Der Count wird um entfernte Sätze verringert.
+- `log("Meldung")` schreibt eine INFO-Meldung ins Server-Tracing.
+  `log(ctx)` oder `log(ctx.payload)` loggt Objektstrukturen als formatiertes JSON.
+  Dabei werden alle enthaltenen Felder ausgegeben, auch personenbezogene Daten;
+  im produktiven Betrieb nur gezielt ausgewählte Inhalte loggen.
 
 Änderungen an den Dateien werden automatisch neu geladen. Ein Skript mit Fehler bleibt wirkungslos und die vorherige Version aktiv. Der Designer nutzt keine Skripte.
 

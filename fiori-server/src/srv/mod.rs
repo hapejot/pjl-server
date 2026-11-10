@@ -1812,7 +1812,7 @@ async fn log_request(req: axum::extract::Request, next: Next) -> Response {
 
     let res = next.run(req).await;
 
-    tracing::info!(
+    tracing::trace!(
         method = %method,
         uri = %uri,
         status = res.status().as_u16(),
@@ -2251,7 +2251,7 @@ async fn resolve_path<'a>(
     };
 
     for (idx, segment) in nav_segments.iter().enumerate().skip(1) {
-        info!("processing segment {:?}", segment);
+        debug!("processing segment {:?}", segment);
         let navigation_query = if idx == last {
             &target_query
         } else {

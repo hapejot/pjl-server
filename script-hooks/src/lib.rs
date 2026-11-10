@@ -19,6 +19,8 @@
 //! `not(a)`. `and`/`or` mit `()` liefern die andere Seite, so laesst sich ein
 //! Filter schrittweise ergaenzen: `ctx.query.filter = and(ctx.query.filter, ...)`.
 //! Weitere Funktion: `now_iso()`.
+//! `log("...")` schreibt eine INFO-Meldung in das Server-Tracing.
+//! `log(ctx)` bzw. `log(ctx.payload)` gibt Objektstrukturen als formatiertes JSON aus.
 
 use chrono::TimeZone;
 use std::cell::Cell;
@@ -33,7 +35,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use odata::query::ODataQuery;
 use rhai::{Dynamic, Engine, EvalAltResult, Scope, AST};
 use serde_json::{json, Value};
-use tracing::info;
+use tracing::{info, trace};
 
 /// Wartezeit nach dem letzten Dateiereignis, bevor neu geladen wird.
 const RELOAD_DEBOUNCE: Duration = Duration::from_millis(300);
@@ -197,7 +199,8 @@ impl ScriptHooks {
 
     /// Schreiboperation vor dem Store (`before_<op>`).
     pub fn before(&self, set: &str, op: &str, payload: &mut Value) -> Result<(), ScriptError> {
-        self.before_write(set, op, payload, None)
+        let current = None;
+        self.before_write(set, op, payload, current)
     }
 
     /// Wie [`ScriptHooks::before`], zusaetzlich mit dem aktuellen Datensatz (`ctx.current`),
@@ -209,7 +212,6 @@ impl ScriptHooks {
         payload: &mut Value,
         current: Option<&Value>,
     ) -> Result<(), ScriptError> {
-        info!("{} before {}: {:?}", set, op, payload);
         let fname = format!("before_{op}");
         // Gebundene Komponenten zuerst (Regeln je Verwendung), dann das Entitaetsskript.
         for (script, config) in self.bound(set) {
@@ -223,7 +225,7 @@ impl ScriptHooks {
                          "payload": payload, "current": current.cloned().unwrap_or(Value::Null)});
         if let Some(res) = self.call(set, &fname, ctx)? {
             take(&res, "payload", payload);
-            info!("-> result payload: {:?}", payload)
+            trace!("-> result payload: {:?}", payload)
         }
         Ok(())
     }
@@ -582,6 +584,20 @@ fn parse_ts(ts: &str) -> Result<chrono::DateTime<chrono::FixedOffset>, Box<rhai:
 }
 
 fn register_helpers(engine: &mut Engine) {
+    engine.register_fn("log", |message: &str| {
+        info!(target: "script_hooks::script", script_message = %message, "Rhai script log");
+    });
+    engine.register_fn(
+        "log",
+        |value: Dynamic| -> Result<(), Box<EvalAltResult>> {
+            let value: Value = rhai::serde::from_dynamic(&value)
+                .map_err(|e| rhai_err(&format!("log: {e}")))?;
+            let message = serde_json::to_string_pretty(&value)
+                .map_err(|e| rhai_err(&format!("log: {e}")))?;
+            info!(target: "script_hooks::script", script_message = %message, "Rhai script log");
+            Ok(())
+        },
+    );
     engine.register_fn("prop", |name: &str| {
         let parts: Vec<&str> = name.split('/').collect();
         if parts.len() == 1 {

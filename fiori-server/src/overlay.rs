@@ -58,8 +58,7 @@ pub fn load(file: &crate::sources::FileRef) -> anyhow::Result<Overlay> {
     let bytes = file
         .repo
         .read(&file.rel)
-        .with_context(|| format!("cannot read ddic overlay '{}'", file.label))?
-        .with_context(|| format!("cannot read ddic overlay '{}': not found", file.label))?;
+        .with_context(|| format!("cannot read ddic overlay '{}'", file.label))?;
     let text =
         std::str::from_utf8(&bytes).with_context(|| format!("'{}' is not UTF-8", file.label))?;
     parse(text).with_context(|| format!("'{}' is not a valid ddic overlay", file.label))
@@ -113,7 +112,7 @@ pub fn apply(base: DataDictionary, overlay: &Overlay) -> anyhow::Result<DataDict
                 let value = serde_json::to_value(view)?;
                 match views
                     .iter()
-                    .position(|v| v.get("name").and_then(Value::as_str) == Some(view.name.as_str()))
+                    .position(|v| v.get("name").and_then(Value::as_str) == Some(view.name()))
                 {
                     Some(i) => views[i] = value,
                     None => views.push(value),
@@ -146,9 +145,10 @@ pub fn apply(base: DataDictionary, overlay: &Overlay) -> anyhow::Result<DataDict
                 .context("ddic: 'facets' ist kein Array")?;
             for facet in &oe.facets {
                 let value = serde_json::to_value(facet)?;
-                match facets.iter().position(|f| {
-                    f.get("facet").and_then(Value::as_str) == Some(facet.facet.as_str())
-                }) {
+                match facets
+                    .iter()
+                    .position(|f| f.get("facet").and_then(Value::as_str) == Some(facet.facet()))
+                {
                     Some(i) => facets[i] = value,
                     None => facets.push(value),
                 }
@@ -241,9 +241,13 @@ fn validate_facets(merged: &DataDictionary, overlay: &Overlay) -> anyhow::Result
             .with_context(|| format!("overlay: Entitaet '{}' fehlt", oe.name))?;
         let mut seen: Vec<&str> = Vec::new();
         for facet in &oe.facets {
-            let key = facet.facet.as_str();
+            let key = facet.facet();
             let ctx = format!("overlay: Entitaet '{}': facet '{key}'", oe.name);
-            if facet.title.as_deref().is_some_and(|t| t.trim().is_empty()) {
+            if facet
+                .title()
+                .as_deref()
+                .is_some_and(|t| t.trim().is_empty())
+            {
                 bail!("{ctx} hat einen leeren title");
             }
             if seen.contains(&key) {
@@ -251,7 +255,7 @@ fn validate_facets(merged: &DataDictionary, overlay: &Overlay) -> anyhow::Result
             }
             seen.push(key);
             let mut seen_fields: Vec<&str> = Vec::new();
-            for field in &facet.fields {
+            for field in facet.fields() {
                 if seen_fields.contains(&field.as_str()) {
                     bail!("{ctx}: Feld '{field}' mehrfach angegeben");
                 }
@@ -269,33 +273,33 @@ fn validate_facets(merged: &DataDictionary, overlay: &Overlay) -> anyhow::Result
             });
 
             if key == DEFAULT_FACET {
-                if facet.view.is_some() || !facet.fields.is_empty() {
+                if facet.view().is_some() || !facet.fields().is_empty() {
                     bail!(
                         "{ctx}: Default hat keine fields und keine view, es sammelt die nicht genannten Felder"
                     );
                 }
             } else if key == GENERAL_FACET {
-                if facet.view.is_some() {
+                if facet.view().is_some() {
                     bail!("{ctx}: hat keine Listenansicht");
                 }
                 check_facet_fields(&oe.name, facet, entity)?;
             } else if let Some(target) = nav_target {
-                if !facet.fields.is_empty() {
+                if !facet.fields().is_empty() {
                     bail!("{ctx}: Navigationsfacette hat keine fields");
                 }
-                if let Some(view) = facet.view.as_deref().filter(|v| *v != ListView::DEFAULT) {
+                if let Some(view) = facet.view().as_deref().filter(|v| *v != ListView::DEFAULT) {
                     let target_entity = active
                         .active_entity(&target)
                         .with_context(|| format!("overlay: Zielentitaet '{target}' fehlt"))?;
-                    if !target_entity.list_views().iter().any(|v| v.name == view) {
+                    if !target_entity.list_views().iter().any(|v| v.name() == view) {
                         bail!("{ctx} nennt Ansicht '{view}', die es auf '{target}' nicht gibt");
                     }
                 }
             } else {
-                if facet.view.is_some() {
+                if facet.view().is_some() {
                     bail!("{ctx}: ist keine Navigation und hat daher keine Listenansicht");
                 }
-                if facet.fields.is_empty() {
+                if facet.fields().is_empty() {
                     bail!(
                         "{ctx}: ist weder Navigation noch General/Default, eine eigene Facette braucht fields"
                     );
@@ -313,7 +317,7 @@ fn check_facet_fields(
     facet: &FacetSpec,
     entity: &spec::EntitySpec,
 ) -> anyhow::Result<()> {
-    for field in &facet.fields {
+    for field in facet.fields() {
         let ok = entity.fields().any(|f| match f {
             spec::FieldSpec::Atom { name, .. } => name == field,
             spec::FieldSpec::Lookup {
@@ -324,7 +328,7 @@ fn check_facet_fields(
         if !ok {
             bail!(
                 "overlay: Entitaet '{owner}': facet '{}' nennt '{field}', das weder Atom noch einwertige Navigation ist",
-                facet.facet
+                facet.facet()
             );
         }
     }

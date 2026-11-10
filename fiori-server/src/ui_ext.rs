@@ -82,7 +82,7 @@ impl UiExtension {
         let mut formatted: BTreeMap<String, Vec<FormattedField>> = BTreeMap::new();
         let mut hidden: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for entity in ddic.entities() {
-            for f in entity.fields.iter() {
+            for f in entity.fields() {
                 if let FieldSpec::Atom {
                     name,
                     label,
@@ -90,9 +90,9 @@ impl UiExtension {
                     ..
                 } = f
                 {
-                    if let Some(format) = ui.format {
+                    if let Some(format) = ui.format() {
                         formatted
-                            .entry(entity.name.clone())
+                            .entry(entity.name().to_string())
                             .or_default()
                             .push(FormattedField {
                                 field: name.clone(),
@@ -102,16 +102,16 @@ impl UiExtension {
                     }
                 }
             }
-            if let Some(ui) = &entity.ui {
-                if !ui.hidden_fields.is_empty() {
-                    hidden.insert(entity.name.clone(), ui.hidden_fields.clone());
+            if let Some(ui) = entity.ui() {
+                if !ui.hidden_fields().is_empty() {
+                    hidden.insert(entity.name().to_string(), ui.hidden_fields().to_vec());
                 }
             }
         }
         let mut entity_ui = BTreeMap::new();
         for entity in ddic.entities() {
-            if let Some(ui) = &entity.ui {
-                entity_ui.insert(entity.name.clone(), ui.clone());
+            if let Some(ui) = entity.ui() {
+                entity_ui.insert(entity.name().to_string(), ui.clone());
             }
         }
         let mut app_of_entity = BTreeMap::new();
@@ -128,29 +128,35 @@ impl UiExtension {
                 assets.push(ns.clone());
             }
             if let Some(app_ui) = app.ui() {
-                for m in &app_ui.modules {
+                for m in app_ui.modules() {
                     modules.push(format!("{ns}/ext/{m}"));
                 }
-                for c in &app_ui.controller_extensions {
-                    controller_exts.push((c.target.clone(), format!("{ns}.ext.{}", c.controller)));
+                for c in app_ui.controller_extensions() {
+                    controller_exts.push((
+                        c.target().to_string(),
+                        format!("{ns}.ext.{}", c.controller()),
+                    ));
                 }
             }
         }
         let mut components: BTreeMap<String, Vec<ComponentSection>> = BTreeMap::new();
         for usage in ddic.component_uses() {
-            let Some(section_title) = usage.section_title.clone() else {
+            let Some(section_title) = usage.section_title().map(str::to_string) else {
                 continue;
             };
-            let Some(component) = ddic.components().iter().find(|c| c.name == usage.component)
+            let Some(component) = ddic
+                .components()
+                .iter()
+                .find(|c| c.name() == usage.component())
             else {
                 continue;
             };
-            let fragment = format!("Component__{}__{}", usage.entity, usage.instance);
+            let fragment = format!("Component__{}__{}", usage.entity(), usage.instance());
             components
-                .entry(usage.entity.clone())
+                .entry(usage.entity().to_string())
                 .or_default()
                 .push(ComponentSection {
-                    key: format!("Component_{}", usage.instance),
+                    key: format!("Component_{}", usage.instance()),
                     title: section_title,
                     xml: component_fragment(component, usage),
                     fragment,
@@ -218,12 +224,12 @@ fn component_fragment(
 ) -> String {
     use spec::component::{default_label, effective_step};
     let step = effective_step(component, usage);
-    let kind = component.kind;
-    let field = |role: &str| usage.fields.get(role).cloned().unwrap_or_default();
+    let kind = component.kind();
+    let field = |role: &str| usage.fields().get(role).cloned().unwrap_or_default();
     let label = |role: &str| {
         xml_escape(
             usage
-                .labels
+                .labels()
                 .get(role)
                 .map(String::as_str)
                 .unwrap_or(default_label(kind, role)),
@@ -231,7 +237,7 @@ fn component_fragment(
     };
     let config = format!(
         "instance={};start={};end={};duration={};step={}",
-        usage.instance,
+        usage.instance(),
         field("start"),
         field("end"),
         field("duration"),
@@ -408,13 +414,13 @@ impl Extension for UiExtension {
         let (Some(ns), Some(ui)) = (self.fragment_ns(entity), self.entity_ui.get(entity)) else {
             return Vec::new();
         };
-        ui.list_templates
+        ui.list_templates()
             .iter()
             .map(|t| {
                 json!({
-                    "key": t.key,
-                    "label": t.label,
-                    "template": format!("{ns}.{}", t.fragment),
+                    "key": t.key(),
+                    "label": t.label(),
+                    "template": format!("{ns}.{}", t.fragment()),
                 })
             })
             .collect()
@@ -425,7 +431,7 @@ impl Extension for UiExtension {
         let custom = self
             .entity_ui
             .get(entity)
-            .map(|u| u.list_columns.as_slice())
+            .map(|u| u.list_columns())
             .unwrap_or(&[]);
         if formatted.is_none() && custom.is_empty() {
             return None;
@@ -434,15 +440,15 @@ impl Extension for UiExtension {
         for c in custom {
             let ns = self.fragment_ns(entity).unwrap_or_default();
             cols.insert(
-                c.key.clone(),
+                c.key().to_string(),
                 json!({
-                    "header": c.header,
-                    "template": format!("{ns}.{}", c.fragment),
-                    "width": c.width.clone().unwrap_or_else(|| "120px".into()),
+                    "header": c.header(),
+                    "template": format!("{ns}.{}", c.fragment()),
+                    "width": c.width().unwrap_or("120px"),
                     "horizontalAlign": "Begin",
                     "position": {
-                        "anchor": c.anchor,
-                        "placement": c.placement.clone().unwrap_or_else(|| "After".into())
+                        "anchor": c.anchor(),
+                        "placement": c.placement().unwrap_or("After")
                     }
                 }),
             );
@@ -480,15 +486,15 @@ impl Extension for UiExtension {
             );
         }
         if let (Some(ns), Some(ui)) = (self.fragment_ns(entity), self.entity_ui.get(entity)) {
-            for sec in &ui.sections {
+            for sec in ui.sections() {
                 sections.insert(
-                    sec.key.clone(),
+                    sec.key().to_string(),
                     json!({
-                        "title": sec.title,
-                        "template": format!("{ns}.{}", sec.fragment),
+                        "title": sec.title(),
+                        "template": format!("{ns}.{}", sec.fragment()),
                         "position": {
-                            "placement": sec.placement.clone().unwrap_or_else(|| "After".into()),
-                            "anchor": sec.anchor.clone().unwrap_or_else(|| "GeneralSection".into())
+                            "placement": sec.placement().unwrap_or("After"),
+                            "anchor": sec.anchor().unwrap_or("GeneralSection")
                         }
                     }),
                 );
@@ -505,7 +511,7 @@ impl Extension for UiExtension {
             );
         }
         if let Some(ui) = self.entity_ui.get(entity) {
-            for facet in &ui.hide_facets {
+            for facet in ui.hide_facets() {
                 sections.insert(facet.clone(), json!({ "visible": false }));
             }
         }

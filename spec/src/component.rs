@@ -36,17 +36,17 @@ pub enum TimeUnit {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ComponentSpec {
-    pub name: String,
-    pub kind: ComponentKind,
+    pub(crate) name: String,
+    pub(crate) kind: ComponentKind,
     /// Rhai-Modul mit den Regeln, relativ zum Skriptverzeichnis (z. B. `components/TimeRange`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub script: Option<String>,
+    pub(crate) script: Option<String>,
     /// Einheit der Dauer. Standard: Minuten.
     #[serde(default)]
-    pub unit: TimeUnit,
+    pub(crate) unit: TimeUnit,
     /// Schrittweite der Zeitpunkte in Minuten (1..=60, teilt 60). Standard: 5.
     #[serde(default = "default_step")]
-    pub step_minutes: u32,
+    pub(crate) step_minutes: u32,
 }
 
 fn default_step() -> u32 {
@@ -58,22 +58,86 @@ fn default_step() -> u32 {
 #[serde(deny_unknown_fields)]
 pub struct ComponentUse {
     /// Entitaet, in der die Komponente liegt.
-    pub entity: String,
+    pub(crate) entity: String,
     /// Name der Komponente (`ComponentSpec::name`).
-    pub component: String,
+    pub(crate) component: String,
     /// Schluessel der Verwendung innerhalb der Entitaet (z. B. `termin`, `ist`).
-    pub instance: String,
+    pub(crate) instance: String,
     /// Rolle -> Feldname. Alle Rollen der Komponente muessen belegt sein.
-    pub fields: BTreeMap<String, String>,
+    pub(crate) fields: BTreeMap<String, String>,
     /// Rolle -> Beschriftung. Fehlt eine Rolle, gilt die Standardbeschriftung.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub labels: BTreeMap<String, String>,
+    pub(crate) labels: BTreeMap<String, String>,
     /// Ueberschreibt die Schrittweite der Komponente fuer diese Verwendung.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub step_minutes: Option<u32>,
+    pub(crate) step_minutes: Option<u32>,
     /// Titel des Abschnitts auf der Object Page. Fehlt er, erscheint kein Abschnitt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub section_title: Option<String>,
+    pub(crate) section_title: Option<String>,
+}
+
+impl ComponentUse {
+    /// Entitaet, in der die Komponente verwendet wird.
+    pub fn entity(&self) -> &str {
+        &self.entity
+    }
+
+    /// Name der Komponenten-Definition.
+    pub fn component(&self) -> &str {
+        &self.component
+    }
+
+    /// Instanzname innerhalb der Entitaet.
+    pub fn instance(&self) -> &str {
+        &self.instance
+    }
+
+    /// Feldzuordnung (Rolle -> Feldname).
+    pub fn fields(&self) -> &BTreeMap<String, String> {
+        &self.fields
+    }
+
+    /// Bezeichnungen je Rolle.
+    pub fn labels(&self) -> &BTreeMap<String, String> {
+        &self.labels
+    }
+
+    /// Schrittweite der Verwendung; `None` = Standard der Definition.
+    pub fn step_minutes(&self) -> Option<u32> {
+        self.step_minutes
+    }
+
+    /// Abschnittstitel in der Object Page.
+    pub fn section_title(&self) -> Option<&str> {
+        self.section_title.as_deref()
+    }
+}
+
+impl ComponentSpec {
+    /// Name der Komponenten-Definition.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Art der Komponente (z. B. Zeitraum).
+    pub fn kind(&self) -> ComponentKind {
+        self.kind
+    }
+
+    /// Optionales Skript, das die Komponente berechnet.
+    pub fn script(&self) -> Option<&str> {
+        self.script.as_deref()
+    }
+
+    /// Einheit der Dauer-Rolle.
+    pub fn unit(&self) -> TimeUnit {
+        self.unit
+    }
+
+    /// Standard-Schrittweite in Minuten.
+    pub fn step_minutes(&self) -> u32 {
+        self.step_minutes
+    }
 }
 
 /// Rollen der Komponente `kind`, in fester Reihenfolge.

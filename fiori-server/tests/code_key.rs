@@ -64,23 +64,17 @@ async fn json_request(
 /// Dictionary wie im Designer-Export: Projekt mit Wertehilfe auf eine Code-Liste.
 fn base_dictionary() -> DataDictionary {
     let mut ddic = DataDictionary::empty();
-    ddic.add_value_list(ValueList {
-        id: LIST_ID.into(),
-        name: "ProjectStatus".into(),
-        values: vec![
-            ValueEntry {
-                code: "planned".into(),
-                label: "Geplant".into(),
-                sort: 1,
-            },
-            ValueEntry {
-                code: "active".into(),
-                label: "Aktiv".into(),
-                sort: 2,
-            },
-        ],
-        code_key: true,
-    });
+    ddic.add_value_list(
+        ValueList::new(
+            LIST_ID,
+            "ProjectStatus",
+            vec![
+                ValueEntry::new("planned", "Geplant", 1),
+                ValueEntry::new("active", "Aktiv", 2),
+            ],
+        )
+        .with_code_key(),
+    );
     ddic.add_entity(
         EntitySpec::new("Project", "test", "Projects")
             .without_drafts()

@@ -16,9 +16,9 @@ pub enum MeasureKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValueListFilter {
     /// Property on the local entity (e.g. "ConfigID", "ID")
-    pub local_property: String,
+    pub(crate) local_property: String,
     /// Property on the value list target entity (e.g. "ConfigID")
-    pub target_property: String,
+    pub(crate) target_property: String,
 }
 
 /// Fester Filter auf der Value-Help-Entitaet, unabhaengig vom Datensatz.
@@ -26,9 +26,9 @@ pub struct ValueListFilter {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConstantFilter {
     /// Property on the value list target entity (e.g. "dimension")
-    pub target_property: String,
+    pub(crate) target_property: String,
     /// Fester Vergleichswert
-    pub value: String,
+    pub(crate) value: String,
 }
 
 /// Value help configuration for an Atom field.
@@ -145,7 +145,7 @@ pub enum DisplayFormat {
 pub struct FieldUi {
     /// Eingebautes Format. Fehlt es, wird der Rohwert angezeigt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub format: Option<DisplayFormat>,
+    pub(crate) format: Option<DisplayFormat>,
 }
 
 /// `ui`-Block einer Entitaet. Fragmente liegen als `<app>.ext.fragment.<fragment>`
@@ -155,19 +155,19 @@ pub struct FieldUi {
 pub struct EntityUi {
     /// Felder, die im Standard ausgeblendet werden (Listen- und Formularspalten).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub hidden_fields: Vec<String>,
+    pub(crate) hidden_fields: Vec<String>,
     /// Zusaetzliche Abschnitte der Object Page (Custom Sections).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub sections: Vec<UiSection>,
+    pub(crate) sections: Vec<UiSection>,
     /// Object-Page-Facetten (Ids wie `_VideoThumbnailsSection`), die ausgeblendet werden.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub hide_facets: Vec<String>,
+    pub(crate) hide_facets: Vec<String>,
     /// Zusaetzliche Listenspalten (Custom Columns).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub list_columns: Vec<UiListColumn>,
+    pub(crate) list_columns: Vec<UiListColumn>,
     /// Zusaetzliche Listenansichten mit eigenem Fragment (z. B. eine Suchseite als Tab).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub list_templates: Vec<UiListTemplate>,
+    pub(crate) list_templates: Vec<UiListTemplate>,
 }
 
 /// Custom Section der Object Page.
@@ -175,42 +175,42 @@ pub struct EntityUi {
 #[serde(deny_unknown_fields)]
 pub struct UiSection {
     /// Schluessel des Abschnitts (wird als Id verwendet).
-    pub key: String,
+    pub(crate) key: String,
     /// Titel; kann ein i18n-Verweis `{{key}}` sein.
-    pub title: String,
+    pub(crate) title: String,
     /// Fragmentname ohne `.fragment.xml`.
-    pub fragment: String,
+    pub(crate) fragment: String,
     /// Anker (Abschnitts-Id), Standard `GeneralSection`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub anchor: Option<String>,
+    pub(crate) anchor: Option<String>,
     /// `After` (Standard) oder `Before`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub placement: Option<String>,
+    pub(crate) placement: Option<String>,
 }
 
 /// Custom Column der Liste.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UiListColumn {
-    pub key: String,
-    pub header: String,
-    pub fragment: String,
+    pub(crate) key: String,
+    pub(crate) header: String,
+    pub(crate) fragment: String,
     /// Anker-Spalte (Feldname), vor oder nach der sie erscheint.
-    pub anchor: String,
+    pub(crate) anchor: String,
     /// `After` (Standard) oder `Before`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub placement: Option<String>,
+    pub(crate) placement: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub width: Option<String>,
+    pub(crate) width: Option<String>,
 }
 
 /// Listenansicht mit eigenem Fragment (Tab der ListReport-Seite).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UiListTemplate {
-    pub key: String,
-    pub label: String,
-    pub fragment: String,
+    pub(crate) key: String,
+    pub(crate) label: String,
+    pub(crate) fragment: String,
 }
 
 /// A field specification — describes the entity's own data (leaves on the relationship tree).
@@ -219,27 +219,38 @@ pub struct UiListTemplate {
 /// References to other entities are expressed as `Relationship`, not as fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FieldSpec {
+    /// Verweis auf eine andere Entitaet (Navigation).
     Lookup {
+        /// Name des Feldes.
         name: String,
+        /// Zielentitaet.
         entity: String,
+        /// `true`: to-many Navigation (Sammlung).
         collection: bool,
+        /// `true`: Kompositionsbeziehung (Kind gehoert zum Eigentuemer).
         owned: bool,
         /// Lesbarer Titel der Navigation (aus der Relationship). Fehlt er, gilt der Name.
         label: Option<String>,
     },
     /// Simple value: text, number, date, boolean, coded value with optional dropdown.
     Atom {
+        /// Atom: skalares Feld mit Typ aus dem EDM.
         name: String,
+        /// Name des Feldes.
         label: String,
+        /// Anzeigename (Label).
         edm_type: String,
         /// Logical package grouping (e.g. "itil", "asset_management").
         #[serde(default, skip_serializing_if = "Option::is_none")]
         package: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// Maximale Laenge (nur Strings).
         max_length: Option<u32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// Genauigkeit (Dezimalzahlen).
         precision: Option<u32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// Nachkommastellen (Dezimalzahlen).
         scale: Option<u32>,
         /// Server-generated field — never editable (Core.Computed + NonInsertable).
         #[serde(default, skip_serializing_if = "is_false")]
@@ -274,14 +285,18 @@ pub enum FieldSpec {
     /// Amount/quantity with a unit/currency companion field.
     /// Generates `Org.OData.Measures.V1.ISOCurrency` or `.Unit` annotation.
     Measure {
+        /// Dezimalfeld mit Genauigkeit und Nachkommastellen.
         name: String,
+        /// Name des Feldes.
         label: String,
         /// Logical package grouping (e.g. "itil", "asset_management").
         #[serde(default, skip_serializing_if = "Option::is_none")]
         package: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// Genauigkeit.
         precision: Option<u32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// Nachkommastellen.
         scale: Option<u32>,
         /// Name of the companion Atom field holding the unit/currency code (e.g. "Currency").
         unit_field: String,
@@ -309,6 +324,7 @@ impl FieldSpec {
 
     // ── Constructors ─────────────────────────────────────────────────
 
+    /// Atom mit beliebigem EDM-Typ, ohne weitere Einstellungen.
     pub fn atom(name: &str, label: &str, edm_type: &str) -> Self {
         FieldSpec::Atom {
             name: name.into(),
@@ -330,6 +346,7 @@ impl FieldSpec {
         }
     }
 
+    /// Zeichenkette mit maximaler Laenge.
     pub fn string(name: &str, label: &str, max_length: u32) -> Self {
         FieldSpec::Atom {
             name: name.into(),
@@ -351,14 +368,17 @@ impl FieldSpec {
         }
     }
 
+    /// Ganzzahl (`Edm.Int32`).
     pub fn int(name: &str, label: &str) -> Self {
         FieldSpec::atom(name, label, "Edm.Int32")
     }
 
+    /// Wahrheitswert (`Edm.Boolean`).
     pub fn bool_field(name: &str, label: &str) -> Self {
         FieldSpec::atom(name, label, "Edm.Boolean")
     }
 
+    /// Dezimalzahl mit Genauigkeit und Nachkommastellen.
     pub fn decimal(name: &str, label: &str, precision: u32, scale: u32) -> Self {
         FieldSpec::Atom {
             name: name.into(),
@@ -380,6 +400,7 @@ impl FieldSpec {
         }
     }
 
+    /// Messgroesse, deren Einheit in `unit_field` steht.
     pub fn measure(name: &str, label: &str, unit_field: &str, kind: MeasureKind) -> Self {
         FieldSpec::Measure {
             name: name.into(),
@@ -394,6 +415,7 @@ impl FieldSpec {
 
     // ── Chainable modifiers ──────────────────────────────────────────
 
+    /// Markiert das Feld als berechnet (nicht schreibbar).
     pub fn computed(mut self) -> Self {
         if let FieldSpec::Atom { computed, .. } = &mut self {
             *computed = true;
@@ -401,6 +423,7 @@ impl FieldSpec {
         self
     }
 
+    /// Markiert das Feld als unveraenderlich nach dem Anlegen.
     pub fn immutable(mut self) -> Self {
         if let FieldSpec::Atom { immutable, .. } = &mut self {
             *immutable = true;
@@ -408,6 +431,7 @@ impl FieldSpec {
         self
     }
 
+    /// Ordnet das Feld einem Paket zu.
     pub fn pkg(mut self, p: &str) -> Self {
         match &mut self {
             FieldSpec::Atom { package, .. } => *package = Some(p.into()),
@@ -417,6 +441,7 @@ impl FieldSpec {
         self
     }
 
+    /// Verknuepft das Feld mit einer Festwertliste oder Wertehilfe.
     pub fn with_value_list(mut self, vl: AtomValueList) -> Self {
         if let FieldSpec::Atom { value_list, .. } = &mut self {
             *value_list = Some(vl);
@@ -461,6 +486,20 @@ impl FieldSpec {
             FieldSpec::Lookup { .. } => "Edm.Guid",
         }
     }
+
+    /// Returns the target entity of a lookup field, if applicable.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(&str)` - The target entity name if this is a lookup field.
+    /// * `None` - If this is not a lookup field.
+    pub fn lookup_entity(&self) -> Option<&str> {
+        match self {
+            FieldSpec::Lookup { entity, .. } => Some(entity),
+            _ => None,
+        }
+    }
+
 }
 
 /// Application-level entity specification — describes an entity's own fields and header layout.
@@ -472,61 +511,61 @@ impl FieldSpec {
 pub struct EntitySpec {
     /// Draft-Unterstuetzung; bestehende Dictionaries bleiben draft-faehig.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
-    pub draft_enabled: bool,
+    pub(crate) draft_enabled: bool,
     /// Entity name (e.g. "Orders"). Must match the entity name used in Relationships.
-    pub name: String,
+    pub(crate) name: String,
 
     /// Stammdaten-Startzeilen (Feldname -> Wert). Werden beim Start eingespielt, sofern
     /// die Entity noch keine Zeile mit gleichem Schluessel hat (siehe `seed_entities`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub seed: Vec<BTreeMap<String, serde_json::Value>>,
+    pub(crate) seed: Vec<BTreeMap<String, serde_json::Value>>,
 
     /// Logical package grouping (e.g. "itil", "asset_management").
-    pub package: String,
+    pub(crate) package: String,
 
     /// Singular display name for the Object Page header (e.g. "Customer").
     /// Frei definierbar, unabhaengig vom Entitaetsnamen. Fehlt er, gilt der Name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub type_name: Option<String>,
+    pub(crate) type_name: Option<String>,
 
     /// Plural display name (e.g. "Orders"). Default: set_name.
-    pub type_name_plural: String,
+    pub(crate) type_name_plural: String,
 
     /// The entity's own fields (leaves). FK fields from Relationships are auto-generated
     /// and should NOT be declared here.
-    pub fields: Vec<FieldSpec>,
+    pub(crate) fields: Vec<FieldSpec>,
 
     /// Benannte Listenansichten (Spaltenauswahl). Leer = Standard (nur `name`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub list_views: Vec<ListView>,
+    pub(crate) list_views: Vec<ListView>,
 
     /// Vorbelegte Filterwerte je Atom-Feld (`Common.FilterDefaultValue`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub filter_defaults: BTreeMap<String, FilterDefault>,
+    pub(crate) filter_defaults: BTreeMap<String, FilterDefault>,
 
     /// Felder der Filterleiste in dieser Reihenfolge (`UI.SelectionFields`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub selection_fields: Vec<String>,
+    pub(crate) selection_fields: Vec<String>,
 
     /// Einstellungen je Object-Page-Facette (Tabellenabschnitt einer to-many Navigation).
     /// Fehlt ein Eintrag, gelten die Standardwerte.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub facets: Vec<FacetSpec>,
+    pub(crate) facets: Vec<FacetSpec>,
 
     /// Auditierung (Owner, CreatedBy/At, ChangedBy/At). Standard: `true`.
     /// `false` fuer Entitaeten wie Festwerte, die keinen Owner brauchen.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
-    pub audited: bool,
+    pub(crate) audited: bool,
 
     /// Anzeige-Einstellungen der Entitaet (`ui`-Block in `ddic.json`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ui: Option<EntityUi>,
+    pub(crate) ui: Option<EntityUi>,
 
     /// Einzelnes Feld als Primaerschluessel (Name eines Atoms). Fehlt es, gilt `ID` (Edm.Guid).
     /// Typ und Laenge kommen aus dem Atom. Nur ohne Drafts zulaessig, sonst wuerde
     /// `IsActiveEntity` Teil des Schluessels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub primary_key: Option<String>,
+    pub(crate) primary_key: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -545,17 +584,17 @@ pub struct FacetSpec {
     /// Identifikator der Facette: eine to-many Navigation des Eigentuemers
     /// (z. B. `_ActorSceneMap`), `General` (Feldabschnitt Main), `Default`
     /// (nicht genannte Felder) oder ein frei gewaehlter Schluessel mit `fields`.
-    pub facet: String,
+    pub(crate) facet: String,
     /// Listenansicht der Zielentitaet. Fehlt sie oder ist `default`, gilt das Standard-LineItem.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub view: Option<String>,
+    pub(crate) view: Option<String>,
     /// Titel des Facetten-Abschnitts. Fehlt er, wird der Schluessel verwendet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
+    pub(crate) title: Option<String>,
     /// Felder des Abschnitts in Anzeigereihenfolge (Atome oder einwertige Navigationen).
     /// Bei `General` ohne Angabe: alle Felder. Bei `Default`: nicht genannte Felder.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub fields: Vec<String>,
+    pub(crate) fields: Vec<String>,
 }
 
 /// Konstanter Standardwert fuer einen Filter. Zahlen und Datumswerte sind
@@ -563,7 +602,9 @@ pub struct FacetSpec {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum FilterDefault {
+    /// Konstanter Text, z. B. `"Demo"`.
     Text(String),
+    /// Konstanter Wahrheitswert.
     Flag(bool),
 }
 
@@ -574,14 +615,15 @@ pub enum FilterDefault {
 /// `role` ist vorbereitet fuer eine rollenbasierte Auswahl; heute ohne Wirkung.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ListView {
-    pub name: String,
+    pub(crate) name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub role: Option<String>,
+    pub(crate) role: Option<String>,
     /// Geordnete Spalten. Siehe `ListColumn`.
-    pub columns: Vec<ListColumn>,
+    pub(crate) columns: Vec<ListColumn>,
 }
 
 impl ListView {
+    /// Name der Standardansicht.
     pub const DEFAULT: &'static str = "default";
 
     /// Ansicht aus reinen Feldnamen (ohne Breite und Prioritaet).
@@ -602,6 +644,7 @@ impl ListView {
         }
     }
 
+    /// `true`, wenn dies die Standardansicht (`default`) ist.
     pub fn is_default(&self) -> bool {
         self.name == Self::DEFAULT
     }
@@ -612,8 +655,11 @@ impl ListView {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Priority {
+    /// Hohe Wichtigkeit: bleibt bei schmalen Bildschirmen sichtbar.
     High,
+    /// Mittlere Wichtigkeit.
     Medium,
+    /// Niedrige Wichtigkeit: wird bei schmalen Bildschirmen zuerst ausgeblendet.
     Low,
 }
 
@@ -638,14 +684,15 @@ impl Priority {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "ListColumnInput")]
 pub struct ListColumn {
-    pub field: String,
+    pub(crate) field: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub width: Option<String>,
+    pub(crate) width: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub priority: Option<Priority>,
+    pub(crate) priority: Option<Priority>,
 }
 
 impl ListColumn {
+    /// Spalte fuer ein Feld ohne Breite und Prioritaet.
     pub fn new(field: impl Into<String>) -> Self {
         Self {
             field: field.into(),
@@ -654,12 +701,14 @@ impl ListColumn {
         }
     }
 
-    pub fn width(mut self, width: impl Into<String>) -> Self {
+    /// Setzt die CSS-Breite der Spalte (Builder).
+    pub fn with_width(mut self, width: impl Into<String>) -> Self {
         self.width = Some(width.into());
         self
     }
 
-    pub fn priority(mut self, priority: Priority) -> Self {
+    /// Setzt die Prioritaet der Spalte (Builder).
+    pub fn with_priority(mut self, priority: Priority) -> Self {
         self.priority = Some(priority);
         self
     }
@@ -699,21 +748,362 @@ impl From<ListColumnInput> for ListColumn {
 /// An explicit facet section for the Object Page.
 #[derive(Debug, Clone)]
 pub struct FacetSectionSpec {
-    pub label: String,
-    pub id: String,
-    pub field_group_qualifier: String,
-    pub field_group_label: String,
+    pub(crate) label: String,
+    pub(crate) id: String,
+    pub(crate) field_group_qualifier: String,
+    pub(crate) field_group_label: String,
 }
 
 /// An explicit table facet (child collection table on the Object Page).
 #[derive(Debug, Clone)]
 pub struct TableFacetSpec {
-    pub label: String,
-    pub id: String,
-    pub navigation_property: String,
+    pub(crate) label: String,
+    pub(crate) id: String,
+    pub(crate) navigation_property: String,
+}
+
+impl ValueListFilter {
+    /// Feld der Wertehilfe, das lokal (in der Entitaet) gefiltert wird.
+    pub fn local_property(&self) -> &str {
+        &self.local_property
+    }
+
+    /// Feld der Zielentitaet der Wertehilfe.
+    pub fn target_property(&self) -> &str {
+        &self.target_property
+    }
+}
+
+impl ConstantFilter {
+    /// Feld der Zielentitaet, auf das ein konstanter Wert gesetzt wird.
+    pub fn target_property(&self) -> &str {
+        &self.target_property
+    }
+
+    /// Konstanter Wert des Filters.
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+}
+
+impl FieldUi {
+    /// Anzeigeformat des Feldes, falls gesetzt.
+    pub fn format(&self) -> Option<DisplayFormat> {
+        self.format
+    }
+}
+
+impl EntityUi {
+    /// Felder, die in der Oberflaeche ausgeblendet werden.
+    pub fn hidden_fields(&self) -> &[String] {
+        &self.hidden_fields
+    }
+
+    /// Abschnitte der Object Page.
+    pub fn sections(&self) -> &[UiSection] {
+        &self.sections
+    }
+
+    /// Facetten, die ausgeblendet werden.
+    pub fn hide_facets(&self) -> &[String] {
+        &self.hide_facets
+    }
+
+    /// Zusaetzliche Spalten der Liste.
+    pub fn list_columns(&self) -> &[UiListColumn] {
+        &self.list_columns
+    }
+
+    /// Zusaetzliche Listen-Templates.
+    pub fn list_templates(&self) -> &[UiListTemplate] {
+        &self.list_templates
+    }
+}
+
+impl UiSection {
+    /// Schluessel des Abschnitts.
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// Titel des Abschnitts.
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    /// Fragment-Name (ohne Namensraum).
+    pub fn fragment(&self) -> &str {
+        &self.fragment
+    }
+
+    /// Anker des Abschnitts, falls gesetzt.
+    pub fn anchor(&self) -> Option<&str> {
+        self.anchor.as_deref()
+    }
+
+    /// Platzierung des Abschnitts, falls gesetzt.
+    pub fn placement(&self) -> Option<&str> {
+        self.placement.as_deref()
+    }
+}
+
+impl UiListColumn {
+    /// Schluessel der Spalte.
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// Ueberschrift der Spalte.
+    pub fn header(&self) -> &str {
+        &self.header
+    }
+
+    /// Fragment-Name der Spalte (ohne Namensraum).
+    pub fn fragment(&self) -> &str {
+        &self.fragment
+    }
+
+    /// Anker der Spalte.
+    pub fn anchor(&self) -> &str {
+        &self.anchor
+    }
+
+    /// Platzierung der Spalte, falls gesetzt.
+    pub fn placement(&self) -> Option<&str> {
+        self.placement.as_deref()
+    }
+
+    /// CSS-Breite der Spalte, falls gesetzt.
+    pub fn width(&self) -> Option<&str> {
+        self.width.as_deref()
+    }
+}
+
+impl UiListTemplate {
+    /// Schluessel des Listen-Templates.
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// Anzeige-Bezeichnung des Templates.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// Fragment-Name des Templates (ohne Namensraum).
+    pub fn fragment(&self) -> &str {
+        &self.fragment
+    }
+}
+
+impl FacetSpec {
+    /// Neue Facetten-Einstellung fuer `facet` (Identifikator, siehe `facet()`).
+    pub fn new(
+        facet: impl Into<String>,
+        view: Option<String>,
+        title: Option<String>,
+        fields: Vec<String>,
+    ) -> Self {
+        Self {
+            facet: facet.into(),
+            view,
+            title,
+            fields,
+        }
+    }
+
+    /// Identifikator der Facette (Navigation, `General`, `Default` oder frei gewaehlt).
+    pub fn facet(&self) -> &str {
+        &self.facet
+    }
+
+    /// Setzt die Listenansicht der Zielentitaet (`None` = Standard).
+    pub fn set_view(&mut self, view: Option<String>) {
+        self.view = view;
+    }
+
+    /// Listenansicht der Zielentitaet, falls gesetzt.
+    pub fn view(&self) -> Option<&str> {
+        self.view.as_deref()
+    }
+
+    /// Titel des Abschnitts, falls gesetzt.
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    /// Felder des Abschnitts in Anzeigereihenfolge.
+    pub fn fields(&self) -> &[String] {
+        &self.fields
+    }
+}
+
+impl FacetSectionSpec {
+    /// Bezeichnung des Abschnitts.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// Technische ID des Abschnitts.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Qualifier der Feldgruppe.
+    pub fn field_group_qualifier(&self) -> &str {
+        &self.field_group_qualifier
+    }
+
+    /// Bezeichnung der Feldgruppe.
+    pub fn field_group_label(&self) -> &str {
+        &self.field_group_label
+    }
+}
+
+impl TableFacetSpec {
+    /// Bezeichnung der Tabelle.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// Technische ID der Tabelle.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Navigationsproperty, deren Werte die Tabelle zeigt.
+    pub fn navigation_property(&self) -> &str {
+        &self.navigation_property
+    }
+}
+
+impl ListView {
+    /// Name der Listenansicht.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Rolle der Ansicht, falls gesetzt (heute ohne Wirkung).
+    pub fn role(&self) -> Option<&str> {
+        self.role.as_deref()
+    }
+
+    /// Geordnete Spalten der Ansicht.
+    pub fn columns(&self) -> &[ListColumn] {
+        &self.columns
+    }
+}
+
+impl ListColumn {
+    /// Feld oder Navigationspfad der Spalte.
+    pub fn field(&self) -> &str {
+        &self.field
+    }
+
+    /// CSS-Breite der Spalte, falls gesetzt.
+    pub fn width(&self) -> Option<&str> {
+        self.width.as_deref()
+    }
+
+    /// Prioritaet der Spalte, falls gesetzt.
+    pub fn priority(&self) -> Option<Priority> {
+        self.priority
+    }
 }
 
 impl EntitySpec {
+    /// `true`, wenn die Entitaet Drafts unterstuetzt.
+    pub fn draft_enabled(&self) -> bool {
+        self.draft_enabled
+    }
+
+    /// Stammdaten-Startzeilen.
+    pub fn seed(&self) -> &[BTreeMap<String, serde_json::Value>] {
+        &self.seed
+    }
+
+    /// Plural-Anzeigename.
+    pub fn type_name_plural(&self) -> &str {
+        &self.type_name_plural
+    }
+
+    /// `true`, wenn die Entitaet auditiert wird.
+    pub fn audited(&self) -> bool {
+        self.audited
+    }
+
+    /// Anzeige-Einstellungen der Entitaet, falls gesetzt.
+    pub fn ui(&self) -> Option<&EntityUi> {
+        self.ui.as_ref()
+    }
+
+    /// Name des Primaerschluessel-Feldes, falls gesetzt.
+    pub fn primary_key(&self) -> Option<&str> {
+        self.primary_key.as_deref()
+    }
+
+    /// Schaltet Drafts ein oder aus.
+    pub fn set_draft_enabled(&mut self, enabled: bool) {
+        self.draft_enabled = enabled;
+    }
+
+    /// Schaltet die Auditierung ein oder aus.
+    pub fn set_audited(&mut self, audited: bool) {
+        self.audited = audited;
+    }
+
+    /// Setzt den Singular-Anzeigenamen (`None` = Entitaetsname).
+    pub fn set_type_name(&mut self, type_name: Option<String>) {
+        self.type_name = type_name;
+    }
+
+    /// Ersetzt die Felder der Filterleiste.
+    pub fn set_selection_fields(&mut self, fields: Vec<String>) {
+        self.selection_fields = fields;
+    }
+
+    /// Haengt ein Feld an die Feldliste an.
+    pub fn add_field(&mut self, field: FieldSpec) {
+        self.fields.push(field);
+    }
+
+    /// Veraendert die Felder in place (z. B. um UI-Einstellungen zu setzen).
+    pub fn update_fields(&mut self, mut f: impl FnMut(&mut FieldSpec)) {
+        self.fields.iter_mut().for_each(|field| f(field));
+    }
+
+    /// Ersetzt alle Object-Page-Facetten.
+    pub fn set_facets(&mut self, facets: Vec<FacetSpec>) {
+        self.facets = facets;
+    }
+
+    /// Setzt den Filterstandard eines Atom-Feldes.
+    pub fn set_filter_default(&mut self, field: impl Into<String>, value: FilterDefault) {
+        self.filter_defaults.insert(field.into(), value);
+    }
+
+    /// Haengt eine Facette an die Object-Page-Einstellungen an.
+    pub fn add_facet(&mut self, facet: FacetSpec) {
+        self.facets.push(facet);
+    }
+
+    /// Sucht das Feld der Entität heraus und gibt die Spec dazu zurück, wenn gefunden.
+    ///
+    /// # Arguments
+    ///
+    /// * `column_name` - Der Name des Feldes, das gesucht werden soll.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(&FieldSpec)` - Die Spezifikation des Feldes, falls gefunden.
+    /// * `None` - Wenn kein Feld mit dem angegebenen Namen existiert.
+    pub fn field_by_name(&self, column_name: &str) -> Option<&FieldSpec> {
+        self.fields().find(|f| f.name() == column_name)
+    }
+}
+
+impl EntitySpec {
+    /// Erzeugt eine Entitaet mit Drafts und Audit (beides aktiv) ohne Felder.
     pub fn new(
         name: impl Into<String>,
         package: impl Into<String>,
@@ -766,6 +1156,7 @@ impl EntitySpec {
         self
     }
 
+    /// Schaltet Drafts fuer diese Entitaet ab (Builder).
     pub fn without_drafts(mut self) -> Self {
         self.draft_enabled = false;
         self
@@ -780,6 +1171,7 @@ impl EntitySpec {
         }
     }
 
+    /// Namen der Schluesselfelder.
     pub fn key_names(&self) -> &[&str] {
         if self.draft_enabled {
             &["ID", "IsActiveEntity"]
@@ -788,45 +1180,55 @@ impl EntitySpec {
         }
     }
 
+    /// `true`, wenn die Entitaet auditiert wird.
     pub fn is_audited(&self) -> bool {
         self.audited
     }
 
+    /// Facetten-Einstellungen der Object Page.
     pub fn facets(&self) -> &[FacetSpec] {
         &self.facets
     }
 
+    /// Facette mit dem gegebenen Schluessel, falls konfiguriert.
     pub fn facet(&self, key: &str) -> Option<&FacetSpec> {
         self.facets.iter().find(|f| f.facet == key)
     }
 
+    /// Felder der Filterleiste in Reihenfolge.
     pub fn selection_fields(&self) -> &[String] {
         &self.selection_fields
     }
 
+    /// Vorbelegte Filterwerte je Feld.
     pub fn filter_defaults(&self) -> &BTreeMap<String, FilterDefault> {
         &self.filter_defaults
     }
 
+    /// Fuegt eine Listenansicht hinzu (Builder).
     pub fn list_view(mut self, view: ListView) -> Self {
         self.list_views.push(view);
         self
     }
 
+    /// Alle benannten Listenansichten.
     pub fn list_views(&self) -> &[ListView] {
         &self.list_views
     }
 
+    /// Fuegt ein Feld hinzu (Builder).
     pub fn field(mut self, fld: FieldSpec) -> Self {
         debug!("add field {}", fld.name());
         self.fields.push(fld);
         self
     }
 
+    /// Name der Entitaet.
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    /// Alle eigenen Felder der Entitaet.
     pub fn fields(&self) -> impl Iterator<Item = &FieldSpec> {
         self.fields.iter()
     }
@@ -836,6 +1238,7 @@ impl EntitySpec {
         self.type_name.as_deref().unwrap_or(&self.name)
     }
 
+    /// Name des EntitySets fuer OData (`{name}Set`).
     pub fn setname(&self) -> String {
         format!("{}Set", self.name)
     }

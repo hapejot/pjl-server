@@ -33,21 +33,21 @@ pub fn schema_from_ddic(ddic: &DataDictionary) -> Result<Schema, SchemaError> {
         for conv in ddic
             .converted_value_fields()
             .iter()
-            .filter(|c| c.entity == entity.name())
+            .filter(|c| c.entity() == entity.name())
         {
-            let Some(list) = ddic.value_lists().iter().find(|l| l.id == conv.list_id) else {
+            let Some(list) = ddic.value_lists().iter().find(|l| l.id() == conv.list_id()) else {
                 continue;
             };
             set.legacy_value_columns.push(LegacyValueColumn {
-                old_column: conv.field.clone(),
-                fk_column: format!("{}{ID_SUFFIX}", conv.field),
+                old_column: conv.field().to_string(),
+                fk_column: format!("{}{ID_SUFFIX}", conv.field()),
                 mapping: list
-                    .values
+                    .values()
                     .iter()
                     .map(|v| {
                         (
-                            v.code.clone(),
-                            spec::value_list::entry_id(&list.id, &v.code),
+                            v.code().to_string(),
+                            spec::value_list::entry_id(list.id(), v.code()),
                         )
                     })
                     .collect(),
@@ -63,12 +63,12 @@ fn composition_index(ddic: &DataDictionary) -> HashMap<(String, String), Ownersh
     let mut index = HashMap::new();
     for rel in ddic.relationships() {
         let (Some(one), Some(one_field), Some(many), Some(many_property)) = (
-            rel.one.as_ref(),
-            rel.one_field.as_ref(),
-            rel.many.as_ref(),
-            rel.many_property.as_ref(),
+            rel.one_opt(),
+            rel.one_field_opt(),
+            rel.many_opt(),
+            rel.many_property_opt(),
         ) else {
-            warn!("unvollstaendige Relationship '{}' ignoriert", rel.name);
+            warn!("unvollstaendige Relationship '{}' ignoriert", rel.name());
             continue;
         };
         let ownership = if rel.is_owned() {
@@ -76,8 +76,8 @@ fn composition_index(ddic: &DataDictionary) -> HashMap<(String, String), Ownersh
         } else {
             Ownership::Association
         };
-        index.insert((one.clone(), one_field.clone()), ownership);
-        index.insert((many.clone(), many_property.clone()), ownership);
+        index.insert((one.to_string(), one_field.to_string()), ownership);
+        index.insert((many.to_string(), many_property.to_string()), ownership);
     }
     index
 }
@@ -89,7 +89,7 @@ fn entity_set(
 ) -> Result<EntitySet, SchemaError> {
     let mut set =
         EntitySet::new(entity.setname(), entity.name()).with_key_type(key_data_type(entity));
-    if entity.draft_enabled {
+    if entity.draft_enabled() {
         set = set.drafts();
     }
 
@@ -112,7 +112,7 @@ fn entity_set(
                 // spec kennt keine Nullability: alles ausser dem Schluessel ist
                 // optional. Bewusste Festlegung, nicht Ableitung. Der eigene
                 // Primaerschluessel ist Pflicht.
-                column.nullable = entity.primary_key.as_deref() != Some(name.as_str());
+                column.nullable = entity.primary_key() != Some(name.as_str());
                 if *computed {
                     column = column.computed();
                 }
@@ -222,7 +222,7 @@ fn entity_set(
 /// gemeldet - lieber eine breite Spalte als ein Abbruch beim Start.
 /// Datentyp des Primaerschluessels einer Entitaet (`Guid` ohne eigenen Schluessel).
 fn key_data_type(entity: &EntitySpec) -> DataType {
-    let Some(pk) = entity.primary_key.as_deref() else {
+    let Some(pk) = entity.primary_key() else {
         return DataType::Guid;
     };
     entity

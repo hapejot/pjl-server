@@ -202,9 +202,9 @@ async fn designer_has_no_draft_metadata_and_persists_direct_crud() {
         !disk
             .entities()
             .iter()
-            .find(|e| e.name == "Catalog")
+            .find(|e| e.name() == "Catalog")
             .unwrap()
-            .draft_enabled
+            .draft_enabled()
     );
     let reopened = DdicStore::open(&path).unwrap();
     let saved = reopened
@@ -471,7 +471,7 @@ fn draft_setting_defaults_to_compatible_behavior_and_round_trips() {
     let mut value = serde_json::to_value(EntitySpec::new("Thing", "test", "Things")).unwrap();
     assert!(value.get("draft_enabled").is_none());
     let entity: EntitySpec = serde_json::from_value(value.clone()).unwrap();
-    assert!(entity.draft_enabled);
+    assert!(entity.draft_enabled());
     assert_eq!(entity.key_names(), &["ID", "IsActiveEntity"]);
     value["draft_enabled"] = json!(false);
     let entity: EntitySpec = serde_json::from_value(value).unwrap();

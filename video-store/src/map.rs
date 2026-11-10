@@ -180,8 +180,8 @@ pub fn build_model(catalog: &PgCatalog) -> anyhow::Result<Model> {
         let mut rel = Relationship::new(format!("{}_{}", fk.child, fk.child_col), PACKAGE)
             .with_one(&parent.entity, collection_nav(&child.table))
             .with_many(&child.entity, nav_name(&fk.child_col));
-        rel.one_label = Some(human_label(&child.table));
-        rel.many_label = Some(human_label(&nav_name(&fk.child_col)));
+        rel.set_one_label(Some(human_label(&child.table)));
+        rel.set_many_label(Some(human_label(&nav_name(&fk.child_col))));
         if composition {
             rel = rel.owned();
         }

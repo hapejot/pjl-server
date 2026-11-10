@@ -25,26 +25,29 @@ pub fn bind_components(
         let component = ddic
             .components()
             .iter()
-            .find(|c| c.name == usage.component)
+            .find(|c| c.name() == usage.component())
             .ok_or_else(|| {
-                anyhow::anyhow!("verwendung {}: unbekannte Komponente", usage.instance)
+                anyhow::anyhow!("verwendung {}: unbekannte Komponente", usage.instance())
             })?;
         let script = component
-            .script
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("komponente '{}' hat kein Skript", component.name))?;
+            .script()
+            .ok_or_else(|| anyhow::anyhow!("komponente '{}' hat kein Skript", component.name()))?;
         let entity = entities
             .iter()
-            .find(|e| e.name == usage.entity)
-            .ok_or_else(|| anyhow::anyhow!("verwendung {}: unbekannte Entitaet", usage.instance))?;
+            .find(|e| e.name() == usage.entity())
+            .ok_or_else(|| {
+                anyhow::anyhow!("verwendung {}: unbekannte Entitaet", usage.instance())
+            })?;
         let config = json!({
-            "instance": usage.instance,
-            "fields": usage.fields,
+            "instance": usage.instance(),
+            "fields": usage.fields(),
             "step_minutes": spec::component::effective_step(component, usage),
         });
         hooks
             .bind_component(&entity.setname(), script, config)
-            .map_err(|e| anyhow::anyhow!("verwendung {}.{}: {e}", usage.entity, usage.instance))?;
+            .map_err(|e| {
+                anyhow::anyhow!("verwendung {}.{}: {e}", usage.entity(), usage.instance())
+            })?;
     }
     Ok(())
 }

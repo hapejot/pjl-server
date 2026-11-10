@@ -1,6 +1,11 @@
-use std::sync::{Arc, RwLock};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, RwLock},
+};
 
 use data_store::DraftDataStore;
+use file_repo::{FileRepository, Limits};
+use javaproperties::Properties;
 use spec::data_dictionary::DataDictionary;
 
 pub mod auth;
@@ -25,6 +30,7 @@ pub mod term3270;
 pub mod ui_ext;
 
 use config::{ServerConfig, ServerMode};
+use tracing::info;
 
 /// Gemeinsamer Zustand beider Server.
 ///
@@ -37,12 +43,14 @@ pub struct AppState {
     pub sticky: Option<Arc<sticky::StickySessions>>,
     pub store: Arc<dyn DraftDataStore>,
     pub config: Arc<ServerConfig>,
+    pub file_repo: Option<Arc<dyn FileRepository>>,
     /// Unaktivierter Ausgangsstand; jeder `reload()` geht wieder von hier aus,
     /// damit `activate()` die Lookups nicht mehrfach anhaengt.
     base: Arc<RwLock<Arc<DataDictionary>>>,
     ddic: Arc<RwLock<Arc<DataDictionary>>>,
     /// Eingereichte Erweiterungen (Routen, UI5-Pfade, Object-Page-Beitraege).
     pub extensions: Arc<Vec<Arc<dyn extension::Extension>>>,
+    internationalization: Arc<Properties>,
 }
 
 impl AppState {
@@ -61,14 +69,28 @@ impl AppState {
         let base = Arc::new(base);
         let mut active = (*base).clone();
         active.activate();
-        Self {
+
+        let r = config
+            .model_root
+            .as_ref()
+            .map(|root| file_repo::open(&root, &Limits::default()).ok())
+            .flatten();
+
+        info!("AppState initialized with active dictionary.");
+        info!(?config);
+
+        let mut s = Self {
             sticky: None,
             store,
             config,
             base: Arc::new(RwLock::new(base)),
             ddic: Arc::new(RwLock::new(Arc::new(active))),
             extensions: Arc::new(Vec::new()),
-        }
+            file_repo: r,
+            internationalization: Arc::new(Properties::default()),
+        };
+        s.init_i18n();
+        s
     }
 
     /// Erweiterungen setzen; ersetzt die bisherigen.
@@ -131,5 +153,40 @@ impl AppState {
         let ddic = Arc::new(ddic);
         // *self.ddic.write().expect("ddic lock") = ddic.clone();
         ddic
+    }
+
+    fn init_i18n(&mut self) {
+        let mut map = BTreeMap::new();
+        for e in self.ddic().entities() {
+            for f in e.fields() {
+                let key = format!("{}.{}", e.name(), f.name());
+                let value = f.label().to_string();
+                map.insert(key, value);
+            }
+            map.insert(format!("{}.name", e.name()), e.type_name().to_string());
+        }
+        for app in self.ddic().apps() {
+            map.insert(format!("app.{}.title", app.name()), app.title().to_string());
+            map.insert(
+                format!("app.{}.subtitle", app.name()),
+                app.subtitle().unwrap_or(&"-".to_string()).to_string(),
+            );
+        }
+        if let Some(content) = self
+            .file_repo
+            .as_ref()
+            .map(|r| r.read("i18n.properties").ok())
+            .flatten()
+        {
+            for (k, v) in javaproperties::parse(&content)
+                .ok()
+                .unwrap_or_default()
+                .iter()
+            {
+                map.insert(k.to_string(), v.to_string());
+            }
+        }
+        let p2 = Properties::from_pairs(map.into_iter().collect::<Vec<_>>());
+        self.internationalization = Arc::new(p2);
     }
 }

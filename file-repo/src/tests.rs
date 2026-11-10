@@ -51,12 +51,12 @@ fn conformance_read_list_exists() {
     let (_dir, d, z) = both();
     for repo in [&d, &z] {
         assert_eq!(
-            repo.read("ddic.json").unwrap().unwrap(),
+            repo.read("ddic.json").unwrap(),
             Bytes::from_static(b"{}")
         );
-        assert!(repo.read("missing.json").unwrap().is_none());
+        assert!(matches!(repo.read("missing.json"), Err(RepoError::NotFound(_))));
         assert_eq!(
-            repo.read("./scripts//CustomerSet.rhai").unwrap().unwrap(),
+            repo.read("./scripts//CustomerSet.rhai").unwrap(),
             Bytes::from_static(b"// x")
         );
         assert_eq!(repo.list("").unwrap(), vec!["ddic.json", "ext", "scripts"]);
@@ -207,7 +207,7 @@ fn scoped_view_prefixes_paths() {
         Arc::new(ZipRepository::from_bytes(data, &Limits::default()).unwrap());
     let sc = scoped(z, "scripts").unwrap();
     assert_eq!(
-        sc.read("CustomerSet.rhai").unwrap().unwrap(),
+        sc.read("CustomerSet.rhai").unwrap(),
         Bytes::from_static(b"// x")
     );
     assert_eq!(

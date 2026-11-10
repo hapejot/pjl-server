@@ -30,6 +30,8 @@ pub enum RepoError {
     Zip(String),
     #[error("E/A-Fehler: {0}")]
     Io(#[from] std::io::Error),
+    #[error("Keine Datei gefunden: {0} (evtl. Verzeichnis?)")]
+    NotFound(String),
 }
 
 /// Obergrenzen fuer ZIP-Quellen. Werden beim Oeffnen und beim Packen geprueft.
@@ -63,7 +65,7 @@ impl Default for Limits {
 /// Lesender Dateizugriff. Implementierungen muessen threadsicher sein.
 pub trait FileRepository: Send + Sync {
     /// Inhalt einer Datei. `Ok(None)`, wenn es die Datei nicht gibt.
-    fn read(&self, path: &str) -> Result<Option<Bytes>, RepoError>;
+    fn read(&self, path: &str) -> Result<Bytes, RepoError>;
 
     /// Namen der direkten Kinder eines Verzeichnisses (Dateien und Unterverzeichnisse),
     /// sortiert. Leer, wenn das Verzeichnis nicht existiert.
@@ -121,12 +123,12 @@ impl DirRepository {
 }
 
 impl FileRepository for DirRepository {
-    fn read(&self, path: &str) -> Result<Option<Bytes>, RepoError> {
+    fn read(&self, path: &str) -> Result<Bytes, RepoError> {
         let full = self.full(path)?;
         if !full.is_file() {
-            return Ok(None);
+            return Err(RepoError::NotFound(path.to_string()));
         }
-        Ok(Some(Bytes::from(fs::read(full)?)))
+        Ok(Bytes::from(fs::read(full).map_err(|e| RepoError::Io(e))?))
     }
 
     fn list(&self, dir: &str) -> Result<Vec<String>, RepoError> {
@@ -135,7 +137,7 @@ impl FileRepository for DirRepository {
             return Ok(Vec::new());
         }
         let mut names = Vec::new();
-        for entry in fs::read_dir(full)? {
+        for entry in fs::read_dir(full).map_err(|e| RepoError::Io(e))? {
             names.push(entry?.file_name().to_string_lossy().into_owned());
         }
         names.sort();
@@ -236,9 +238,9 @@ impl ZipRepository {
 }
 
 impl FileRepository for ZipRepository {
-    fn read(&self, path: &str) -> Result<Option<Bytes>, RepoError> {
+    fn read(&self, path: &str) -> Result<Bytes, RepoError> {
         let name = normalize(path)?;
-        Ok(self.files.get(&name).cloned())
+        self.files.get(&name).cloned().ok_or(RepoError::NotFound(path.to_string()))
     }
 
     fn list(&self, dir: &str) -> Result<Vec<String>, RepoError> {
@@ -271,7 +273,7 @@ impl FileRepository for ZipRepository {
 }
 
 /// Oeffnet eine Quelle aus einer URI-Angabe (`file://...`, `zip://...` oder Pfad).
-pub fn open(uri: &str, limits: &Limits) -> Result<Box<dyn FileRepository>, RepoError> {
+pub fn open(uri: &str, limits: &Limits) -> Result<Arc<dyn FileRepository>, RepoError> {
     if uri.is_empty() {
         return Err(RepoError::InvalidUri(uri.to_string()));
     }
@@ -289,14 +291,14 @@ pub fn open(uri: &str, limits: &Limits) -> Result<Box<dyn FileRepository>, RepoE
             )));
         }
         let data = Bytes::from(fs::read(rest)?);
-        return Ok(Box::new(ZipRepository::from_bytes(data, limits)?));
+        return Ok(Arc::new(ZipRepository::from_bytes(data, limits)?));
     }
     let path = uri.strip_prefix("file://").unwrap_or(uri);
     if path.is_empty() {
         return Err(RepoError::InvalidUri(uri.to_string()));
     }
     info!("using path: {}", path);
-    Ok(Box::new(DirRepository::new(path)))
+    Ok(Arc::new(DirRepository::new(path)))
 }
 
 /// Sicht auf ein Unterverzeichnis einer Quelle (z. B. `scripts/` im Model-ZIP).
@@ -328,7 +330,7 @@ impl Scoped {
 }
 
 impl FileRepository for Scoped {
-    fn read(&self, path: &str) -> Result<Option<Bytes>, RepoError> {
+    fn read(&self, path: &str) -> Result<Bytes, RepoError> {
         self.inner.read(&self.join(path)?)
     }
 

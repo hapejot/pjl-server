@@ -27,17 +27,56 @@ pub fn entry_id(list_id: &str, code: &str) -> Uuid {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Festwertliste (Wertehilfe), z. B. Projektstatus.
 pub struct ValueList {
     /// UUID der Liste; wird von `AtomValueList::FieldValueList::list_id` referenziert.
-    pub id: String,
+    pub(crate) id: String,
     /// Anzeigename im Designer, rein informativ.
-    pub name: String,
+    pub(crate) name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub values: Vec<ValueEntry>,
+    pub(crate) values: Vec<ValueEntry>,
     /// `true`: der Code ist der Primaerschluessel der Listen-Entitaet (kein GUID, keine
     /// Drafts). Verweise auf die Liste tragen dann den Code selbst.
     #[serde(default, skip_serializing_if = "is_false")]
-    pub code_key: bool,
+    pub(crate) code_key: bool,
+}
+
+impl ValueList {
+    /// Neue Festwertliste ohne Code-Schluessel (`code_key = false`).
+    pub fn new(id: impl Into<String>, name: impl Into<String>, values: Vec<ValueEntry>) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            values,
+            code_key: false,
+        }
+    }
+
+    /// Markiert den Code als Primaerschluessel der Listen-Entitaet.
+    pub fn with_code_key(mut self) -> Self {
+        self.code_key = true;
+        self
+    }
+
+    /// UUID der Liste.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Anzeigename der Liste.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Eintraege der Liste.
+    pub fn values(&self) -> &[ValueEntry] {
+        &self.values
+    }
+
+    /// `true`, wenn der Code der Primaerschluessel der Listen-Entitaet ist.
+    pub fn code_key(&self) -> bool {
+        self.code_key
+    }
 }
 
 fn is_false(v: &bool) -> bool {
@@ -45,12 +84,39 @@ fn is_false(v: &bool) -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Ein Eintrag einer Festwertliste.
 pub struct ValueEntry {
     /// Gespeicherter Wert (landet im Atom).
-    pub code: String,
-    pub label: String,
+    pub(crate) code: String,
+    pub(crate) label: String,
     #[serde(default)]
-    pub sort: u32,
+    pub(crate) sort: u32,
+}
+
+impl ValueEntry {
+    /// Erzeugt einen Eintrag.
+    pub fn new(code: impl Into<String>, label: impl Into<String>, sort: u32) -> Self {
+        Self {
+            code: code.into(),
+            label: label.into(),
+            sort,
+        }
+    }
+
+    /// Gespeicherter Code (landet im Atom).
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
+    /// Anzeige-Bezeichnung.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// Sortierreihenfolge.
+    pub fn sort(&self) -> u32 {
+        self.sort
+    }
 }
 
 /// Prueft IDs (gueltige UUID, eindeutig), Namen und Codes je Liste.

@@ -458,8 +458,7 @@ impl Inner {
         let bytes = self
             .repo
             .read(rel)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "Datei nicht gefunden".to_string())?;
+            .map_err(|e| e.to_string())?;
         let src = String::from_utf8(bytes.to_vec()).map_err(|e| e.to_string())?;
         let ast = self.engine.compile(&src).map_err(|e| e.to_string())?;
         let functions = ast

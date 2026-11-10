@@ -90,14 +90,18 @@ fn column_width_is_validated() {
     for ok in ["120px", "15rem", "2.5em", "20%", "auto"] {
         let d = ddic(vec![ListView::with_columns(
             "default",
-            vec![ListColumn::new("name").width(ok).priority(Priority::Low)],
+            vec![
+                ListColumn::new("name")
+                    .with_width(ok)
+                    .with_priority(Priority::Low),
+            ],
         )]);
         assert!(d.validate_list_views().is_ok(), "{ok}");
     }
     for bad in ["", "px", "12", "12pt", "abc", "1.2.3px", "-5px", "10 px"] {
         let d = ddic(vec![ListView::with_columns(
             "default",
-            vec![ListColumn::new("name").width(bad)],
+            vec![ListColumn::new("name").with_width(bad)],
         )]);
         let err = d.validate_list_views().unwrap_err();
         assert!(err.contains("Breite"), "{bad}: {err}");

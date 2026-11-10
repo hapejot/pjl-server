@@ -350,6 +350,18 @@ pub async fn component_preload_handler() -> impl IntoResponse {
     )
 }
 
+/// Handler fuer i18n-Textdateien. Liefert leere Inhalte, damit UI5 nicht fehlschlaegt.
+pub async fn i18n_handler(
+    Path((app, language)): Path<(String, String)>,
+    State(_state): State<AppState>,
+) -> impl IntoResponse {
+    let s = _state.internationalization.store(Some("Whatever"));
+    info!("i18n app:{app} language:{language}");
+    (
+        [(header::CONTENT_TYPE, "application/text; charset=utf-8")],
+        s,
+    )
+}
 pub async fn app_manifest_handler(
     Path(app): Path<String>,
     State(_state): State<AppState>,
@@ -434,7 +446,7 @@ pub async fn app_manifest_handler(
     // mid/end when a ListReport occupies the begin column.
     for rel in ddic
         .relationships()
-        .filter(|r| r.one.is_some() && r.many.is_some() && r.one() == main_name)
+        .filter(|r| r.one_opt().is_some() && r.many_opt().is_some() && r.one() == main_name)
     {
         // Navigation property as it exists in the EDMX (e.g. `_Fields`), NOT the
         // technical relationship name.
@@ -637,9 +649,12 @@ pub(crate) fn list_views_settings(
             let annotation_path = if v.is_default() {
                 "com.sap.vocabularies.UI.v1.PresentationVariant".to_string()
             } else {
-                format!("com.sap.vocabularies.UI.v1.PresentationVariant#{}", v.name)
+                format!(
+                    "com.sap.vocabularies.UI.v1.PresentationVariant#{}",
+                    v.name()
+                )
             };
-            json!({ "key": v.name, "annotationPath": annotation_path })
+            json!({ "key": v.name(), "annotationPath": annotation_path })
         })
         .collect();
     paths.extend(extra.iter().cloned());

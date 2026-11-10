@@ -25,13 +25,13 @@ fn atom(name: &str) -> FieldSpec {
 #[test]
 fn link_atoms_become_clickable_fields() {
     let mut e = active_video(vec![ListView::new("default", &["title"])]);
-    for f in e.fields.iter_mut() {
+    e.update_fields(|f| {
         if let FieldSpec::Atom { name, link, .. } = f {
             if name == "title" {
                 *link = true;
             }
         }
-    }
+    });
     let fg = serde_json::to_string(&field_group(
         &DataDictionary::new(),
         "Main",
@@ -79,7 +79,7 @@ fn header_type_names_are_display_texts_not_technical_names() {
     let h = header(&e);
     assert!(h.contains("\"Videos\""), "Plural aus type_name_plural");
     assert!(!h.contains("VideoSet"));
-    e.type_name = Some("Film".into());
+    e.set_type_name(Some("Film".into()));
     assert!(header(&e).contains("\"Film\""), "TypeName aus type_name");
 }
 
@@ -129,7 +129,7 @@ fn datafield_paths(a: &Annotation) -> Vec<String> {
 #[test]
 fn selection_fields_become_ui_selection_fields() {
     let mut e = active_video(vec![]);
-    e.selection_fields = vec!["title".into(), "name".into()];
+    e.set_selection_fields(vec!["title".into(), "name".into()]);
     let anns = Annotations::from_entity(&DataDictionary::new(), &e, &[], &[]);
     let main = anns.iter().find(|a| a.target == "Service.Video").unwrap();
     let sel = main
@@ -150,10 +150,8 @@ fn datafield_paths_of_property_paths(a: &Annotation) -> Vec<String> {
 #[test]
 fn filter_defaults_become_property_annotations() {
     let mut e = active_video(vec![]);
-    e.filter_defaults
-        .insert("name".into(), spec::FilterDefault::Text("Demo".into()));
-    e.filter_defaults
-        .insert("title".into(), spec::FilterDefault::Flag(true));
+    e.set_filter_default("name", spec::FilterDefault::Text("Demo".into()));
+    e.set_filter_default("title", spec::FilterDefault::Flag(true));
     let anns = Annotations::from_entity(&DataDictionary::new(), &e, &[], &[]);
     let on = |target: &str| {
         anns.iter()
@@ -169,12 +167,12 @@ fn filter_defaults_become_property_annotations() {
 #[test]
 fn general_facet_with_fields_restricts_the_main_group() {
     let mut e = active_video(vec![]);
-    e.facets.push(spec::FacetSpec {
-        facet: "General".into(),
-        view: None,
-        title: None,
-        fields: vec!["name".into()],
-    });
+    e.add_facet(spec::FacetSpec::new(
+        "General",
+        None,
+        None,
+        vec!["name".into()],
+    ));
     let (_, groups) = object_page_sections(&DataDictionary::new(), &e, &[], &[]);
     let main = serde_json::to_string(&groups[0]).unwrap();
     assert!(main.contains("\"name\""));
@@ -184,18 +182,18 @@ fn general_facet_with_fields_restricts_the_main_group() {
 #[test]
 fn default_facet_collects_unmentioned_fields() {
     let mut e = active_video(vec![]);
-    e.facets.push(spec::FacetSpec {
-        facet: "General".into(),
-        view: None,
-        title: None,
-        fields: vec!["name".into()],
-    });
-    e.facets.push(spec::FacetSpec {
-        facet: "Default".into(),
-        view: None,
-        title: Some("Weitere".into()),
-        fields: vec![],
-    });
+    e.add_facet(spec::FacetSpec::new(
+        "General",
+        None,
+        None,
+        vec!["name".into()],
+    ));
+    e.add_facet(spec::FacetSpec::new(
+        "Default",
+        None,
+        Some("Weitere".into()),
+        vec![],
+    ));
     let (records, groups) = object_page_sections(&DataDictionary::new(), &e, &[], &[]);
     let rest = groups
         .iter()
@@ -214,12 +212,12 @@ fn default_facet_collects_unmentioned_fields() {
 #[test]
 fn custom_facet_gets_its_own_field_group() {
     let mut e = active_video(vec![]);
-    e.facets.push(spec::FacetSpec {
-        facet: "Meta".into(),
-        view: None,
-        title: Some("Meta".into()),
-        fields: vec!["title".into()],
-    });
+    e.add_facet(spec::FacetSpec::new(
+        "Meta",
+        None,
+        Some("Meta".into()),
+        vec!["title".into()],
+    ));
     let (_, groups) = object_page_sections(&DataDictionary::new(), &e, &[], &[]);
     let meta = groups
         .iter()
@@ -259,8 +257,8 @@ fn column_priority_becomes_importance_and_width_goes_to_config() {
         "default",
         vec![
             ListColumn::new("name")
-                .width("20%")
-                .priority(Priority::High),
+                .with_width("20%")
+                .with_priority(Priority::High),
             ListColumn::new("title"),
         ],
     )]);

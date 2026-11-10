@@ -22,11 +22,10 @@ use std::time::Instant;
 use tracing::*;
 
 use crate::AppState;
-mod sample;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename = "EntityType")]
-pub struct EntityType {
+pub(crate) struct EntityType {
     #[serde(rename = "@Name")]
     pub name: String,
 
@@ -46,10 +45,10 @@ impl EntityType {
         let mut navigation_properties = Vec::new();
 
         // Eigener Primaerschluessel: das Atom ist der Schluessel, kein separates ID-Feld.
-        if x.primary_key.is_none() {
+        if x.primary_key().is_none() {
             properties.push(Property::new("ID", "Edm.Guid").nullable(false));
         }
-        if x.draft_enabled {
+        if x.draft_enabled() {
             properties.push(Property::new("IsActiveEntity", "Edm.Boolean").nullable(false));
             properties.push(Property::new("HasActiveEntity", "Edm.Boolean").nullable(false));
             properties.push(Property::new("HasDraftEntity", "Edm.Boolean").nullable(false));
@@ -75,7 +74,7 @@ impl EntityType {
                         let (target_key, target_type) = target_key_of(ddic, entity);
                         properties.push(Property::new(&ref_name, target_type.as_str()));
                         NavigationProperty::new(name, format!("Service.{}", entity), None)
-                            .ref_constraing(ref_name.as_str(), target_key.as_str())
+                            .ref_constraint(ref_name.as_str(), target_key.as_str())
                     };
                     navigation_properties.push(p);
                 }
@@ -91,7 +90,8 @@ impl EntityType {
                     let mut property = Property::new(name, edm_type);
                     // Code einer Code-Liste (Einheit/Waehrung) ist nicht nullable: ValueListHelper._enrichPath
                     // uebernimmt einen ValueListParameterOut nur fuer nicht nullable Eigenschaften als Schluessel.
-                    if unit_scale_field.is_some() || x.primary_key.as_deref() == Some(name.as_str())
+                    if unit_scale_field.is_some()
+                        || x.primary_key().as_deref() == Some(name.as_str())
                     {
                         property = property.nullable(false);
                     }
@@ -123,7 +123,7 @@ impl EntityType {
                 }
             }
         }
-        if x.draft_enabled {
+        if x.draft_enabled() {
             navigation_properties.push(NavigationProperty::new(
                 "SiblingEntity",
                 format!("Service.{}", x.name()),
@@ -165,7 +165,7 @@ impl EntityType {
 //     }
 // }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Key {
     #[serde(rename = "PropertyRef", default)]
     pub property_refs: Vec<PropertyRef>,
@@ -182,13 +182,13 @@ impl Key {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PropertyRef {
     #[serde(rename = "@Name")]
     pub name: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Property {
     #[serde(rename = "@Name")]
     pub name: String,
@@ -252,7 +252,7 @@ impl Property {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NavigationProperty {
     #[serde(rename = "@Name")]
     pub name: String,
@@ -267,7 +267,7 @@ pub struct NavigationProperty {
     pub constraints: Vec<ReferentialConstraint>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ReferentialConstraint {
     #[serde(rename = "@Property")]
     property: String,
@@ -289,7 +289,7 @@ impl NavigationProperty {
         }
     }
 
-    fn ref_constraing(mut self, property: &str, referenced_property: &str) -> NavigationProperty {
+    fn ref_constraint(mut self, property: &str, referenced_property: &str) -> NavigationProperty {
         self.constraints.push(ReferentialConstraint {
             property: property.into(),
             referenced_property: referenced_property.into(),
@@ -314,7 +314,7 @@ pub struct EntitySet {
 impl EntitySet {
     fn from_entity(ddic: &DataDictionary, x: &EntitySpec) -> EntitySet {
         let mut navigation_property_bindings = Vec::new();
-        if x.draft_enabled {
+        if x.draft_enabled() {
             navigation_property_bindings.push(NavigationPropertyBinding {
                 path: "SiblingEntity".into(),
                 target: x.setname().into(),
@@ -394,7 +394,7 @@ fn code_list_annotations(entity: &EntitySpec) -> Vec<String> {
 fn capability_annotations_for_entity(ddic: &DataDictionary, entity: &EntitySpec) -> Vec<String> {
     let entity_name = entity.name();
     let set_name = entity.setname();
-    if !entity.draft_enabled {
+    if !entity.draft_enabled() {
         return vec![
             format!(
                 r##"<Annotations Target="Service.EntityContainer/{set_name}"><Annotation Term="Capabilities.UpdateRestrictions"><Record><PropertyValue Property="Updatable" Bool="true"/></Record></Annotation><Annotation Term="Capabilities.DeleteRestrictions"><Record><PropertyValue Property="Deletable" Bool="true"/></Record></Annotation><Annotation Term="Capabilities.InsertRestrictions"><Record><PropertyValue Property="Insertable" Bool="true"/><PropertyValue Property="NonInsertableProperties"><Collection><PropertyPath>ID</PropertyPath></Collection></PropertyValue></Record></Annotation>{}</Annotations>"##,
@@ -487,7 +487,7 @@ impl Annotations {
             Annotation::new("UI.HeaderInfo").record(
                 Record::new("UI.HeaderInfoType")
                     .add(PropertyValue::new("TypeName").string(x.type_name()))
-                    .add(PropertyValue::new("TypeNamePlural").string(&x.type_name_plural))
+                    .add(PropertyValue::new("TypeNamePlural").string(x.type_name_plural()))
                     .add(PropertyValue::new("Title").record(
                         Record::new("UI.DataField").add(PropertyValue::new("Value").path("name")),
                     )),
@@ -629,9 +629,14 @@ impl Annotations {
         merge_by_target(annotations)
     }
 
-    fn from_field(ddic: &DataDictionary, service_name: &str, f: &spec::FieldSpec) -> Annotations {
-        let mut target = format!("Service.{}/{}", service_name, f.name());
-        let mut annotations = vec![Annotation::new("Common.Label").string(f.label())];
+    fn from_field(ddic: &DataDictionary, entity_name: &str, f: &spec::FieldSpec) -> Annotations {
+        let mut target = format!("Service.{}/{}", entity_name, f.name());
+        // let mut annotations = vec![Annotation::new("Common.Label").string(f.label())];
+        let mut annotations = vec![Annotation::new("Common.Label").string(format!(
+            "{{@i18n>{}.{}}}",
+            entity_name,
+            f.name()
+        ))];
         if matches!(
             f,
             FieldSpec::Atom {
@@ -655,7 +660,7 @@ impl Annotations {
                             .push(Annotation::new("Org.OData.Core.V1.Computed").boolean(true));
                     }
                     let name = ddic.fk_column(entity, name);
-                    target = format!("Service.{}/{}", service_name, name);
+                    target = format!("Service.{}/{}", entity_name, name);
                     annotations.push(
                         Annotation::new("Common.Text")
                             .path(format!("{}/name", f.name()))
@@ -777,7 +782,7 @@ fn line_item_annotations(
     let default_cols: Vec<ListColumn> = views
         .iter()
         .find(|v| v.is_default())
-        .map(|v| v.columns.clone())
+        .map(|v| v.columns().to_vec())
         .unwrap_or_else(|| vec![ListColumn::new(default_line_item_column(x))]);
     out.push(line_item(ddic, None, &default_cols, x, app_entities));
 
@@ -785,13 +790,13 @@ fn line_item_annotations(
         if !view.is_default() {
             out.push(line_item(
                 ddic,
-                Some(&view.name),
-                &view.columns,
+                Some(view.name()),
+                view.columns(),
                 x,
                 app_entities,
             ));
         }
-        out.push(presentation_variant(&view.name));
+        out.push(presentation_variant(view.name()));
     }
     out
 }
@@ -832,40 +837,46 @@ fn line_item(
 ) -> Annotation {
     let mut coll = Collection::new();
     for column in columns {
-        let col = column.field.as_str();
-        let lookup = x.fields().find_map(|f| match f {
-            spec::FieldSpec::Lookup {
-                name,
-                entity,
-                collection: false,
-                ..
-            } if name == col => Some(entity.as_str()),
-            _ => None,
-        });
-        // Zusaetzlich zur normalen Anzeige: Sprung in die volle Objektansicht.
+        let column_name = column.field();
+
+        let lookup = x.field_by_name(column_name).and_then(|f| f.lookup_entity());
+
         let record = match lookup {
+            // Lookup field pointing to an entity that is part of the application.
             Some(entity) if app_entities.iter().any(|a| a == entity) => {
                 // Der Fremdschluessel muss mitgeladen werden, sonst faellt das Mapping auf die
                 // ID der Zeile zurueck. Die Spalte ist ausgeblendet (UI.Hidden).
                 coll = coll.add_record(
                     Record::new("UI.DataField")
-                        .add(PropertyValue::new("Value").path(ddic.fk_column(entity, col)))
+                        .add(PropertyValue::new("Value").path(ddic.fk_column(entity, column_name)))
                         .annotation(Annotation::new("UI.Hidden")),
                 );
                 intent_link_record(
-                    &format!("{col}/name"),
-                    &ddic.fk_column(entity, col),
+                    &format!("{column_name}/name"),
+                    &ddic.fk_column(entity, column_name),
                     entity,
                     &target_key_of(ddic, entity).0,
                 )
             }
-            Some(_) => data_field(&format!("{col}/name"), false),
-            None if col == "name" && app_entities.iter().any(|a| a == x.name()) => {
+            // Lookup field pointing to an entity that is not part of the application.
+            Some(_) => data_field(&format!("{column_name}/name"), false),
+            // If it is the name column and this entity is part of the application, create an intent link.
+            None if column_name == "name" && app_entities.iter().any(|a| a == x.name()) => {
                 intent_link_record("name", x.primary_key_name(), x.name(), x.primary_key_name())
             }
-            None => data_field(col, is_link_atom(x, col)),
+            // Fallback for all other cases: regular data field or eventually a link
+            None => data_field(column_name, is_link_atom(x, column_name)),
         };
-        let record = match column.priority {
+        let record = if !column_name.contains('/') {
+            record.add(PropertyValue::new("Label").string(format!(
+                "{{@i18n>{}.{}}}",
+                x.name(),
+                column_name
+            )))
+        } else {
+            record
+        };
+        let record = match column.priority() {
             Some(priority) => record.annotation(
                 Annotation::new("UI.Importance").enum_member(priority.importance_member()),
             ),
@@ -889,10 +900,10 @@ pub(crate) fn list_column_widths(ddic: &DataDictionary, entity: &str) -> Option<
     let mut out = serde_json::Map::new();
     for view in x.list_views() {
         let mut columns = serde_json::Map::new();
-        for column in &view.columns {
-            if let Some(width) = &column.width {
+        for column in view.columns() {
+            if let Some(width) = column.width() {
                 columns.insert(
-                    column_record_key(x, &column.field, &app_entities),
+                    column_record_key(x, column.field(), &app_entities),
                     json!({ "width": width }),
                 );
             }
@@ -903,7 +914,7 @@ pub(crate) fn list_column_widths(ddic: &DataDictionary, entity: &str) -> Option<
         let key = if view.is_default() {
             "@com.sap.vocabularies.UI.v1.LineItem".to_string()
         } else {
-            format!("@com.sap.vocabularies.UI.v1.LineItem#{}", view.name)
+            format!("@com.sap.vocabularies.UI.v1.LineItem#{}", view.name())
         };
         out.insert(key, json!({ "columns": columns }));
     }
@@ -1016,7 +1027,7 @@ pub const DEFAULT_FACET: &str = "Default";
 /// (oder mit Ansicht `default`) das unqualifizierte LineItem, sonst `#<ansicht>`.
 fn facet_target_path(x: &EntitySpec, nav: &str) -> String {
     info!("facet_target_path: entity={}, nav={}", x.name(), nav);
-    match x.facet(nav).and_then(|f| f.view.as_deref()) {
+    match x.facet(nav).and_then(|f| f.view()) {
         Some(view) if view != spec::ListView::DEFAULT => format!("{nav}/@UI.LineItem#{view}"),
         _ => format!("{nav}/@UI.LineItem"),
     }
@@ -1025,7 +1036,7 @@ fn facet_target_path(x: &EntitySpec, nav: &str) -> String {
 /// Titel einer Facette: der konfigurierte Titel, sonst der Modelltitel der Navigation,
 /// sonst der Schluessel.
 fn facet_title(x: &EntitySpec, key: &str) -> String {
-    if let Some(title) = x.facet(key).and_then(|f| f.title.clone()) {
+    if let Some(title) = x.facet(key).and_then(|f| f.title().map(str::to_string)) {
         return title;
     }
     x.fields()
@@ -1067,7 +1078,7 @@ fn object_page_sections(
     let mentioned: Vec<&str> = x
         .facets()
         .iter()
-        .flat_map(|f| f.fields.iter().map(String::as_str))
+        .flat_map(|f| f.fields().iter().map(String::as_str))
         .collect();
     // Langtexte bekommen je einen eigenen Abschnitt (volle Breite), sofern keine
     // Facette sie ausdruecklich nennt.
@@ -1112,7 +1123,7 @@ fn object_page_sections(
         .map(|f| f.name().to_string())
         .collect();
 
-    let configured: Vec<&str> = x.facets().iter().map(|f| f.facet.as_str()).collect();
+    let configured: Vec<&str> = x.facets().iter().map(|f| f.facet()).collect();
     let mut keys: Vec<String> = Vec::new();
     if !configured.contains(&GENERAL_FACET) {
         keys.push(GENERAL_FACET.to_string());
@@ -1157,7 +1168,7 @@ fn object_page_sections(
         let (selected, qualifier): (Option<Vec<String>>, &str) = if key == GENERAL_FACET {
             let fields = x
                 .facet(key)
-                .map(|f| f.fields.clone())
+                .map(|f| f.fields().to_vec())
                 .filter(|f| !f.is_empty())
                 .or_else(|| Some(general_fields.clone()));
             (fields, "Main")
@@ -1167,7 +1178,7 @@ fn object_page_sections(
             }
             (Some(remainder.clone()), DEFAULT_FACET)
         } else {
-            (x.facet(key).map(|f| f.fields.clone()), key.as_str())
+            (x.facet(key).map(|f| f.fields().to_vec()), key.as_str())
         };
         groups.push(field_group(
             ddic,
@@ -1385,10 +1396,11 @@ fn annotations_for_atom_value_list(name: &str, value_list: &AtomValueList) -> Ve
                     Record::new("Common.ValueListParameterIn")
                         .add(
                             PropertyValue::new("LocalDataProperty")
-                                .property_path(&filter.local_property),
+                                .property_path(filter.local_property()),
                         )
                         .add(
-                            PropertyValue::new("ValueListProperty").string(&filter.target_property),
+                            PropertyValue::new("ValueListProperty")
+                                .string(filter.target_property()),
                         ),
                 );
             }
@@ -1396,9 +1408,10 @@ fn annotations_for_atom_value_list(name: &str, value_list: &AtomValueList) -> Ve
                 parameters = parameters.add_record(
                     Record::new("Common.ValueListParameterConstant")
                         .add(
-                            PropertyValue::new("ValueListProperty").string(&filter.target_property),
+                            PropertyValue::new("ValueListProperty")
+                                .string(filter.target_property()),
                         )
-                        .add(PropertyValue::new("Constant").string(&filter.value)),
+                        .add(PropertyValue::new("Constant").string(filter.value())),
                 );
             }
             value_list_annotations(entity_set, *prefer_dialog, parameters)
@@ -2323,13 +2336,13 @@ fn entity_json(state: &AppState, spec: &EntitySpec, mut value: Value) -> Value {
         return value;
     }
     if let Some(object) = value.as_object_mut() {
-        if !spec.draft_enabled {
+        if !spec.draft_enabled() {
             for name in DRAFT_PROPERTIES {
                 object.remove(*name);
             }
         }
         // Der Store fuehrt den Schluessel unter `ID`; ein eigener Schluessel steht schon als Atom im Objekt.
-        if spec.primary_key.is_some() {
+        if spec.primary_key().is_some() {
             object.remove("ID");
         }
         let ddic = state.ddic();
@@ -2349,7 +2362,7 @@ fn entity_json(state: &AppState, spec: &EntitySpec, mut value: Value) -> Value {
 /// Schreibt den eigenen Primaerschluessel auch nach `ID`, damit der Store ihn kennt.
 /// Ohne eigenen Schluessel passiert nichts.
 fn to_store_body(spec: &EntitySpec, body: &mut Value) {
-    if let (Some(pk), Some(object)) = (spec.primary_key.as_deref(), body.as_object_mut()) {
+    if let (Some(pk), Some(object)) = (spec.primary_key(), body.as_object_mut()) {
         if let Some(value) = object.get(pk).cloned().filter(|v| !v.is_null()) {
             object.insert("ID".into(), value);
         }
@@ -2360,7 +2373,7 @@ fn validate_write(spec: &EntitySpec, body: &Value) -> Result<(), ODataError> {
     if !body.is_object() {
         return Err(ODataError::bad_request("Expected an entity object"));
     }
-    if let Some(pk) = spec.primary_key.as_deref() {
+    if let Some(pk) = spec.primary_key() {
         if body.get("ID").is_some() {
             return Err(ODataError::bad_request(format!(
                 "'ID' ist kein Feld von '{}', Schluessel ist '{pk}'",
@@ -2368,7 +2381,7 @@ fn validate_write(spec: &EntitySpec, body: &Value) -> Result<(), ODataError> {
             )));
         }
     }
-    if !spec.draft_enabled {
+    if !spec.draft_enabled() {
         if let Some(name) = DRAFT_PROPERTIES
             .iter()
             .find(|name| body.get(**name).is_some())
@@ -2387,7 +2400,7 @@ fn validate_query(
     spec: &EntitySpec,
     query: &ODataQuery,
 ) -> Result<(), ODataError> {
-    if !spec.draft_enabled {
+    if !spec.draft_enabled() {
         for name in query
             .select
             .iter()
@@ -2429,7 +2442,7 @@ async fn follow_segment(
             segment.name
         )));
     };
-    let key = if spec.draft_enabled {
+    let key = if spec.draft_enabled() {
         format!(
             "ID={},IsActiveEntity={}",
             record.id(),
@@ -2439,7 +2452,7 @@ async fn follow_segment(
         format!("ID={}", record.id())
     };
     context.push_str(&format!("({key})/{}", segment.name));
-    if !spec.draft_enabled && DRAFT_PROPERTIES.contains(&segment.name.as_str()) {
+    if !spec.draft_enabled() && DRAFT_PROPERTIES.contains(&segment.name.as_str()) {
         return Err(ODataError::not_found(format!(
             "Unknown property '{}'",
             segment.name
@@ -2589,7 +2602,7 @@ fn and_filter(existing: Option<Expr>, additional: Expr) -> Expr {
 
 fn entity_key(spec: &EntitySpec, segment: &PathSegment) -> Result<EntityKey, ODataError> {
     // Eigener Primaerschluessel: genau ein Wert, Name `pk` oder unbenannt.
-    if let Some(pk) = spec.primary_key.as_deref() {
+    if let Some(pk) = spec.primary_key() {
         let [key] = segment.keys.as_slice() else {
             return Err(ODataError::bad_request(format!(
                 "Expected key '{pk}' for '{}'",
@@ -2619,7 +2632,7 @@ fn entity_key(spec: &EntitySpec, segment: &PathSegment) -> Result<EntityKey, ODa
         {
             return Err(ODataError::bad_request("Duplicate key"));
         }
-        if key.name.is_none() && spec.draft_enabled {
+        if key.name.is_none() && spec.draft_enabled() {
             return Err(ODataError::bad_request("Composite keys must be named"));
         }
         if let Some(name) = &key.name {
@@ -2631,7 +2644,7 @@ fn entity_key(spec: &EntitySpec, segment: &PathSegment) -> Result<EntityKey, ODa
             }
         }
     }
-    if spec.draft_enabled
+    if spec.draft_enabled()
         && !segment.keys.iter().any(|key| {
             key.name.as_deref() == Some("IsActiveEntity") && key.value.as_bool().is_some()
         })
@@ -2645,7 +2658,7 @@ fn entity_key(spec: &EntitySpec, segment: &PathSegment) -> Result<EntityKey, ODa
     })?;
     Ok(EntityKey::new(
         id,
-        !spec.draft_enabled || segment.is_active_entity(),
+        !spec.draft_enabled() || segment.is_active_entity(),
     ))
 }
 
@@ -2910,7 +2923,7 @@ async fn post_handler(
                 Err(e) => return e.into_response(),
             };
             let mut body = body;
-            if !spec.draft_enabled {
+            if !spec.draft_enabled() {
                 body["IsActiveEntity"] = json!(true);
             }
             to_store_body(&spec, &mut body);
@@ -2918,7 +2931,7 @@ async fn post_handler(
                 Ok(r) => created_response(
                     entity_json(&state, &spec, json!(r)),
                     &path,
-                    spec.primary_key.as_deref(),
+                    spec.primary_key(),
                 ),
                 Err(e) => ODataError::from_store(e).into_response(),
             }
@@ -2993,7 +3006,7 @@ async fn draft_action(
     let spec = ddic
         .active_entity_by_setname(set)
         .ok_or_else(|| ODataError::not_found(format!("Unknown entity set '{set}'")))?;
-    if !spec.draft_enabled {
+    if !spec.draft_enabled() {
         return Err(ODataError::not_found(format!(
             "Draft actions are not supported for '{set}'"
         )));
@@ -3098,7 +3111,7 @@ async fn create_in_navigation(
 
     body[foreign_key] = json!(record.id().to_string());
     // Das Kind teilt den Draft-Zustand seines Parents.
-    body["IsActiveEntity"] = json!(!target.draft_enabled || record.is_active_entity());
+    body["IsActiveEntity"] = json!(!target.draft_enabled() || record.is_active_entity());
     let created = state
         .store
         .create_entity(&target.setname(), &body)
@@ -3106,7 +3119,7 @@ async fn create_in_navigation(
         .map_err(ODataError::from_store)?;
     Ok((
         entity_json(state, target, json!(created)),
-        target.primary_key.clone(),
+        target.primary_key().map(str::to_string),
     ))
 }
 
@@ -3175,7 +3188,7 @@ async fn patch_handler(
         Err(e) => return e.into_response(),
     };
     // Der Schluessel ist unveraenderlich.
-    if let Some(pk) = spec.primary_key.as_deref() {
+    if let Some(pk) = spec.primary_key() {
         if body.get(pk).is_some_and(|v| {
             v.as_str().map(|s| data_store::key::KeyValue::parse(s)) != Some(ekey.id.clone())
         }) {
@@ -3224,7 +3237,7 @@ async fn delete_entity(state: &AppState, segments: &[PathSegment]) -> Result<(),
 
     let key = EntityKey::from(&*record);
     delete_owned_children(state, &set, &key).await?;
-    if !spec.draft_enabled {
+    if !spec.draft_enabled() {
         return state
             .store
             .delete_entity_tree_only(&set, &key)
@@ -3369,20 +3382,13 @@ async fn metadata(State(state): State<AppState>) -> Response {
         })
         .flatten()
         .collect();
-    // let _sample_entity = sample::sample_entity();
-    // let _sample_entity_set = sample::sample_entity_set();
-    // let xml = sample::sample_annotations();
-    // let sample_annotations: Annotations = quick_xml::de::from_str(&xml).unwrap();
-    // for a in &sample_annotations.annotations {
-    //     trace!("A: {} {:?}", a.term, a.qualifier);
-    // }
 
-    let meta = edmx_template(ddic.active_entities().any(|e| e.draft_enabled));
-    let mut type_defs = vec![]; //quick_xml::se::to_string(&sample_entity).unwrap()];
+    let meta = edmx_template(ddic.active_entities().any(|e| e.draft_enabled()));
+    let mut type_defs = vec![];
     for x in entity_lst {
         type_defs.push(quick_xml::se::to_string(&x).unwrap());
     }
-    let mut entity_sets = vec![]; //quick_xml::se::to_string(&sample_entity_set).unwrap()];
+    let mut entity_sets = vec![];
     for x in entity_set_lst {
         entity_sets.push(quick_xml::se::to_string(&x).unwrap());
     }
@@ -3405,7 +3411,7 @@ async fn metadata(State(state): State<AppState>) -> Response {
         actions.push(r#"<Action Name="stickyDiscard"/>"#.to_string());
         for entity in ddic
             .active_entities()
-            .filter(|entity| !entity.draft_enabled)
+            .filter(|entity| !entity.draft_enabled())
         {
             let name = entity.name();
             let set = entity.setname();
@@ -3421,7 +3427,7 @@ async fn metadata(State(state): State<AppState>) -> Response {
     }
     for e in ddic.active_entities() {
         let entity_name = format!("Service.{}", e.name());
-        if e.draft_enabled {
+        if e.draft_enabled() {
             actions.push(format!(
                 r##"<Action Name="draftEdit" IsBound="true" EntitySetPath="in">
                     <Parameter Name="in" Type="{entity_name}"/>

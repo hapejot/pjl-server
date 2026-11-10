@@ -25,9 +25,9 @@ fn video(d: &DataDictionary) -> EntitySpec {
 fn draft_mode_can_be_overridden_in_both_directions() {
     let disabled = parse(r#"{"entities":[{"name":"Video","draft_enabled":false}]}"#).unwrap();
     let ddic = apply(base(), &disabled).unwrap();
-    assert!(!video(&ddic).draft_enabled);
+    assert!(!video(&ddic).draft_enabled());
     let enabled = parse(r#"{"entities":[{"name":"Video","draft_enabled":true}]}"#).unwrap();
-    assert!(video(&apply(ddic, &enabled).unwrap()).draft_enabled);
+    assert!(video(&apply(ddic, &enabled).unwrap()).draft_enabled());
 }
 
 #[test]
@@ -42,11 +42,11 @@ fn list_views_merge_by_name() {
     let views = video(&d);
     let views = views.list_views();
     assert_eq!(views.len(), 3);
-    let default = views.iter().find(|v| v.name == "default").unwrap();
-    assert_eq!(names(&default.columns), vec!["file_size"]);
-    let review = views.iter().find(|v| v.name == "review").unwrap();
-    assert_eq!(names(&review.columns), vec!["name"]);
-    assert!(views.iter().any(|v| v.name == "archive"));
+    let default = views.iter().find(|v| v.name() == "default").unwrap();
+    assert_eq!(names(&default.columns()), vec!["file_size"]);
+    let review = views.iter().find(|v| v.name() == "review").unwrap();
+    assert_eq!(names(&review.columns()), vec!["name"]);
+    assert!(views.iter().any(|v| v.name() == "archive"));
 }
 
 #[test]
@@ -63,16 +63,16 @@ fn list_view_columns_accept_width_and_priority() {
     let default = views
         .list_views()
         .iter()
-        .find(|v| v.name == "default")
+        .find(|v| v.name() == "default")
         .unwrap();
-    assert_eq!(default.columns[0].width.as_deref(), Some("20%"));
-    assert_eq!(default.columns[0].priority, Some(spec::Priority::High));
-    assert_eq!(default.columns[1].width, None);
-    assert_eq!(default.columns[1].priority, None);
+    assert_eq!(default.columns()[0].width(), Some("20%"));
+    assert_eq!(default.columns()[0].priority(), Some(spec::Priority::High));
+    assert_eq!(default.columns()[1].width(), None);
+    assert_eq!(default.columns()[1].priority(), None);
 }
 
 fn names(columns: &[spec::ListColumn]) -> Vec<&str> {
-    columns.iter().map(|c| c.field.as_str()).collect()
+    columns.iter().map(|c| c.field()).collect()
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn selection_field_must_be_atom() {
 fn scalars_override_the_base() {
     let overlay = parse(r#"{"entities":[{"name":"Video","type_name_plural":"Filme"}]}"#).unwrap();
     let d = apply(base(), &overlay).unwrap();
-    assert_eq!(video(&d).type_name_plural, "Filme");
+    assert_eq!(video(&d).type_name_plural(), "Filme");
 }
 
 #[test]
@@ -199,8 +199,8 @@ fn navigation_labels_come_from_the_relationship() {
     let mut rel = spec::Relationship::new("videos_agent", "core")
         .with_one("Agent", "_Videos")
         .with_many("Video", "agent");
-    rel.one_label = Some("Videos".into());
-    rel.many_label = Some("Agent".into());
+    rel.set_one_label(Some("Videos".into()));
+    rel.set_many_label(Some("Agent".into()));
     d.add_relationship(rel);
     d.activate();
     let agent = d.active_entity("Agent").unwrap();
@@ -235,7 +235,7 @@ fn facet_is_merged_and_kept() {
         .find(|e| e.name() == "Agent")
         .unwrap();
     assert_eq!(
-        agent.facet("_Videos").unwrap().view.as_deref(),
+        agent.facet("_Videos").unwrap().view().as_deref(),
         Some("review")
     );
 }
@@ -270,7 +270,7 @@ fn facet_title_is_merged_and_blank_is_rejected() {
         .find(|e| e.name() == "Agent")
         .unwrap();
     assert_eq!(
-        agent.facet("_Videos").unwrap().title.as_deref(),
+        agent.facet("_Videos").unwrap().title().as_deref(),
         Some("Filme")
     );
 
@@ -293,7 +293,7 @@ fn general_facet_takes_title_but_no_view() {
         .find(|e| e.name() == "Agent")
         .unwrap();
     assert_eq!(
-        agent.facet("General").unwrap().title.as_deref(),
+        agent.facet("General").unwrap().title().as_deref(),
         Some("Stammdaten")
     );
 

@@ -14,7 +14,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "Name",
+            "label": "Firma",
             "edm_type": "Edm.String",
             "max_length": 255
           }
@@ -61,7 +61,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "Name",
+            "label": "Kontakt",
             "edm_type": "Edm.String",
             "max_length": 255
           }
@@ -99,7 +99,7 @@
         {
           "Atom": {
             "name": "name",
-            "label": "Name",
+            "label": "Verkaufschance",
             "edm_type": "Edm.String",
             "max_length": 255
           }
@@ -220,7 +220,12 @@
             }
           }
         }
-      ]
+      ],
+      "list_views":[
+        { "name":"default",
+          "columns": ["name",
+                      {"field":"amount", "width":"15em"},
+                      "account" ]}]
     },
     {
       "name": "Currency",

@@ -19,7 +19,7 @@ pub fn serve(repo: &dyn FileRepository, raw: &str) -> Response {
         path.push_str("index.html");
     }
     match repo.read(&path) {
-        Ok(Some(bytes)) => {
+        Ok(bytes) => {
             let mime = mime_guess::from_path(&path).first_or_octet_stream();
             (
                 [(header::CONTENT_TYPE, mime.essence_str().to_string())],
@@ -27,7 +27,8 @@ pub fn serve(repo: &dyn FileRepository, raw: &str) -> Response {
             )
                 .into_response()
         }
-        _ => StatusCode::NOT_FOUND.into_response(),
+        Err(file_repo::RepoError::NotFound(_)) => StatusCode::NOT_FOUND.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 

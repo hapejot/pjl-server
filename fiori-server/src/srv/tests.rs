@@ -59,17 +59,22 @@ fn facet_target_uses_the_configured_view() {
         facet_target_path(&x, "_ActorSceneMap"),
         "_ActorSceneMap/@UI.LineItem"
     );
-    x.facets.push(spec::FacetSpec {
-        facet: "_ActorSceneMap".into(),
-        view: Some("reverse".into()),
-        title: None,
-        fields: vec![],
-    });
+    x.add_facet(spec::FacetSpec::new(
+        "_ActorSceneMap",
+        Some("reverse".into()),
+        None,
+        vec![],
+    ));
     assert_eq!(
         facet_target_path(&x, "_ActorSceneMap"),
         "_ActorSceneMap/@UI.LineItem#reverse"
     );
-    x.facets[0].view = Some("default".into());
+    x.set_facets(vec![spec::FacetSpec::new(
+        "_ActorSceneMap",
+        Some("default".into()),
+        None,
+        vec![],
+    )]);
     assert_eq!(
         facet_target_path(&x, "_ActorSceneMap"),
         "_ActorSceneMap/@UI.LineItem"
@@ -79,7 +84,7 @@ fn facet_target_uses_the_configured_view() {
 #[test]
 fn facet_title_prefers_the_model_label_of_the_navigation() {
     let mut x = EntitySpec::new("Actor", "core", "Actors");
-    x.fields.push(FieldSpec::Lookup {
+    x.add_field(FieldSpec::Lookup {
         name: "_ActorSceneMap".into(),
         entity: "ActorSceneMap".into(),
         collection: true,
@@ -87,12 +92,12 @@ fn facet_title_prefers_the_model_label_of_the_navigation() {
         label: Some("Scene assignments".into()),
     });
     assert_eq!(facet_title(&x, "_ActorSceneMap"), "Scene assignments");
-    x.facets.push(spec::FacetSpec {
-        facet: "_ActorSceneMap".into(),
-        view: None,
-        title: Some("Szenen".into()),
-        fields: vec![],
-    });
+    x.add_facet(spec::FacetSpec::new(
+        "_ActorSceneMap",
+        None,
+        Some("Szenen".into()),
+        vec![],
+    ));
     assert_eq!(facet_title(&x, "_ActorSceneMap"), "Szenen");
 }
 
@@ -100,12 +105,12 @@ fn facet_title_prefers_the_model_label_of_the_navigation() {
 fn facet_title_defaults_to_the_navigation_name() {
     let mut x = EntitySpec::new("Actor", "core", "Actors");
     assert_eq!(facet_title(&x, "_ActorSceneMap"), "_ActorSceneMap");
-    x.facets.push(spec::FacetSpec {
-        facet: "_ActorSceneMap".into(),
-        view: None,
-        title: Some("Szenen".into()),
-        fields: vec![],
-    });
+    x.add_facet(spec::FacetSpec::new(
+        "_ActorSceneMap",
+        None,
+        Some("Szenen".into()),
+        vec![],
+    ));
     assert_eq!(facet_title(&x, "_ActorSceneMap"), "Szenen");
 }
 

@@ -13,6 +13,10 @@ pub const CODE_FK_SUFFIX: &str = "_code";
 pub const PRIMARY_KEY_TYPES: [&str; 4] = ["Edm.String", "Edm.Guid", "Edm.Int32", "Edm.Int64"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Das Datenverzeichnis (DDIC): Pakete, Entitäten, Beziehungen, Apps, Komponenten
+/// und Festwertlisten.
+///
+/// Die Serialisierung entspricht dem Format von `ddic.json`.
 pub struct DataDictionary {
     packages: Vec<Package>,
     entities: Vec<EntitySpec>,
@@ -37,14 +41,33 @@ pub struct DataDictionary {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConvertedValueField {
     /// Entitaet, zu der das Feld gehoert.
-    pub entity: String,
+    pub(crate) entity: String,
     /// Feldname (bleibt gleich, die Fremdschluesselspalte heisst `{field}_ID`).
-    pub field: String,
+    pub(crate) field: String,
     /// Liste, auf die das Feld zeigt.
-    pub list_id: String,
+    pub(crate) list_id: String,
+}
+
+impl ConvertedValueField {
+    /// Entitaet, zu der das Feld gehoert.
+    pub fn entity(&self) -> &str {
+        &self.entity
+    }
+
+    /// Feldname.
+    pub fn field(&self) -> &str {
+        &self.field
+    }
+
+    /// Festwertliste, auf die das Feld zeigt.
+    pub fn list_id(&self) -> &str {
+        &self.list_id
+    }
 }
 
 impl DataDictionary {
+    /// Standard-Datenwoerterbuch mit dem Paket `core` und den eingebauten Entitaeten (z. B. `Entity`).
+    /// Fuer ein leeres Dictionary siehe [`DataDictionary::empty`].
     pub fn new() -> Self {
         debug!("using default ddic");
         let _core = Package::new("core");
@@ -558,18 +581,22 @@ impl DataDictionary {
         }
     }
 
+    /// Alle Apps.
     pub fn apps(&self) -> impl Iterator<Item = &App> {
         self.apps.iter()
     }
 
+    /// Alle Pakete.
     pub fn packages(&self) -> impl Iterator<Item = &Package> {
         self.packages.iter()
     }
 
+    /// Alle Komponenten-Definitionen.
     pub fn components(&self) -> &[crate::component::ComponentSpec] {
         &self.components
     }
 
+    /// Alle Verwendungen von Komponenten in Entitaeten (vor der Expansion).
     pub fn component_uses(&self) -> &[crate::component::ComponentUse] {
         &self.component_uses
     }
@@ -581,6 +608,7 @@ impl DataDictionary {
         crate::component::expand(&mut self.entities, &self.components, &self.component_uses)
     }
 
+    /// Alle Festwertlisten.
     pub fn value_lists(&self) -> &[ValueList] {
         &self.value_lists
     }
@@ -810,6 +838,8 @@ impl DataDictionary {
         }
     }
 
+    /// Alle Entitaeten inklusive generierter (z. B. aus Festwertlisten), mit den aus
+    /// Beziehungen ergaenzten Feldern.
     pub fn entities(&self) -> Vec<EntitySpec> {
         let mut entities = self.entities.clone();
         entities.extend(self.generated_entities());
@@ -859,6 +889,7 @@ impl DataDictionary {
         }
     }
 
+    /// Alle Beziehungen.
     pub fn relationships(&self) -> impl Iterator<Item = &Relationship> {
         self.relationships.iter()
     }
@@ -885,6 +916,7 @@ impl DataDictionary {
         self.value_lists.push(list);
     }
 
+    /// Fuegt ein Paket hinzu. Gibt `false` zurueck, wenn der Name bereits existiert.
     pub fn add_package(&mut self, package: Package) -> bool {
         if self.packages.iter().any(|p| p.name() == package.name()) {
             return false;
@@ -997,20 +1029,25 @@ impl DataDictionary {
         }
     }
 
+    /// Aktive Entitaet (nach `activate`) mit dem gegebenen Namen.
     pub fn active_entity(&self, name: &str) -> Option<&EntitySpec> {
         self.active.get(name)
     }
 
+    /// Alle aktiven Entitaeten.
     pub fn active_entities(&self) -> impl Iterator<Item = &EntitySpec> {
         self.active.values()
     }
 
+    /// Aktive Entitaet mit dem gegebenen EntitySet-Namen.
     pub fn active_entity_by_setname(&self, set_name: &str) -> Option<&EntitySpec> {
         self.active
             .values()
             .find(|entity| entity.setname() == set_name)
     }
 
+    /// Baut die aktive Sicht (`active`) auf. Beziehungen werden als Lookup-Felder in die
+    /// Entitaeten eingetragen; generierte Entitaeten (z. B. aus Festwertlisten) sind enthalten.
     pub fn activate(&mut self) {
         for entitiy in self.entities.iter().chain(self.generated_entities().iter()) {
             let mut active = entitiy.clone();
@@ -1105,6 +1142,7 @@ impl DataDictionary {
         Ok(())
     }
 
+    /// Gibt eine Zusammenfassung des Dictionarys auf der Standardausgabe aus (Diagnose).
     pub fn dump(&self) {
         println!("==== Apps ===================================");
         for app in self.apps.iter() {
@@ -1121,7 +1159,7 @@ impl DataDictionary {
                 println!("    {}", prop.name());
             }
         }
-    }
+    }    
 }
 
 impl Default for DataDictionary {

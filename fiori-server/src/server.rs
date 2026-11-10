@@ -3,11 +3,11 @@
 //! Beide Binaries laufen durch diese Funktion. Was sie unterscheidet, ist
 //! ausschliesslich die Herkunft von Dictionary und Schema:
 //!
-//! | | Designer (`--designer`) | Laufzeit |
-//! |---|---|---|
-//! | Dictionary | eincompiliertes Metamodell | `--ddic` |
-//! | Store | `DdicStore` auf `ddic.json` | SQLite / PostgreSQL |
-//! | Schema | - | `--schema`, sonst abgeleitet |
+//! 
+//! |            | Designer (`--designer`)     | Laufzeit                     |
+//! | ---------- | --------------------------- | ---------------------------- |
+//! | Dictionary | eincompiliertes Metamodell  | `--ddic`                     |
+//! | Store      | `DdicStore` auf `ddic.json` | SQLite / PostgreSQL          |
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -167,7 +167,7 @@ async fn shutdown_signal() {
     }
 }
 
-/// Festwerte aus `ddic.json` in die Listen-Entitaeten schreiben (je Liste ein Set
+/// Festwerte aus `ddic.json` in die Listen-Entitäten schreiben (je Liste ein Set
 /// `{Liste}Set`). IDs sind deterministisch (`value_list::entry_id`), Verweise aus
 /// Fremdschluesseln bleiben also ueber Neustarts gueltig. Vorhandene Eintraege
 /// werden aktualisiert statt geloescht; geloescht wird nur, was nicht mehr in der
@@ -184,7 +184,7 @@ async fn seed_entities(store: &dyn DraftDataStore, ddic: &DataDictionary) -> any
     use odata::query::ODataQuery;
 
     for entity in ddic.entities() {
-        if entity.seed.is_empty() {
+        if entity.seed().is_empty() {
             continue;
         }
         let set = entity.setname();
@@ -195,21 +195,21 @@ async fn seed_entities(store: &dyn DraftDataStore, ddic: &DataDictionary) -> any
         if !existing.is_empty() {
             continue;
         }
-        for row in &entity.seed {
+        for row in entity.seed() {
             let data = serde_json::to_value(row)?;
             let created = store
                 .create_entity(&set, &data)
                 .await
                 .map_err(|e| anyhow::anyhow!("cannot seed {set}: {e}"))?;
-            // Nicht draft-faehige Entitaeten (Stammdaten) sind mit dem Anlegen aktiv.
-            if entity.draft_enabled {
+            // Nicht draft-faehige Entitäten (Stammdaten) sind mit dem Anlegen aktiv.
+            if entity.draft_enabled() {
                 store
                     .draft_activate(&set, &EntityKey::new(created.id(), false))
                     .await
                     .map_err(|e| anyhow::anyhow!("cannot activate {set}: {e}"))?;
             }
         }
-        info!("{} seed rows loaded into {set}", entity.seed.len());
+        info!("{} seed rows loaded into {set}", entity.seed().len());
     }
     Ok(())
 }
@@ -231,15 +231,15 @@ pub async fn seed_value_lists(
         .map_err(|e| anyhow::anyhow!("value lists: {e}"))?;
     let mut count = 0;
     for list in ddic.value_lists() {
-        let set = format!("{}Set", list.name);
+        let set = format!("{}Set", list.name());
         let existing = store
             .get_collection(&set, &ODataQuery::new())
             .await
             .map_err(|e| anyhow::anyhow!("cannot read {set}: {e}"))?;
         let wanted: HashSet<data_store::key::KeyValue> = list
-            .values
+            .values()
             .iter()
-            .map(|v| entry_key(list, &v.code))
+            .map(|v| entry_key(list, v.code()))
             .collect();
         // Alle Saetze je ID (aktiv und Entwurf).
         let mut by_id: HashMap<data_store::key::KeyValue, Vec<_>> = HashMap::new();
@@ -257,16 +257,17 @@ pub async fn seed_value_lists(
                     .map_err(|e| anyhow::anyhow!("cannot remove stale entry in {set}: {e}"))?;
             }
         }
-        for v in &list.values {
-            let id = entry_key(list, &v.code);
+        for v in list.values() {
+            let id = entry_key(list, v.code());
             let rows = by_id.get(&id).map(Vec::as_slice).unwrap_or(&[]);
             let active = rows.iter().find(|r| r.is_active_entity());
-            let wanted_data = json!({LABEL_FIELD: v.label, CODE_FIELD: v.code, SORT_FIELD: v.sort});
+            let wanted_data =
+                json!({LABEL_FIELD: v.label(), CODE_FIELD: v.code(), SORT_FIELD: v.sort()});
             match active {
                 Some(record) => {
-                    let unchanged = record.get(LABEL_FIELD) == Some(json!(v.label))
-                        && record.get(CODE_FIELD) == Some(json!(v.code))
-                        && record.get(SORT_FIELD) == Some(json!(v.sort));
+                    let unchanged = record.get(LABEL_FIELD) == Some(json!(v.label()))
+                        && record.get(CODE_FIELD) == Some(json!(v.code()))
+                        && record.get(SORT_FIELD) == Some(json!(v.sort()));
                     if !unchanged {
                         store
                             .patch_entity(&set, &EntityKey::new(id, true), &wanted_data)
@@ -290,7 +291,7 @@ pub async fn seed_value_lists(
                         .map_err(|e| anyhow::anyhow!("cannot seed {set}: {e}"))?;
                     // Listen mit eigenem Code-Schluessel haben keine Entwuerfe (Validierung in
                     // spec); alle anderen werden wie bisher als Entwurf angelegt und aktiviert.
-                    if !list.code_key {
+                    if !list.code_key() {
                         store
                             .draft_activate(&set, &EntityKey::new(created.id(), false))
                             .await
@@ -307,10 +308,10 @@ pub async fn seed_value_lists(
 
 /// Schluessel eines Festwerts: der Code bei Code-Listen, sonst die stabile UUID.
 fn entry_key(list: &spec::ValueList, code: &str) -> data_store::key::KeyValue {
-    if list.code_key {
+    if list.code_key() {
         data_store::key::KeyValue::Text(code.to_string())
     } else {
-        data_store::key::KeyValue::Uuid(spec::value_list::entry_id(&list.id, code))
+        data_store::key::KeyValue::Uuid(spec::value_list::entry_id(&list.id(), code))
     }
 }
 
@@ -333,14 +334,7 @@ fn load_dictionary(
     let bytes = file
         .repo
         .read(&file.rel)
-        .with_context(|| format!("cannot read data dictionary '{}'", file.label))?
-        .with_context(|| {
-            format!(
-                "cannot read data dictionary '{}'. Run the designer and press \
-                 'Publish Dictionary' to create it.",
-                file.label
-            )
-        })?;
+        .with_context(|| format!("cannot read data dictionary '{}'", file.label))?;
     info!("loading ddic from {}", file.label);
     let mut ddic: DataDictionary = serde_json::from_slice(&bytes)
         .with_context(|| format!("'{}' is not a valid data dictionary", file.label))?;
@@ -355,10 +349,11 @@ fn load_dictionary(
         }
         None => ddic,
     };
+
     // Komponenten (z. B. Zeitraum) expandieren: Felder, Nebenwirkungen, Ausblendung.
     ddic.expand_components()
         .map_err(|e| anyhow::anyhow!("'{}': ungueltige Komponente: {e}", file.label))?;
-    // Festwertlisten: Listen-Entitaeten erzeugen und Atome im Speicher zu Lookups
+    // Festwertlisten: Listen-Entitäten erzeugen und Atome im Speicher zu Lookups
     // machen (vor dem Schema, damit die Spalten dort stehen).
     ddic.apply_value_list_lookups()
         .map_err(|e| anyhow::anyhow!("'{}': ungueltige Festwertliste: {e}", file.label))?;
@@ -379,7 +374,7 @@ fn load_dictionary(
 /// Schema entweder aus der Datei nehmen oder aus dem Dictionary ableiten.
 ///
 /// Das Ableiten ist der Normalfall und der Grund, warum modellierte
-/// Entitaeten in der Laufzeit ueberhaupt Tabellen bekommen: der
+/// Entitäten in der Laufzeit ueberhaupt Tabellen bekommen: der
 /// `RelationalStore` legt beim Start alles an, was im Schema steht und in der
 /// Datenbank fehlt.
 fn schema_source(
@@ -392,7 +387,7 @@ fn schema_source(
         for entity in base.entities() {
             let set = schema.set(&entity.setname())?;
             anyhow::ensure!(
-                set.draft_enabled == entity.draft_enabled,
+                set.draft_enabled == entity.draft_enabled(),
                 "{}: Draft-Modus in Dictionary und Speicher-Schema stimmt nicht ueberein",
                 entity.name()
             );
@@ -481,6 +476,7 @@ fn router(
             "/apps/{app}/Component-preload.js",
             get(flp::component_preload_handler),
         )
+        .route("/apps/{app}/i18n/{language}", get(flp::i18n_handler))
         .route("/", get(flp::index))
         .merge(crate::status::router())
         .route("/sap/bc/lrep/flex/settings", get(flp::lrep_settings))

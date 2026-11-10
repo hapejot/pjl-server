@@ -11,6 +11,6 @@ fn before_draft_activate(ctx) { log("DraftActivate"); ctx }
 fn before_draft_prepare(ctx) { 
     log("DraftPrepare"); 
     log(ctx);
-    if ctx.payload.current.city != "Hannover" {throw "Stadt ist nicht Hannover";}
+    if ctx.current.draft.city != "Hannover" {throw "Stadt ist nicht Hannover";}
     ctx 
 }

@@ -3,7 +3,7 @@
 //! Beide Binaries laufen durch diese Funktion. Was sie unterscheidet, ist
 //! ausschliesslich die Herkunft von Dictionary und Schema:
 //!
-//! 
+//!
 //! |            | Designer (`--designer`)     | Laufzeit                     |
 //! | ---------- | --------------------------- | ---------------------------- |
 //! | Dictionary | eincompiliertes Metamodell  | `--ddic`                     |

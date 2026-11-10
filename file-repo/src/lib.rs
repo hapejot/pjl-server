@@ -240,7 +240,10 @@ impl ZipRepository {
 impl FileRepository for ZipRepository {
     fn read(&self, path: &str) -> Result<Bytes, RepoError> {
         let name = normalize(path)?;
-        self.files.get(&name).cloned().ok_or(RepoError::NotFound(path.to_string()))
+        self.files
+            .get(&name)
+            .cloned()
+            .ok_or(RepoError::NotFound(path.to_string()))
     }
 
     fn list(&self, dir: &str) -> Result<Vec<String>, RepoError> {

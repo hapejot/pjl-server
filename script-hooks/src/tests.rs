@@ -99,6 +99,33 @@ fn write_hook_changes_payload() {
 }
 
 #[test]
+fn write_hook_receives_key_and_both_current_variants() {
+    let d = dir_with(&[(
+        "Order.rhai",
+        r#"
+        fn before_patch(ctx) {
+            if ctx.key.IsActiveEntity && ctx.current.active.Name == "active" &&
+                ctx.current.draft.Name == "draft" {
+                ctx.payload.Checked = true;
+            }
+            ctx
+        }
+        "#,
+    )]);
+    let hooks = ScriptHooks::load(d.path()).unwrap();
+    let key = json!({"ID": "item-1", "IsActiveEntity": true});
+    let current = json!({
+        "active": {"ID": "item-1", "IsActiveEntity": true, "Name": "active"},
+        "draft": {"ID": "item-1", "IsActiveEntity": false, "Name": "draft"}
+    });
+    let mut payload = json!({"Name": "changed"});
+    hooks
+        .before_operation("Order", "patch", &mut payload, Some(key), Some(&current))
+        .unwrap();
+    assert_eq!(payload, json!({"Name": "changed", "Checked": true}));
+}
+
+#[test]
 fn throw_aborts_with_message() {
     let d = dir_with(&[(
         "Order.rhai",

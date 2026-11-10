@@ -499,7 +499,6 @@ impl FieldSpec {
             _ => None,
         }
     }
-
 }
 
 /// Application-level entity specification — describes an entity's own fields and header layout.

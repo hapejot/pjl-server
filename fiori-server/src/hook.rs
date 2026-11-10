@@ -9,6 +9,13 @@ use data_store::{
 };
 use odata::query::ODataQuery;
 
+/// Bestehende Datensaetze mit derselben ID fuer einen Before-Hook.
+#[derive(Debug, Clone, Default)]
+pub struct CurrentRecords {
+    pub active: Option<DataRecord>,
+    pub draft: Option<DataRecord>,
+}
+
 /// Identifiziert eine durchlaufende Operation (für Logging/Vorschau im Hook).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operation {
@@ -60,6 +67,27 @@ pub trait Hook: Send + Sync {
         let _ = store;
         debug!(set_name, ?op, ?value);
         Ok(())
+    }
+
+    /// Schreiboperation vor dem Store, einschliesslich beider vorhandener
+    /// Varianten des Datensatzes. Bestehende Hooks behalten ihr bisheriges
+    /// Verhalten, sofern sie diese Methode nicht ueberschreiben.
+    async fn before_with_current(
+        &self,
+        store: &Extender,
+        set_name: &str,
+        op: Operation,
+        key: Option<&EntityKey>,
+        value: &mut Value,
+        current: &CurrentRecords,
+    ) -> Result<(), HookError> {
+        if op == Operation::Patch {
+            if let Some(key) = key {
+                return self.before_patch(store, set_name, key, value).await;
+            }
+        }
+        let _ = current;
+        self.before(store, set_name, op, value).await
     }
 
     async fn after(
@@ -151,6 +179,48 @@ impl Extender {
         serde_json::to_value(&record).map_err(|e| StoreError::Serialize(e.to_string()))
     }
 
+    /// Beide vorhandenen Varianten eines Datensatzes fuer einen Before-Hook.
+    pub async fn current_records(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+    ) -> Result<CurrentRecords, StoreError> {
+        let active = self
+            .optional_record(set_name, &EntityKey::new(key.id.clone(), true))
+            .await?;
+        let draft = self
+            .optional_record(set_name, &EntityKey::new(key.id.clone(), false))
+            .await?;
+        Ok(CurrentRecords { active, draft })
+    }
+
+    async fn optional_record(
+        &self,
+        set_name: &str,
+        key: &EntityKey,
+    ) -> Result<Option<DataRecord>, StoreError> {
+        match self
+            .inner
+            .read_entity(set_name, key, &ODataQuery::default())
+            .await
+        {
+            Ok(record) => Ok(Some(record)),
+            Err(StoreError::NotFound { .. } | StoreError::InvalidState) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn current_for_value(
+        &self,
+        set_name: &str,
+        value: &Value,
+    ) -> Result<CurrentRecords, StoreError> {
+        match EntityKey::new_from_json(value) {
+            Some(key) => self.current_records(set_name, &key).await,
+            None => Ok(CurrentRecords::default()),
+        }
+    }
+
     /// Erzeugt einen neuen [`Extender`], der einen bestehenden Store mit dem
     /// angegebenen [`Hook`] verdrahtet.
     pub fn new(
@@ -200,8 +270,16 @@ impl DraftDataStore for Extender {
         key: &EntityKey,
     ) -> Result<serde_json::Value, StoreError> {
         let mut value = Self::key_value(key);
+        let current = self.current_records(set_name, key).await?;
         self.hook
-            .before(self, set_name, Operation::DraftEdit, &mut value)
+            .before_with_current(
+                self,
+                set_name,
+                Operation::DraftEdit,
+                Some(key),
+                &mut value,
+                &current,
+            )
             .await?;
         let result = self.inner.draft_edit(set_name, key).await?;
         let mut record = DataRecord::from_json(&result)?;
@@ -217,8 +295,16 @@ impl DraftDataStore for Extender {
         key: &EntityKey,
     ) -> Result<serde_json::Value, StoreError> {
         let mut value = Self::key_value(key);
+        let current = self.current_records(set_name, key).await?;
         self.hook
-            .before(self, set_name, Operation::DraftActivate, &mut value)
+            .before_with_current(
+                self,
+                set_name,
+                Operation::DraftActivate,
+                Some(key),
+                &mut value,
+                &current,
+            )
             .await?;
         let result = self.inner.draft_activate(set_name, key).await?;
         let mut record = DataRecord::from_json(&result)?;
@@ -233,12 +319,18 @@ impl DraftDataStore for Extender {
         set_name: &str,
         key: &EntityKey,
     ) -> Result<serde_json::Value, StoreError> {
-        let mut value = json!( { "key": Self::key_value(key),
-                "current": &self.inner.read_entity(set_name, key, &ODataQuery::default()).await?
-        });
+        let mut value = json!({ "key": Self::key_value(key) });
+        let current = self.current_records(set_name, key).await?;
 
         self.hook
-            .before(self, set_name, Operation::DraftPrepare, &mut value)
+            .before_with_current(
+                self,
+                set_name,
+                Operation::DraftPrepare,
+                Some(key),
+                &mut value,
+                &current,
+            )
             .await?;
         let result = self.inner.draft_prepare(set_name, key).await?;
         let mut record = DataRecord::from_json(&result)?;
@@ -310,8 +402,17 @@ impl DataStore for Extender {
 
     async fn create_entity(&self, set_name: &str, data: &Value) -> Result<DataRecord, StoreError> {
         let mut value = data.clone();
+        let key = EntityKey::new_from_json(&value);
+        let current = self.current_for_value(set_name, &value).await?;
         self.hook
-            .before(self, set_name, Operation::Create, &mut value)
+            .before_with_current(
+                self,
+                set_name,
+                Operation::Create,
+                key.as_ref(),
+                &mut value,
+                &current,
+            )
             .await?;
         let mut r = self.inner.create_entity(set_name, &value).await?;
         self.hook
@@ -327,8 +428,16 @@ impl DataStore for Extender {
         patch: &Value,
     ) -> Result<Value, StoreError> {
         let mut value = patch.clone();
+        let current = self.current_records(set_name, key).await?;
         self.hook
-            .before_patch(self, set_name, key, &mut value)
+            .before_with_current(
+                self,
+                set_name,
+                Operation::Patch,
+                Some(key),
+                &mut value,
+                &current,
+            )
             .await?;
         let result = self.inner.patch_entity(set_name, key, &value).await?;
         let mut record = self
@@ -343,8 +452,16 @@ impl DataStore for Extender {
 
     async fn delete_entity(&self, set_name: &str, key: &EntityKey) -> Result<(), StoreError> {
         let mut value = Self::key_value(key);
+        let current = self.current_records(set_name, key).await?;
         self.hook
-            .before(self, set_name, Operation::Delete, &mut value)
+            .before_with_current(
+                self,
+                set_name,
+                Operation::Delete,
+                Some(key),
+                &mut value,
+                &current,
+            )
             .await?;
         let result = self.inner.delete_entity(set_name, key).await;
         result?;
@@ -375,11 +492,24 @@ impl DataStore for Extender {
                 WriteOp::Patch(key, patch) => (Operation::Patch, patch, Some(key)),
                 WriteOp::Delete(key) => (Operation::Delete, Self::key_value(&key), Some(key)),
             };
-            let before = match (kind, &key) {
-                (Operation::Patch, Some(k)) => {
-                    self.hook.before_patch(self, set_name, k, &mut value).await
+            let current = match key.as_ref() {
+                Some(key) => self.current_records(set_name, key).await,
+                None => self.current_for_value(set_name, &value).await,
+            };
+            let before = match current {
+                Ok(current) => {
+                    self.hook
+                        .before_with_current(
+                            self,
+                            set_name,
+                            kind,
+                            key.as_ref(),
+                            &mut value,
+                            &current,
+                        )
+                        .await
                 }
-                _ => self.hook.before(self, set_name, kind, &mut value).await,
+                Err(error) => Err(error.into()),
             };
             if let Err(e) = before {
                 results[i] = Some(Err(e.into()));
@@ -429,8 +559,16 @@ impl DataStore for Extender {
         key: &EntityKey,
     ) -> Result<(), StoreError> {
         let mut value = Self::key_value(key);
+        let current = self.current_records(set_name, key).await?;
         self.hook
-            .before(self, set_name, Operation::Delete, &mut value)
+            .before_with_current(
+                self,
+                set_name,
+                Operation::Delete,
+                Some(key),
+                &mut value,
+                &current,
+            )
             .await?;
         let result = self.inner.delete_entity_tree_only(set_name, key).await;
         result?;

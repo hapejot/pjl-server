@@ -28,7 +28,11 @@ fn before_patch(ctx, cfg) {
 fn apply_rules(ctx, cfg) {
     let f = cfg.fields;
     let p = ctx.payload;
-    let cur = ctx.current;
+    let cur = if ctx.key != () && !ctx.key.IsActiveEntity {
+        ctx.current.draft
+    } else {
+        ctx.current.active
+    };
     if has(p, f.start) {
         p[f.start] = ts_round_minutes(p[f.start], cfg.step_minutes);
     }

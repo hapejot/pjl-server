@@ -168,7 +168,8 @@ fn field_annotations_cover_atom_value_list_and_measure() {
         Annotations::from_field(&DataDictionary::new(), "Invoice", &value_list_field);
 
     assert!(value_list_annotations.annotations.iter().any(|annotation| {
-        annotation.term == "Common.Label" && annotation.string.as_deref() == Some("Code")
+        annotation.term == "Common.Label"
+            && annotation.string.as_deref() == Some("{@i18n>Invoice.code}")
     }));
     assert!(
         value_list_annotations

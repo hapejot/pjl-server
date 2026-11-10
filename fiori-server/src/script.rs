@@ -10,7 +10,7 @@ use script_hooks::ScriptHooks;
 use serde_json::{Value, json};
 
 use crate::extension::Extension;
-use crate::hook::{Extender, Hook, HookError, Operation};
+use crate::hook::{CurrentRecords, Extender, Hook, HookError, Operation};
 use crate::term3270::section_view;
 
 /// Bindet die Komponenten-Verwendungen der DDIC an die Skripte: je Verwendung ein Aufruf
@@ -97,6 +97,30 @@ impl Hook for ScriptHook {
             .map_err(script_err)
     }
 
+    async fn before_with_current(
+        &self,
+        _store: &Extender,
+        set_name: &str,
+        op: Operation,
+        key: Option<&EntityKey>,
+        value: &mut Value,
+        current: &CurrentRecords,
+    ) -> Result<(), HookError> {
+        let current = json!({
+            "active": current.active.as_ref().map(record_to_value).transpose()?,
+            "draft": current.draft.as_ref().map(record_to_value).transpose()?,
+        });
+        self.0
+            .before_operation(
+                set_name,
+                op_name(op),
+                value,
+                key.map(key_value),
+                Some(&current),
+            )
+            .map_err(script_err)
+    }
+
     async fn before_patch(
         &self,
         store: &Extender,
@@ -104,9 +128,19 @@ impl Hook for ScriptHook {
         key: &EntityKey,
         patch: &mut Value,
     ) -> Result<(), HookError> {
-        let current = store.current_value(set_name, key).await?;
+        let current = store.current_records(set_name, key).await?;
+        let current = json!({
+            "active": current.active.as_ref().map(record_to_value).transpose()?,
+            "draft": current.draft.as_ref().map(record_to_value).transpose()?,
+        });
         self.0
-            .before_write(set_name, op_name(Operation::Patch), patch, Some(&current))
+            .before_operation(
+                set_name,
+                op_name(Operation::Patch),
+                patch,
+                Some(key_value(key)),
+                Some(&current),
+            )
             .map_err(script_err)
     }
 

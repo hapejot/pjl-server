@@ -1,3 +1,4 @@
+use std::sync::Mutex;
 use std::sync::RwLock;
 
 use odata_yaml_store::YamlStore;
@@ -83,5 +84,79 @@ async fn example_hook() -> anyhow::Result<()> {
         .create_entity("OrderSet", &json!({"SoldTo": "Peter"}))
         .await?;
     assert_eq!(hook.create_count(), 1);
+    Ok(())
+}
+
+#[derive(Default)]
+struct CurrentRecordsHook {
+    seen: Mutex<Vec<(Operation, bool, bool)>>,
+}
+
+#[async_trait::async_trait]
+impl Hook for CurrentRecordsHook {
+    async fn before_with_current(
+        &self,
+        _store: &Extender,
+        _set_name: &str,
+        op: Operation,
+        _key: Option<&EntityKey>,
+        _value: &mut Value,
+        current: &CurrentRecords,
+    ) -> Result<(), HookError> {
+        self.seen
+            .lock()
+            .map_err(|e| HookError::Hook(e.to_string()))?
+            .push((op, current.active.is_some(), current.draft.is_some()));
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn every_write_hook_receives_active_and_draft_records() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let inner = Arc::new(YamlStore::open(dir.path())?);
+    let hook = Arc::new(CurrentRecordsHook::default());
+    let store = Extender::new(inner, hook.clone())?;
+    let id = uuid::Uuid::new_v4();
+    let active_key = EntityKey::new(id, true);
+    let draft_key = active_key.sibling();
+
+    store
+        .create_entity(
+            "ItemSet",
+            &json!({ "ID": id.to_string(), "IsActiveEntity": true, "Name": "active" }),
+        )
+        .await?;
+    store.draft_edit("ItemSet", &active_key).await?;
+    store
+        .patch_entity("ItemSet", &draft_key, &json!({ "Name": "draft" }))
+        .await?;
+    store.draft_prepare("ItemSet", &draft_key).await?;
+    store.draft_activate("ItemSet", &draft_key).await?;
+    let results = store
+        .write_entities(
+            "ItemSet",
+            vec![WriteOp::Patch(
+                active_key.clone(),
+                json!({ "Name": "batch" }),
+            )],
+        )
+        .await;
+    assert!(matches!(results.as_slice(), [Ok(Some(_))]));
+    store.delete_entity("ItemSet", &active_key).await?;
+
+    let seen = hook.seen.lock().unwrap();
+    assert_eq!(
+        *seen,
+        vec![
+            (Operation::Create, false, false),
+            (Operation::DraftEdit, true, false),
+            (Operation::Patch, true, true),
+            (Operation::DraftPrepare, true, true),
+            (Operation::DraftActivate, true, true),
+            (Operation::Patch, true, false),
+            (Operation::Delete, true, false),
+        ]
+    );
     Ok(())
 }

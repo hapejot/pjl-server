@@ -1159,7 +1159,7 @@ impl DataDictionary {
                 println!("    {}", prop.name());
             }
         }
-    }    
+    }
 }
 
 impl Default for DataDictionary {

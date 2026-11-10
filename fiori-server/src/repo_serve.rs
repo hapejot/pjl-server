@@ -27,7 +27,9 @@ pub fn serve(repo: &dyn FileRepository, raw: &str) -> Response {
             )
                 .into_response()
         }
-        Err(file_repo::RepoError::NotFound(_)) => StatusCode::NOT_FOUND.into_response(),
+        Err(file_repo::RepoError::NotFound(_) | file_repo::RepoError::UnsafePath(_)) => {
+            StatusCode::NOT_FOUND.into_response()
+        }
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }

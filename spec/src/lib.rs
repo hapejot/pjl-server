@@ -7,9 +7,9 @@
 //! Vertrags und wird über `serde` abgebildet.
 //!
 //! # Beispiel
-//! 
+//!
 //! Validierung und Verwaltung von Entitäten, Beziehungen, Apps, Komponenten und Festwertlisten.
-//! 
+//!
 //! ```
 //! use spec::{DataDictionary, EntitySpec, FieldSpec};
 //!

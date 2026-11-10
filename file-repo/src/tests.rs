@@ -50,11 +50,11 @@ fn both() -> (
 fn conformance_read_list_exists() {
     let (_dir, d, z) = both();
     for repo in [&d, &z] {
-        assert_eq!(
-            repo.read("ddic.json").unwrap(),
-            Bytes::from_static(b"{}")
-        );
-        assert!(matches!(repo.read("missing.json"), Err(RepoError::NotFound(_))));
+        assert_eq!(repo.read("ddic.json").unwrap(), Bytes::from_static(b"{}"));
+        assert!(matches!(
+            repo.read("missing.json"),
+            Err(RepoError::NotFound(_))
+        ));
         assert_eq!(
             repo.read("./scripts//CustomerSet.rhai").unwrap(),
             Bytes::from_static(b"// x")

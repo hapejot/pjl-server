@@ -12,6 +12,7 @@
 //! * `key` (`#{ ID, IsActiveEntity }` oder `()`)
 //! * `property` (nur bei `kind == "property"`)
 //! * `payload` (Datensatz als Map, Liste bei `kind == "list"`, sonst Wert)
+//! * `current` (bei Schreiboperationen: `#{ active, draft }`, jeweils Datensatz oder `()`)
 //! * `query` (nur bei `before_read`): `$filter` als Struktur, `$top`, `$skip`, ...
 //!
 //! Hilfsfunktionen fuer Filter: `prop("Name")`, `text("x")`, `num(1)`,
@@ -203,8 +204,8 @@ impl ScriptHooks {
         self.before_write(set, op, payload, current)
     }
 
-    /// Wie [`ScriptHooks::before`], zusaetzlich mit dem aktuellen Datensatz (`ctx.current`),
-    /// damit ein Patch fehlende Gegenwerte (z. B. den Startzeitpunkt) ergaenzen kann.
+    /// Wie [`ScriptHooks::before`], zusaetzlich mit Bestand (`ctx.current`) fuer
+    /// beide Varianten; dieser Legacy-Aufruf setzt `ctx.key` nicht.
     pub fn before_write(
         &self,
         set: &str,
@@ -212,16 +213,28 @@ impl ScriptHooks {
         payload: &mut Value,
         current: Option<&Value>,
     ) -> Result<(), ScriptError> {
+        self.before_operation(set, op, payload, None, current)
+    }
+
+    /// Schreiboperation vor dem Store mit Schluessel und aktuellem Bestand.
+    pub fn before_operation(
+        &self,
+        set: &str,
+        op: &str,
+        payload: &mut Value,
+        key: Option<Value>,
+        current: Option<&Value>,
+    ) -> Result<(), ScriptError> {
         let fname = format!("before_{op}");
         // Gebundene Komponenten zuerst (Regeln je Verwendung), dann das Entitaetsskript.
         for (script, config) in self.bound(set) {
-            let ctx = json!({"set": set, "op": op, "kind": "write", "key": null,
+            let ctx = json!({"set": set, "op": op, "kind": "write", "key": key,
                              "payload": payload, "current": current.cloned().unwrap_or(Value::Null)});
             if let Some(res) = self.call_component(&script, &fname, ctx, &config)? {
                 take(&res, "payload", payload);
             }
         }
-        let ctx = json!({"set": set, "op": op, "kind": "write", "key": null,
+        let ctx = json!({"set": set, "op": op, "kind": "write", "key": key,
                          "payload": payload, "current": current.cloned().unwrap_or(Value::Null)});
         if let Some(res) = self.call(set, &fname, ctx)? {
             take(&res, "payload", payload);
@@ -457,10 +470,7 @@ impl Inner {
 
     /// Kompiliert die Datei `rel` aus der Quelle.
     fn compile(&self, rel: &str) -> Result<Script, String> {
-        let bytes = self
-            .repo
-            .read(rel)
-            .map_err(|e| e.to_string())?;
+        let bytes = self.repo.read(rel).map_err(|e| e.to_string())?;
         let src = String::from_utf8(bytes.to_vec()).map_err(|e| e.to_string())?;
         let ast = self.engine.compile(&src).map_err(|e| e.to_string())?;
         let functions = ast
@@ -587,17 +597,14 @@ fn register_helpers(engine: &mut Engine) {
     engine.register_fn("log", |message: &str| {
         info!(target: "script_hooks::script", script_message = %message, "Rhai script log");
     });
-    engine.register_fn(
-        "log",
-        |value: Dynamic| -> Result<(), Box<EvalAltResult>> {
-            let value: Value = rhai::serde::from_dynamic(&value)
-                .map_err(|e| rhai_err(&format!("log: {e}")))?;
-            let message = serde_json::to_string_pretty(&value)
-                .map_err(|e| rhai_err(&format!("log: {e}")))?;
-            info!(target: "script_hooks::script", script_message = %message, "Rhai script log");
-            Ok(())
-        },
-    );
+    engine.register_fn("log", |value: Dynamic| -> Result<(), Box<EvalAltResult>> {
+        let value: Value =
+            rhai::serde::from_dynamic(&value).map_err(|e| rhai_err(&format!("log: {e}")))?;
+        let message =
+            serde_json::to_string_pretty(&value).map_err(|e| rhai_err(&format!("log: {e}")))?;
+        info!(target: "script_hooks::script", script_message = %message, "Rhai script log");
+        Ok(())
+    });
     engine.register_fn("prop", |name: &str| {
         let parts: Vec<&str> = name.split('/').collect();
         if parts.len() == 1 {

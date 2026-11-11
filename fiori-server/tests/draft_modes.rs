@@ -159,6 +159,18 @@ async fn designer_has_no_draft_metadata_and_persists_direct_crud() {
         StatusCode::CREATED).await;
     assert_no_drafts(&entity);
     let id = entity["ID"].as_str().unwrap();
+    let initial_fields = json_request(
+        &state,
+        Method::GET,
+        &format!("/EntitySet({id})/_Fields"),
+        Value::Null,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(initial_fields["value"].as_array().unwrap().len(), 1);
+    assert_eq!(initial_fields["value"][0]["name"], "Name");
+    assert_eq!(initial_fields["value"][0]["type"], "Edm.String");
+    assert_no_drafts(&initial_fields);
     let field = json_request(
         &state,
         Method::POST,
@@ -194,7 +206,7 @@ async fn designer_has_no_draft_metadata_and_persists_direct_crud() {
         StatusCode::OK,
     )
     .await;
-    assert_eq!(fields["value"].as_array().unwrap().len(), 1);
+    assert_eq!(fields["value"].as_array().unwrap().len(), 2);
     assert_no_drafts(&fields);
     let disk: DataDictionary =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
@@ -213,6 +225,18 @@ async fn designer_has_no_draft_metadata_and_persists_direct_crud() {
         .unwrap();
     assert_eq!(saved[0].get("draft_enabled"), Some(json!(false)));
     assert_eq!(saved[0].get("plural"), Some(json!("Catalog entries")));
+    let saved_fields = reopened
+        .get_collection("FieldSet", &Default::default())
+        .await
+        .unwrap();
+    assert_eq!(saved_fields.len(), 2);
+    assert_eq!(
+        saved_fields
+            .iter()
+            .filter(|field| field.get("name") == Some(json!("Name")))
+            .count(),
+        1
+    );
     assert!(
         store
             .draft_edit("EntitySet", &EntityKey::new_active(id))

@@ -72,6 +72,12 @@ impl DataDictionary {
         debug!("using default ddic");
         let _core = Package::new("core");
         let core = Package::new("core");
+        let fixed_value_field = |name, label, set| {
+            FieldSpec::atom(name, label, "Edm.String")
+                .with_value_list(crate::entity_spec::AtomValueList::entity_ref(
+                    set, "value", Some("name"),
+                ))
+        };
 
         let entity_ent = EntitySpec::new("Entity", core.name(), "Entities")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
@@ -84,20 +90,20 @@ impl DataDictionary {
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
             .field(FieldSpec::atom("role", "Role", "Edm.String"))
             .field(FieldSpec::atom("label", "Label", "Edm.String"))
-            .field(FieldSpec::atom("type", "Type", "Edm.String"))
+            .field(fixed_value_field("type", "Type", "EdmTypeSet"))
             .field(FieldSpec::atom("max_length", "MaxLength", "Edm.Int64"))
             .field(FieldSpec::atom("precision", "Precision", "Edm.Int64"))
             .field(FieldSpec::atom("scale", "Scale", "Edm.Int64"))
             .field(FieldSpec::atom("computed", "Computed", "Edm.Boolean"))
             .field(FieldSpec::atom("immutable", "Immutable", "Edm.Boolean"))
             .field(FieldSpec::atom("multiline", "Multiline", "Edm.Boolean"))
-            .field(FieldSpec::atom("kind", "Field Kind", "Edm.String"))
+            .field(fixed_value_field("kind", "Field Kind", "FieldKindSet"))
             .field(FieldSpec::atom("link", "Link", "Edm.Boolean"))
             .field(FieldSpec::bool_field("prefer_dialog", "Prefer Dialog"))
-            .field(FieldSpec::atom(
+            .field(fixed_value_field(
                 "value_help_type",
                 "Value Help Type",
-                "Edm.String",
+                "ValueHelpTypeSet",
             ))
             .field(FieldSpec::atom(
                 "entity_set",
@@ -114,21 +120,42 @@ impl DataDictionary {
                 "Display Property",
                 "Edm.String",
             ))
-            .field(FieldSpec::atom(
+            .field(fixed_value_field(
                 "display_format",
                 "Display Format",
-                "Edm.String",
+                "DisplayFormatSet",
             ))
             .field(FieldSpec::atom(
                 "unit_field",
                 "Unit or Currency Field",
                 "Edm.String",
             ))
-            .field(FieldSpec::atom(
+            .field(fixed_value_field(
                 "measure_kind",
                 "Measure Kind",
-                "Edm.String",
+                "MeasureKindSet",
             ));
+
+        let fixed_value_entities = [
+            ("FieldKind", "Field Kinds"),
+            ("MeasureKind", "Measure Kinds"),
+            ("ValueHelpType", "Value Help Types"),
+            ("DisplayFormat", "Display Formats"),
+            ("EdmType", "EDM Types"),
+            ("Priority", "Priorities"),
+            ("Placement", "Placements"),
+            ("ComponentKind", "Component Kinds"),
+            ("TimeUnit", "Time Units"),
+            ("SeedValueType", "Seed Value Types"),
+        ]
+        .into_iter()
+        .map(|(name, label)| {
+            EntitySpec::new(name, core.name(), label)
+                .without_drafts()
+                .field(FieldSpec::atom("name", "Name", "Edm.String"))
+                .field(FieldSpec::atom("value", "Value", "Edm.String"))
+        })
+        .collect::<Vec<_>>();
 
         let relation_ent = EntitySpec::new("Relation", core.name(), "Relations")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
@@ -176,9 +203,9 @@ impl DataDictionary {
 
         let component_ent = EntitySpec::new("Component", core.name(), "Components")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
-            .field(FieldSpec::atom("kind", "Kind", "Edm.String"))
+            .field(fixed_value_field("kind", "Kind", "ComponentKindSet"))
             .field(FieldSpec::atom("script", "Script", "Edm.String"))
-            .field(FieldSpec::atom("unit", "Unit", "Edm.String"))
+            .field(fixed_value_field("unit", "Unit", "TimeUnitSet"))
             .field(FieldSpec::atom("step_minutes", "Step Minutes", "Edm.Int64"));
 
         let component_use_ent = EntitySpec::new("ComponentUse", core.name(), "Component Uses")
@@ -199,7 +226,7 @@ impl DataDictionary {
             .field(FieldSpec::atom("field", "Field", "Edm.String"))
             .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
             .field(FieldSpec::atom("width", "Width", "Edm.String"))
-            .field(FieldSpec::atom("priority", "Priority", "Edm.String"))
+            .field(fixed_value_field("priority", "Priority", "PrioritySet"))
             .without_audit();
         let filter_default_ent =
             EntitySpec::new("EntityFilterDefault", core.name(), "Filter Defaults")
@@ -235,7 +262,7 @@ impl DataDictionary {
             .field(FieldSpec::atom("title", "Title", "Edm.String"))
             .field(FieldSpec::atom("fragment", "Fragment", "Edm.String"))
             .field(FieldSpec::atom("anchor", "Anchor", "Edm.String"))
-            .field(FieldSpec::atom("placement", "Placement", "Edm.String"))
+            .field(fixed_value_field("placement", "Placement", "PlacementSet"))
             .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
             .without_audit();
         let ui_column_ent =
@@ -244,7 +271,7 @@ impl DataDictionary {
                 .field(FieldSpec::atom("header", "Header", "Edm.String"))
                 .field(FieldSpec::atom("fragment", "Fragment", "Edm.String"))
                 .field(FieldSpec::atom("anchor", "Anchor", "Edm.String"))
-                .field(FieldSpec::atom("placement", "Placement", "Edm.String"))
+                .field(fixed_value_field("placement", "Placement", "PlacementSet"))
                 .field(FieldSpec::atom("width", "Width", "Edm.String"))
                 .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
                 .without_audit();
@@ -298,6 +325,16 @@ impl DataDictionary {
                 .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
                 .without_audit();
 
+        let seed_ent = EntitySpec::new("EntitySeed", core.name(), "Seeds")
+            .field(FieldSpec::atom("name", "Name", "Edm.String").computed())
+            .field(FieldSpec::atom("order", "Position", "Edm.Int64"))
+            .without_audit();
+        let seed_value_ent = EntitySpec::new("EntitySeedValue", core.name(), "Seed Values")
+            .field(FieldSpec::atom("field", "Field", "Edm.String"))
+            .field(FieldSpec::atom("value", "Value", "Edm.String"))
+            .field(fixed_value_field("value_type", "Value Type", "SeedValueTypeSet"))
+            .without_audit();
+
         let rel = Relationship::new("entity_fields", core.name())
             .with_one("Entity", "_Fields")
             .with_many("Field", "entity")
@@ -324,6 +361,8 @@ impl DataDictionary {
             .with_one("ValueList", "_Fields")
             .with_many("Field", "value_list");
         let config_relationships = [
+            ("entity_seeds", "Entity", "_Seeds", "EntitySeed", "entity"),
+            ("seed_values", "EntitySeed", "_Values", "EntitySeedValue", "seed"),
             (
                 "entity_list_views",
                 "Entity",
@@ -456,7 +495,7 @@ impl DataDictionary {
         let r7 = Relationship::new("app_package", core.name())
             .with_one("Package", "_Apps")
             .with_many("App", "package");
-        let a1 = App::new(
+        let relations_app = App::new(
             "relations".into(),
             "Relations".into(),
             "Relation".into(),
@@ -464,7 +503,7 @@ impl DataDictionary {
             Some("sap-icon://world".into()),
             core.clone(),
         );
-        let a2 = App::new(
+        let values_app = App::new(
             "values".into(),
             "Values".into(),
             "Value".into(),
@@ -472,7 +511,7 @@ impl DataDictionary {
             Some("sap-icon://world".into()),
             core.clone(),
         );
-        let a3 = App::new(
+        let entities_app = App::new(
             "entities".into(),
             "Entities".into(),
             "Entity".into(),
@@ -480,7 +519,7 @@ impl DataDictionary {
             Some("sap-icon://world".into()),
             core.clone(),
         );
-        let a4 = App::new(
+        let packages_app = App::new(
             "packages".into(),
             "Packages".into(),
             "Package".into(),
@@ -488,7 +527,7 @@ impl DataDictionary {
             Some("sap-icon://world".into()),
             core.clone(),
         );
-        let a6 = App::new(
+        let value_lists_app = App::new(
             "valuelists".into(),
             "Value Lists".into(),
             "ValueList".into(),
@@ -496,7 +535,7 @@ impl DataDictionary {
             Some("sap-icon://world".into()),
             core.clone(),
         );
-        let a5 = App::new(
+        let apps_app = App::new(
             "apps".into(),
             "Apps".into(),
             "App".into(),
@@ -504,7 +543,7 @@ impl DataDictionary {
             Some("sap-icon://world".into()),
             core.clone(),
         );
-        let a7 = App::new(
+        let components_app = App::new(
             "components".into(),
             "Components".into(),
             "Component".into(),
@@ -512,7 +551,7 @@ impl DataDictionary {
             Some("sap-icon://world".into()),
             core.clone(),
         );
-        let a8 = App::new(
+        let component_use_app = App::new(
             "componentuses".into(),
             "Component Uses".into(),
             "ComponentUse".into(),
@@ -549,12 +588,26 @@ impl DataDictionary {
                 app_module_ent,
                 app_extension_ent,
                 component_role_ent,
-            ],
+                seed_ent,
+                seed_value_ent,
+            ]
+            .into_iter()
+            .chain(fixed_value_entities)
+            .collect(),
             relationships: vec![rel, r2, r3, r4, r5, r6, r7, r8, r9]
                 .into_iter()
                 .chain(config_relationships)
                 .collect(),
-            apps: vec![a1, a2, a3, a4, a5, a6, a7, a8],
+            apps: vec![
+                packages_app,
+                entities_app,
+                apps_app,
+                relations_app,
+                values_app,
+                value_lists_app,
+                components_app,
+                component_use_app,
+            ],
             value_lists: Vec::new(),
             components: Vec::new(),
             component_uses: Vec::new(),

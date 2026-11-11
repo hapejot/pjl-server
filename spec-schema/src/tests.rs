@@ -22,11 +22,18 @@ fn bootstrap_dictionary_yields_a_valid_schema() {
 }
 
 #[test]
-fn every_set_has_the_draft_key() {
-    let schema = schema_from_ddic(&activated_ddic()).unwrap();
-    for set in schema.sets() {
+fn every_set_has_keys_matching_its_draft_mode() {
+    let ddic = activated_ddic();
+    let schema = schema_from_ddic(&ddic).unwrap();
+    for entity in ddic.entities() {
+        let set = schema.set(&format!("{}Set", entity.name())).unwrap();
         let keys: Vec<_> = set.key_columns().iter().map(|c| c.name.clone()).collect();
-        assert_eq!(keys, vec!["ID", "IsActiveEntity"], "{}", set.name);
+        let expected = if entity.draft_enabled() {
+            vec!["ID", "IsActiveEntity"]
+        } else {
+            vec!["ID"]
+        };
+        assert_eq!(keys, expected, "{}", set.name);
     }
 }
 

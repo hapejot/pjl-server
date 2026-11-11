@@ -388,6 +388,22 @@ jq --argjson formats '{"Video":{"duration_seconds":"duration","bitrate":"bitrate
    -f scripts/ddic-migrate-ui.jq video-store/ddic.json > video-store/ddic.new.json
 ```
 
+### Seed-Daten im Designer
+
+Fachliche Startdaten wie Währungen werden je Entität unter `seed` definiert. Im Designer
+enthält die Object Page einer Entität dafür den Bereich **Seeds**. Eine Seed-Zeile enthält
+unter **Seed Values** ihre Feldwerte mit Feldname, Wert und Werttyp. Die Position bestimmt
+die Reihenfolge der Zeilen.
+
+Für eine Währung werden beispielsweise `code = EUR` und `name = Euro` als `String` sowie
+`decimal_places = 2` als `Number` angelegt. Weitere Werttypen sind `Boolean`, `Null`, `Object`
+und `Array`; bei strukturierten Werten wird der Wert als JSON eingegeben. Speichern schreibt
+die Zeilen typgetreu nach `entities[].seed` in `ddic.json`.
+
+Die Runtime spielt Seeds beim Start nur ein, wenn das zugehörige EntitySet leer ist.
+Änderungen oder Löschungen der Seed-Definition verändern keine bereits vorhandenen
+Laufzeitdatensätze.
+
 ## 15. Bekannte Einschränkungen
 
 * **Designer: `ui`-Blöcke sind nicht editierbar.** Beim Speichern im Designer werden die

@@ -260,6 +260,17 @@ async fn new_validates_at_save_and_keeps_failed_sessions_editable() {
     assert_eq!(fixture.disk()["entities"][0]["name"], "Customer");
     assert_eq!(
         fixture.disk()["entities"][0]["fields"][0]["Atom"]["name"],
+        "Name"
+    );
+    assert_eq!(
+        fixture.disk()["entities"][0]["fields"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        fixture.disk()["entities"][0]["fields"][1]["Atom"]["name"],
         "name"
     );
     assert_eq!(fixture.disk()["entities"][0]["draft_enabled"], false);
@@ -409,10 +420,13 @@ async fn changeset_can_create_and_save_an_entity_tree_using_content_ids() {
     assert!(text.contains("Content-ID: 4"), "{text}");
     assert!(!headers.contains_key(CONTEXT));
     assert_eq!(fixture.disk()["entities"][0]["name"], "BatchEntity");
-    assert_eq!(
-        fixture.disk()["entities"][0]["fields"][0]["Atom"]["name"],
-        "code"
-    );
+    let fields = fixture.disk()["entities"][0]["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|field| field["Atom"]["name"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(fields, vec![json!("Name"), json!("code")]);
 }
 
 #[tokio::test]
@@ -784,12 +798,13 @@ async fn designer_expansions_preserve_session_state_and_nullable_navigation_shap
         )
         .await;
     assert_eq!(parent["_Entities@odata.count"], 1);
-    assert_eq!(parent["_Entities"][0]["_Fields"][0]["name"], "code");
-    assert!(
-        parent["_Entities"][0]["_Fields"][0]
-            .get("IsActiveEntity")
-            .is_none()
-    );
+    let fields = parent["_Entities"][0]["_Fields"].as_array().unwrap();
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0]["name"], "Name");
+    assert_eq!(fields[1]["name"], "code");
+    for field in fields {
+        assert!(field.get("IsActiveEntity").is_none());
+    }
     fixture
         .call(
             Method::POST,

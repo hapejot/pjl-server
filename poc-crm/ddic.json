@@ -509,5 +509,32 @@
         }
       ]
     }
+  ],
+  "components": [
+    {
+      "name": "TimeRange",
+      "kind": "time_range",
+      "script": "components/TimeRange",
+      "unit": "minutes",
+      "step_minutes": 5
+    }
+  ],
+  "component_uses": [
+    {
+      "entity": "Opportunity",
+      "component": "TimeRange",
+      "instance": "zeitraum",
+      "fields": {
+        "start": "starts_at",
+        "end": "ends_at",
+        "duration": "duration_minutes"
+      },
+      "labels": {
+        "start": "Beginn",
+        "end": "Ende",
+        "duration": "Dauer (Minuten)"
+      },
+      "section_title": "Zeitraum"
+    }
   ]
 }

@@ -4,6 +4,7 @@ members = [
     "data-store",
     "file-repo",
     "fiori-server",
+    "json-to-ddic",
     "odata",
     "odata-export",
     "odata-yaml-store",

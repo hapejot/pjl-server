@@ -178,7 +178,7 @@ pub(crate) async fn metadata(State(state): State<AppState>) -> Response {
             };
             header_actions.entry(entity_name).or_default().push(format!(
                 r##"<Record Type="UI.DataFieldForAction"><PropertyValue Property="Action" String="Service.{}"/><PropertyValue Property="Label" String="{}"/>{hidden}</Record>"##,
-                a.name, header.text
+                a.name, quick_xml::escape::escape(&header.text)
             ));
         }
     }

@@ -9,7 +9,7 @@ use odata::query::ODataQuery;
 use script_hooks::ScriptHooks;
 use serde_json::{Value, json};
 
-use crate::extension::Extension;
+use crate::extension::{ActionError, ActionHandler, BoundAction, Extension, HeaderButton};
 use crate::hook::{CurrentRecords, Extender, Hook, HookError, Operation};
 use crate::term3270::section_view;
 
@@ -226,17 +226,155 @@ impl Hook for ScriptHook {
 /// `scripts` (Status) und `reload` (Neuladen, danach Status).
 pub struct ScriptExtension {
     hooks: Arc<ScriptHooks>,
+    actions: Vec<BoundAction>,
 }
 
 impl ScriptExtension {
     pub fn new(hooks: ScriptHooks) -> Self {
         Self {
             hooks: Arc::new(hooks),
+            actions: Vec::new(),
         }
+    }
+
+    pub fn with_actions(
+        mut self,
+        ddic: &spec::data_dictionary::DataDictionary,
+    ) -> anyhow::Result<Self> {
+        for entity in ddic.entities() {
+            let mut names = std::collections::HashSet::new();
+            for action in entity.actions() {
+                let mut chars = action.name.chars();
+                anyhow::ensure!(
+                    chars
+                        .next()
+                        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+                        && !matches!(
+                            action.name.as_str(),
+                            "draftEdit"
+                                | "draftActivate"
+                                | "draftPrepare"
+                                | "publishConfig"
+                                | "stickyEdit"
+                                | "stickySave"
+                                | "stickyNew"
+                                | "stickyDiscard"
+                        ),
+                    "{}: ungueltiger Aktionsname '{}'",
+                    entity.name(),
+                    action.name
+                );
+                anyhow::ensure!(
+                    names.insert(&action.name),
+                    "{}: doppelte Aktion '{}'",
+                    entity.name(),
+                    action.name
+                );
+                anyhow::ensure!(
+                    !action.label.trim().is_empty(),
+                    "{}.{}: Beschriftung fehlt",
+                    entity.name(),
+                    action.name
+                );
+                let set = entity.setname();
+                anyhow::ensure!(
+                    self.hooks.has_action(&set, &action.name),
+                    "{set}: Funktion action_{} fehlt",
+                    action.name
+                );
+                self.actions.push(BoundAction {
+                    set: set.clone(),
+                    name: action.name.clone(),
+                    returns: Some(entity.name().to_string()),
+                    handler: Arc::new(ScriptAction {
+                        hooks: self.hooks.clone(),
+                        set,
+                        name: action.name.clone(),
+                    }),
+                    header: action.header.then(|| HeaderButton {
+                        text: action.label.clone(),
+                    }),
+                    available_if: None,
+                });
+            }
+        }
+        Ok(self)
+    }
+}
+
+struct ScriptAction {
+    hooks: Arc<ScriptHooks>,
+    set: String,
+    name: String,
+}
+
+#[async_trait::async_trait]
+impl ActionHandler for ScriptAction {
+    async fn invoke(&self, state: &crate::AppState, key: &EntityKey) -> Result<Value, ActionError> {
+        if !key.is_active_entity {
+            return Err(ActionError::Failed(
+                "Aktionen sind nur fuer aktive Datensaetze erlaubt".into(),
+            ));
+        }
+        let ddic = state.ddic();
+        let entity = ddic
+            .active_entity_by_setname(&self.set)
+            .ok_or_else(|| ActionError::Failed(format!("Unbekanntes Set '{}'", self.set)))?;
+        if entity.draft_enabled() {
+            match state.store.read_sibling_entity(&self.set, key).await {
+                Ok(_) => {
+                    return Err(ActionError::Failed(
+                        "Der Datensatz hat einen offenen Entwurf".into(),
+                    ));
+                }
+                Err(StoreError::NotFound { .. }) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        let record = state
+            .store
+            .read_entity(&self.set, key, &ODataQuery::new())
+            .await?;
+        let record =
+            serde_json::to_value(record).map_err(|e| ActionError::Failed(e.to_string()))?;
+        let patch = self
+            .hooks
+            .action(&self.set, &self.name, record)
+            .map_err(|e| ActionError::Failed(e.to_string()))?;
+        let fields = patch
+            .as_object()
+            .ok_or_else(|| ActionError::Failed("Patch muss ein Objekt sein".into()))?;
+        for field in fields.keys() {
+            let writable = match entity.field_by_name(field) {
+                Some(spec::FieldSpec::Atom {
+                    computed,
+                    immutable,
+                    ..
+                }) => !computed && !immutable,
+                Some(spec::FieldSpec::Measure { .. }) => true,
+                _ => false,
+            };
+            if !writable || entity.primary_key_name() == field {
+                return Err(ActionError::Failed(format!(
+                    "Feld '{field}' kann durch eine Aktion nicht geaendert werden"
+                )));
+            }
+        }
+        state.store.patch_entity(&self.set, key, &patch).await?;
+        let updated = state
+            .store
+            .read_entity(&self.set, key, &ODataQuery::new())
+            .await?;
+        serde_json::to_value(updated).map_err(|e| ActionError::Failed(e.to_string()))
     }
 }
 
 impl Extension for ScriptExtension {
+    fn actions(&self) -> Vec<BoundAction> {
+        self.actions.clone()
+    }
+
     fn hooks(&self) -> Vec<Arc<dyn Hook>> {
         vec![Arc::new(ScriptHook(self.hooks.clone()))]
     }

@@ -349,6 +349,48 @@ Zeitpunkte sind ISO-8601-Texte mit Offset.
 Rhai-Hinweis: Eine verschachtelte `if`-Kette in einer Funktion führt zu "Expression exceeds maximum
 complexity". Regeln in kleine Funktionen aufteilen.
 
+### Skriptgesteuerte Aktionen
+
+Eine Entität kann parameterlose Aktionen auf einzelnen aktiven Datensätzen definieren:
+
+```json
+"actions": [
+  { "name": "starten", "label": "Vorgang starten", "list": true, "header": true }
+]
+```
+
+In `<SCRIPTS_DIR>/<Entity>Set.rhai` implementiert `action_starten(ctx)` die Aktion:
+
+```rhai
+fn action_starten(ctx) {
+    if ctx.record.status != "Geplant" { throw "Vorgang ist nicht geplant"; }
+    ctx.patch.status = "In Bearbeitung";
+    ctx
+}
+```
+
+`list` zeigt den Button in der Listentabelle, `header` auf der Object Page.
+Der OData-Aufruf ist `POST /Service/<Entity>Set(<Schlüssel>)/Service.starten`
+mit leerem JSON-Objekt. `ctx.record` enthält den gelesenen Satz, `ctx.patch` die
+zu ändernden Felder. Die Funktion muss `ctx` mit einem nichtleeren Patch
+zurückgeben. Ein `throw` meldet einen Fehler; es wird nichts geschrieben.
+Nur eigene, nicht berechnete und nicht unveränderliche Felder dürfen geändert
+werden. Der normale Patch einschließlich der Store-Hooks wird verwendet.
+Ein vorhandener Entwurf verhindert die Aktion, damit er die Änderung nicht
+bei seiner Aktivierung überschreibt.
+
+Der Server prüft beim Start Aktionsnamen und Skriptfunktionen. Änderungen an der
+DDIC erfordern einen Neustart, Änderungen an Skripten werden wie bei Hooks
+nachgeladen. Fehlt eine Funktion nach dem Nachladen, schlägt ihr Aufruf fehl.
+Im Designer bleiben die Definitionen erhalten, werden aber noch nicht über
+eigene Designer-Felder gepflegt.
+
+Diese erste Stufe unterstützt weder Parameter noch Änderungen an anderen Sätzen
+oder Transaktionen über mehrere Sätze. Lesen, Skriptausführung und Patch sind
+kein atomarer Read-Modify-Write: parallele Änderungen können dazwischenliegen.
+Bei Mehrfachauswahl wird jeder Satz separat behandelt, nicht gemeinsam gebucht.
+Für produktive Buchungen mit Konsistenzanforderungen ist dies nicht geeignet.
+
 ## 12. Rust-Extensions
 
 Für Routen, Actions und Logik, die nicht in Rhai passt, implementiert man den Trait

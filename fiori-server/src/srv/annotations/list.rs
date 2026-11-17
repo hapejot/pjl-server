@@ -137,6 +137,13 @@ fn line_item(
         };
         coll = coll.add_record(record);
     }
+    for action in x.actions().iter().filter(|action| action.list) {
+        coll = coll.add_record(
+            Record::new("UI.DataFieldForAction")
+                .add(PropertyValue::new("Action").string(format!("Service.{}", action.name)))
+                .add(PropertyValue::new("Label").string(&action.label)),
+        );
+    }
     let mut ann = Annotation::new("UI.LineItem").collection(coll);
     ann.qualifier = qualifier.map(str::to_string);
     ann

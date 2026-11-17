@@ -1641,6 +1641,12 @@ async fn post_handler(
             if let Some(a) =
                 crate::extension::find_action(&state.extensions, &entity.name, action_name)
             {
+                if spec.actions().iter().any(|a| a.name == action_name)
+                    && body.as_object().is_none_or(|object| !object.is_empty())
+                {
+                    return ODataError::bad_request("Diese Aktion erwartet keine Parameter")
+                        .into_response();
+                }
                 return match a.handler.invoke(&state, &key).await {
                     Ok(Value::Null) => StatusCode::NO_CONTENT.into_response(),
                     Ok(r) => to_json_response(entity_json(&state, &spec, r)).into_response(),
@@ -1650,6 +1656,44 @@ async fn post_handler(
             match draft_action(&state, &entity.name, &key, action_name).await {
                 Ok(r) => to_json_response(entity_json(&state, &spec, r)).into_response(),
                 Err(e) => e.into_response(),
+            }
+        }
+        segments
+            if segments.len() > 2
+                && segments.last().is_some_and(|action| {
+                    action.keys.is_empty() && action.name.starts_with("Service.")
+                }) =>
+        {
+            let action_name = segments.last().unwrap().name.trim_start_matches("Service.");
+            let resolved = match resolve_path(
+                &state,
+                &ODataQuery::default(),
+                &segments[..segments.len() - 1],
+            )
+            .await
+            {
+                Ok(resolved) => resolved,
+                Err(error) => return error.into_response(),
+            };
+            let Cursor::Entity { spec, set, record } = resolved.cursor else {
+                return ODataError::bad_request("Eine Aktion erwartet einen einzelnen Datensatz")
+                    .into_response();
+            };
+            let Some(action) = crate::extension::find_action(&state.extensions, &set, action_name)
+            else {
+                return ODataError::not_found(format!("Unknown action '{action_name}'"))
+                    .into_response();
+            };
+            if spec.actions().iter().any(|a| a.name == action_name)
+                && body.as_object().is_none_or(|object| !object.is_empty())
+            {
+                return ODataError::bad_request("Diese Aktion erwartet keine Parameter")
+                    .into_response();
+            }
+            match action.handler.invoke(&state, &record.key()).await {
+                Ok(Value::Null) => StatusCode::NO_CONTENT.into_response(),
+                Ok(value) => to_json_response(entity_json(&state, &spec, value)).into_response(),
+                Err(error) => ODataError::from(error).into_response(),
             }
         }
         segments if segments.len() > 1 => {

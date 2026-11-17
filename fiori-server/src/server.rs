@@ -23,6 +23,7 @@ use tracing::info;
 
 use crate::config::ServerConfig;
 use crate::ddic_store::DdicStore;
+use crate::extension::Extension;
 use crate::hook::Extender;
 use crate::{AppState, batch, flp, srv};
 
@@ -66,7 +67,22 @@ pub async fn run_with(
         .with_context(|| format!("cannot load scripts '{}'", dir.label))?;
         crate::script::bind_components(&hooks, &base)
             .with_context(|| format!("components in '{}'", dir.label))?;
-        extensions.push(Arc::new(crate::script::ScriptExtension::new(hooks)));
+        let script_extension = crate::script::ScriptExtension::new(hooks).with_actions(&base)?;
+        for action in script_extension.actions() {
+            anyhow::ensure!(
+                crate::extension::find_action(&extensions, &action.set, &action.name).is_none(),
+                "{}: Aktion '{}' ist bereits registriert",
+                action.set,
+                action.name
+            );
+        }
+        extensions.push(Arc::new(script_extension));
+    } else if base
+        .entities()
+        .iter()
+        .any(|entity| !entity.actions().is_empty())
+    {
+        anyhow::bail!("DDIC-Aktionen erfordern ein Skriptverzeichnis");
     }
 
     // Generische UI-Erweiterung aus den `ui`-Bloecken der ddic.json (Formate, ausgeblendete

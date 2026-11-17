@@ -34,8 +34,8 @@ use std::time::{Duration, Instant};
 use file_repo::{DirRepository, FileRepository};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use odata::query::ODataQuery;
-use rhai::{Dynamic, Engine, EvalAltResult, Scope, AST};
-use serde_json::{json, Value};
+use rhai::{AST, Dynamic, Engine, EvalAltResult, Scope};
+use serde_json::{Value, json};
 use tracing::{info, trace};
 
 /// Wartezeit nach dem letzten Dateiereignis, bevor neu geladen wird.
@@ -179,6 +179,31 @@ impl ScriptHooks {
     pub fn reload(&self) -> usize {
         self.inner.reload();
         self.inner.errors.read().unwrap().len()
+    }
+
+    /// Prueft, ob eine Aktion im Set-Skript vorhanden ist.
+    pub fn has_action(&self, set: &str, name: &str) -> bool {
+        self.inner
+            .scripts
+            .read()
+            .unwrap()
+            .get(set)
+            .is_some_and(|script| script.functions.contains(&format!("action_{name}")))
+    }
+
+    /// Fuehrt eine Aktion aus und liefert deren Patch fuer den gebundenen Satz.
+    pub fn action(&self, set: &str, name: &str, record: Value) -> Result<Value, ScriptError> {
+        let function = format!("action_{name}");
+        let ctx = json!({"set": set, "record": record, "patch": {}});
+        let result = self
+            .call(set, &function, ctx)?
+            .ok_or_else(|| ScriptError::Script(format!("{set}.{function}: Aktion fehlt")))?;
+        match result.get("patch") {
+            Some(Value::Object(patch)) if !patch.is_empty() => Ok(Value::Object(patch.clone())),
+            _ => Err(ScriptError::Script(format!(
+                "{set}.{function}: ctx.patch muss ein nichtleeres Objekt sein"
+            ))),
+        }
     }
 
     /// Stand fuer den Status (Sets, Funktionen, Fehler).

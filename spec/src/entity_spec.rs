@@ -538,6 +538,10 @@ pub struct EntitySpec {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) list_views: Vec<ListView>,
 
+    /// Parameterlose, skriptgesteuerte Aktionen auf einzelnen Datensaetzen.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) actions: Vec<EntityAction>,
+
     /// Vorbelegte Filterwerte je Atom-Feld (`Common.FilterDefaultValue`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) filter_defaults: BTreeMap<String, FilterDefault>,
@@ -577,6 +581,22 @@ fn default_true() -> bool {
 
 fn is_true(v: &bool) -> bool {
     *v
+}
+
+/// Eine gebundene Aktion, implementiert als `action_<name>` im Set-Skript.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EntityAction {
+    /// OData-Name und Suffix der Rhai-Funktion.
+    pub name: String,
+    /// Beschriftung der Aktion.
+    pub label: String,
+    /// Aktion in Listen anzeigen.
+    #[serde(default)]
+    pub list: bool,
+    /// Aktion im Kopf der Object Page anzeigen.
+    #[serde(default)]
+    pub header: bool,
 }
 
 /// Einstellungen fuer eine Object-Page-Facette, identifiziert ueber `facet`.
@@ -1035,6 +1055,11 @@ impl EntitySpec {
         &self.seed
     }
 
+    /// Deklarierte Aktionen dieser Entitaet.
+    pub fn actions(&self) -> &[EntityAction] {
+        &self.actions
+    }
+
     /// Plural-Anzeigename.
     pub fn type_name_plural(&self) -> &str {
         &self.type_name_plural
@@ -1136,6 +1161,7 @@ impl EntitySpec {
             type_name_plural: type_name_plural.into(),
             fields: vec![],
             list_views: vec![],
+            actions: vec![],
             filter_defaults: BTreeMap::new(),
             selection_fields: vec![],
             data_points: vec![],

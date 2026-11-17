@@ -40,6 +40,8 @@ pub(crate) fn facet_title(x: &EntitySpec, key: &str) -> String {
 /// * `General` ist immer vorhanden. Steht es nicht in `facets`, wird es vorangestellt.
 /// * Navigationen, die nicht konfiguriert sind, folgen am Ende.
 /// * Eigene Schluessel mit `fields` erzeugen eine eigene `UI.FieldGroup#<schluessel>`.
+/// * Ein Multiline-Feld kann per Facettenschluessel konfiguriert werden und behaelt dabei
+///   seinen eigenen Langtext-Abschnitt.
 /// * `Default` sammelt alle Felder, die in keiner Facette genannt sind.
 ///
 /// Liefert die Facetten-Records und die zugehoerigen FieldGroups.
@@ -120,7 +122,9 @@ pub(crate) fn object_page_sections(
         }
     }
     for long in &long_texts {
-        keys.push(format!("{long}{LONG_TEXT_SUFFIX}"));
+        if !has_configured_long_text_facet(x, long) {
+            keys.push(format!("{long}{LONG_TEXT_SUFFIX}"));
+        }
     }
 
     let mut records = Vec::new();
@@ -130,10 +134,17 @@ pub(crate) fn object_page_sections(
             records.push(list_facet_record(x, key));
             continue;
         }
-        if let Some(long) = key.strip_suffix(LONG_TEXT_SUFFIX) {
+        let configured_long_text = long_texts
+            .iter()
+            .any(|long| long == key && has_configured_long_text_facet(x, long));
+        if let Some(long) = configured_long_text
+            .then_some(key.as_str())
+            .or_else(|| key.strip_suffix(LONG_TEXT_SUFFIX))
+        {
+            let qualifier = format!("{long}{LONG_TEXT_SUFFIX}");
             groups.push(field_group(
                 ddic,
-                key,
+                &qualifier,
                 x,
                 Some(&[long.to_string()]),
                 hidden,
@@ -145,7 +156,7 @@ pub(crate) fn object_page_sections(
                     .add(PropertyValue::new("ID").string(format!("{long}Section")))
                     .add(
                         PropertyValue::new("Target")
-                            .annotation_path(format!("@UI.FieldGroup#{key}")),
+                            .annotation_path(format!("@UI.FieldGroup#{qualifier}")),
                     ),
             );
             continue;
@@ -205,6 +216,11 @@ pub(crate) fn object_page_sections(
         }
     }
     (records, groups)
+}
+
+fn has_configured_long_text_facet(x: &EntitySpec, field: &str) -> bool {
+    x.facet(field)
+        .is_some_and(|facet| facet.view().is_none() && facet.fields().is_empty())
 }
 
 /// Qualifier-Suffix fuer den eigenen Abschnitt eines Langtextfelds.

@@ -231,6 +231,7 @@ fn validate(base: &DataDictionary, overlay: &Overlay) -> anyhow::Result<()> {
 /// * `Default`: ohne `fields` und ohne `view`.
 /// * `General`: nur `title` und `fields`.
 /// * To-many Navigation: `view` und `title`, keine `fields`.
+/// * Multiline-Feld: `title`, keine `fields` oder `view`; behält den eigenen Langtext-Abschnitt.
 /// * Eigener Schluessel: braucht `fields`, keine `view`.
 fn validate_facets(merged: &DataDictionary, overlay: &Overlay) -> anyhow::Result<()> {
     let mut active = merged.clone();
@@ -271,6 +272,16 @@ fn validate_facets(merged: &DataDictionary, overlay: &Overlay) -> anyhow::Result
                 } if name == key => Some(target.clone()),
                 _ => None,
             });
+            let is_multiline_field = entity.fields().any(|f| {
+                matches!(
+                    f,
+                    spec::FieldSpec::Atom {
+                        name,
+                        multiline: true,
+                        ..
+                    } if name == key
+                )
+            });
 
             if key == DEFAULT_FACET {
                 if facet.view().is_some() || !facet.fields().is_empty() {
@@ -294,6 +305,10 @@ fn validate_facets(merged: &DataDictionary, overlay: &Overlay) -> anyhow::Result
                     if !target_entity.list_views().iter().any(|v| v.name() == view) {
                         bail!("{ctx} nennt Ansicht '{view}', die es auf '{target}' nicht gibt");
                     }
+                }
+            } else if is_multiline_field && facet.fields().is_empty() {
+                if facet.view().is_some() {
+                    bail!("{ctx}: hat keine Listenansicht");
                 }
             } else {
                 if facet.view().is_some() {

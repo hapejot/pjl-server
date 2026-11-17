@@ -250,6 +250,76 @@ fn facet_title_defaults_to_the_navigation_name() {
 }
 
 #[test]
+fn multiline_facet_keeps_its_special_section_and_can_be_ordered() {
+    let long_text: FieldSpec = serde_json::from_value(json!({
+        "Atom": {
+            "name": "notes",
+            "label": "Notes",
+            "edm_type": "Edm.String",
+            "multiline": true
+        }
+    }))
+    .unwrap();
+    let mut entity = EntitySpec::new("Memo", "core", "Memos")
+        .field(FieldSpec::atom("name", "Name", "Edm.String"))
+        .field(long_text)
+        .field(FieldSpec::atom("status", "Status", "Edm.String"));
+    entity.set_facets(vec![
+        spec::FacetSpec::new(
+            "General",
+            None,
+            Some("Allgemein".into()),
+            vec!["name".into()],
+        ),
+        spec::FacetSpec::new("notes", None, Some("Notizen".into()), vec![]),
+        spec::FacetSpec::new("Status", None, Some("Status".into()), vec!["status".into()]),
+    ]);
+
+    let (sections, groups) = object_page_sections(&DataDictionary::new(), &entity, &[], &[]);
+    let labels: Vec<_> = sections
+        .iter()
+        .map(|section| {
+            section
+                .property_values
+                .iter()
+                .find(|property| property.property == "Label")
+                .and_then(|property| property.string.as_deref())
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(labels, ["Allgemein", "Notizen", "Status"]);
+
+    let notes_section = sections
+        .iter()
+        .find(|section| {
+            section.property_values.iter().any(|property| {
+                property.property == "ID" && property.string.as_deref() == Some("notesSection")
+            })
+        })
+        .unwrap();
+    assert!(notes_section.property_values.iter().any(|property| {
+        property.property == "Target"
+            && property.annotation_path.as_deref() == Some("@UI.FieldGroup#notes_LongText")
+    }));
+    assert!(
+        groups
+            .iter()
+            .any(|group| group.qualifier.as_deref() == Some("notes_LongText"))
+    );
+    let field_annotations = Annotations::from_entity(&DataDictionary::new(), &entity, &[], &[]);
+    let notes_annotations = field_annotations
+        .iter()
+        .find(|annotations| annotations.target == "Service.Memo/notes")
+        .unwrap();
+    assert!(
+        notes_annotations
+            .annotations
+            .iter()
+            .any(|annotation| annotation.term == "UI.MultiLineText")
+    );
+}
+
+#[test]
 fn facets_include_a_list_section_per_to_many_navigation() {
     let mut ddic = DataDictionary::new();
     ddic.activate();

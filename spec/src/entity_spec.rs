@@ -577,6 +577,8 @@ fn is_true(v: &bool) -> bool {
 
 /// Einstellungen fuer eine Object-Page-Facette, identifiziert ueber `facet`.
 /// Weitere Einstellungen kommen als zusaetzliche Felder hinzu.
+/// Ein Multiline-Feld kann durch eine Facette mit seinem Feldnamen, `title` und
+/// ohne `fields`/`view` benannt und einsortiert werden, ohne seinen Langtext-Abschnitt zu verlieren.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FacetSpec {

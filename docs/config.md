@@ -63,6 +63,8 @@ Der `DdicStore` persistiert die folgenden 27 Sets. Die Pfade bezeichnen die jewe
 
 Die festen Katalog-Sets (z. B. EDM-Typen, Prioritäten und Platzierungen) werden für die Designer-Oberfläche erzeugt und nicht in `ddic.json` gespeichert.
 
+Für einen Multiline-Abschnitt, dessen besondere Darstellung erhalten bleiben soll, wird in `EntityFacetSet` eine Facette mit `facet` gleich dem Feldnamen, optionalem `title` und gewünschtem `order` angelegt. In `EntityFacetFieldSet` wird dafür kein Kinddatensatz angelegt; so bleibt es ein eigener Langtext-Abschnitt statt einer normalen Feldgruppe.
+
 `ValueHelpFilterSet` bezieht sich auf Filter in `AtomValueList::EntityRef`. Die ebenfalls unterstützte Eigenschaft `Relationship.value_list_filters` wird am Relationship im Dictionary konfiguriert; dafür gibt es kein eigenes Designer-Set.
 
 **Regeln**

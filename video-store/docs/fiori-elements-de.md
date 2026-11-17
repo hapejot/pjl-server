@@ -258,8 +258,10 @@ separaten Datei, die die Runtime optional einliest:
     * `Default`: sammelt alle Felder, die in keiner Facette genannt sind. Erlaubt nur `title`.
     * Navigation (to-many, z. B. `_ActorSceneMap`): Listenabschnitt. Erlaubt: `view` (Listenansicht der Zielentität), `title`.
     * Eigener Schlüssel: eigener Feldabschnitt mit `fields` in der angegebenen Reihenfolge. Erlaubt: `title`, `fields`.
+    * Multiline-Feld (`multiline: true`): `{ "facet": "<Feldname>", "title": "..." }` ohne `fields` und `view`. Damit werden Titel und Position konfiguriert, der eigene Langtext-Abschnitt mit seiner besonderen Darstellung bleibt erhalten. Das Feld nicht zusätzlich in `fields` einer anderen Facette aufführen.
     * Titel ohne Angabe ist der Schlüssel. Feldtitel kommen aus dem Modell (`Common.Label`).
-    * Ein Feld darf in mehreren Facetten stehen. Die Reihenfolge der Liste bestimmt die Reihenfolge der Abschnitte.
+    * Die Reihenfolge der Liste bestimmt die Reihenfolge der konfigurierten Abschnitte. `General` wird vorangestellt, falls es nicht explizit aufgeführt ist; nicht konfigurierte Navigationsfacetten und danach nicht konfigurierte Multiline-Facetten folgen am Ende.
+    * Im Overlay ersetzen gleichnamige Facetten ihre Basis-Einträge an deren bestehender Position. Neue Facetten werden in Overlay-Reihenfolge angehängt.
   * Unbekannte Entitäten, Pakete, Felder in `facets` sowie unbekannte Schlüssel
     (z. B. Tippfehler) führen zum Startfehler.
   * `filter_defaults`: Feldname -> Standardwert für die Filterleiste (`Common.FilterDefaultValue`).
@@ -279,12 +281,15 @@ separaten Datei, die die Runtime optional einliest:
       ],
       "facets": [
         { "facet": "General", "fields": ["name", "scene", "agent"] },
+        { "facet": "description", "title": "Beschreibung" },
         { "facet": "Default", "title": "Weitere Angaben" }
       ]
     }
   ]
 }
 ```
+
+Im Beispiel muss `description` ein Feld der Entität mit `multiline: true` sein. Ohne `fields` bleibt es ein eigener Langtext-Abschnitt; die Position in der Liste und `title` steuern seine Reihenfolge und Überschrift.
 
 Die Konstante `LIST_VIEWS` in `map.rs` existiert nicht mehr.
 

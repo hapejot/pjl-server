@@ -14,6 +14,26 @@ fn base() -> DataDictionary {
     d
 }
 
+fn base_with_multiline_field() -> DataDictionary {
+    let mut d = DataDictionary::empty();
+    d.add_package(spec::package::Package::new("core"));
+    let notes: spec::FieldSpec = serde_json::from_value(serde_json::json!({
+        "Atom": {
+            "name": "notes",
+            "label": "Notes",
+            "edm_type": "Edm.String",
+            "multiline": true
+        }
+    }))
+    .unwrap();
+    d.add_entity(
+        spec::EntitySpec::new("Memo", "core", "Memos")
+            .field(spec::FieldSpec::atom("name", "Name", "Edm.String"))
+            .field(notes),
+    );
+    d
+}
+
 fn video(d: &DataDictionary) -> EntitySpec {
     d.entities()
         .into_iter()
@@ -278,6 +298,27 @@ fn facet_title_is_merged_and_blank_is_rejected() {
         parse(r#"{"entities":[{"name":"Agent","facets":[{"facet":"_Videos","title":"  "}]}]}"#)
             .unwrap();
     assert!(apply(base_with_agent(), &blank).is_err());
+}
+
+#[test]
+fn multiline_facet_can_set_title_without_replacing_its_field_group() {
+    let overlay =
+        parse(r#"{"entities":[{"name":"Memo","facets":[{"facet":"notes","title":"Notizen"}]}]}"#)
+            .unwrap();
+    let d = apply(base_with_multiline_field(), &overlay).unwrap();
+    let memo = d
+        .entities()
+        .into_iter()
+        .find(|entity| entity.name() == "Memo")
+        .unwrap();
+    let facet = memo.facet("notes").unwrap();
+    assert_eq!(facet.title(), Some("Notizen"));
+    assert!(facet.fields().is_empty());
+
+    let invalid =
+        parse(r#"{"entities":[{"name":"Memo","facets":[{"facet":"notes","view":"default"}]}]}"#)
+            .unwrap();
+    assert!(apply(base_with_multiline_field(), &invalid).is_err());
 }
 
 #[test]

@@ -1,7 +1,7 @@
 //! Auslieferung statischer Dateien aus einem [`FileRepository`].
 //!
 //! Ersetzt `tower_http::ServeDir`, das nur das Dateisystem kennt. Die Inhalte
-//! stammen aus dem Repository (Verzeichnis oder ZIP im Speicher).
+//! stammen aus einem eingebetteten, Verzeichnis- oder ZIP-Repository.
 
 use std::sync::Arc;
 
@@ -34,7 +34,7 @@ pub fn serve(repo: &dyn FileRepository, raw: &str) -> Response {
     }
 }
 
-/// Fallback-Handler fuer die Web-Wurzel (`FIORI_ROOT`).
+/// Fallback-Handler fuer eingebettete Standard- und optionale benutzerdefinierte Assets.
 pub fn fallback(
     repo: Arc<dyn FileRepository>,
 ) -> impl Fn(Uri) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>> + Clone {

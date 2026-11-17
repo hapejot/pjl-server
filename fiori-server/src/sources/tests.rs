@@ -95,3 +95,65 @@ fn fiori_root_zip_is_served_with_content_type() {
         StatusCode::NOT_FOUND
     );
 }
+
+#[test]
+fn embedded_web_assets_are_served_without_a_web_directory() {
+    let mut config = ServerConfig::defaults(crate::config::ServerMode::Runtime);
+    config.ddic = Some(PathBuf::from("ddic.json"));
+
+    let sources = resolve(&config).unwrap();
+    assert!(sources.fiori.exists("favicon.svg"));
+    assert!(sources.fiori.exists("apps/EntityConfigs/manifest.json"));
+    let response = crate::repo_serve::serve(sources.fiori.as_ref(), "favicon.svg");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "image/svg+xml");
+}
+
+#[test]
+fn web_root_assets_override_and_extend_embedded_assets() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("favicon.svg"), b"custom").unwrap();
+    std::fs::write(dir.path().join("custom.js"), b"custom asset").unwrap();
+
+    let mut config = ServerConfig::defaults(crate::config::ServerMode::Runtime);
+    config.ddic = Some(PathBuf::from("ddic.json"));
+    config.web_root = Some(dir.path().to_path_buf());
+
+    let sources = resolve(&config).unwrap();
+    assert_eq!(sources.fiori.read("favicon.svg").unwrap(), b"custom"[..]);
+    assert!(sources.fiori.exists("custom.js"));
+    assert!(sources.fiori.exists("logo.svg"));
+    assert_eq!(
+        sources.fiori.list("").unwrap(),
+        vec![
+            "apps".to_string(),
+            "custom.js".to_string(),
+            "favicon.svg".to_string(),
+            "logo.svg".to_string()
+        ]
+    );
+}
+
+#[test]
+fn fiori_root_zip_overrides_embedded_assets() {
+    let dir = tempfile::tempdir().unwrap();
+    let zip_path = dir.path().join("fiori.zip");
+    let mut buf = Cursor::new(Vec::new());
+    {
+        let mut writer = zip::ZipWriter::new(&mut buf);
+        writer
+            .start_file("favicon.svg", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(b"custom").unwrap();
+        writer.finish().unwrap();
+    }
+    std::fs::write(&zip_path, buf.into_inner()).unwrap();
+
+    let mut config = ServerConfig::defaults(crate::config::ServerMode::Runtime);
+    config.ddic = Some(PathBuf::from("ddic.json"));
+    config.fiori_root = Some(format!("zip://{}", zip_path.display()));
+
+    let sources = resolve(&config).unwrap();
+    assert_eq!(sources.fiori.read("favicon.svg").unwrap(), b"custom"[..]);
+    assert!(sources.fiori.exists("logo.svg"));
+}

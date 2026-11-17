@@ -61,14 +61,12 @@ WORKDIR /app
 # Ziel-Dateiname bewusst fest auf "app", damit ENTRYPOINT unten unabhängig
 # von BIN_NAME immer passt.
 COPY --from=build /usr/src/app/${BIN_NAME} /app/app
-# Die statischen UI5-Assets gehören mit ins Image: ohne sie liefert der
-# ServeDir-Fallback nur 404, und das Launchpad bleibt leer.
-COPY web /app/web
-
 # Schreibbare Verzeichnisse für Datenbank und Export. Beide sind als Volume
 # gedacht - im Designer-Container liegt hier das Modell, im Laufzeit-Container
 # die Fachdaten.
-RUN mkdir -p /app/data /app/export && chown -R appuser /app/data /app/export
+# Standard-Webressourcen sind im Binary eingebettet; /app/web ist nur ein
+# optionales Verzeichnis für benutzerdefinierte Assets.
+RUN mkdir -p /app/data /app/export /app/web && chown -R appuser /app/data /app/export /app/web
 
 USER appuser
 # Der Server liest PORT/DATA_DIR/WEB_ROOT aus der Umgebung

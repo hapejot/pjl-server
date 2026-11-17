@@ -148,7 +148,7 @@ Der SQLite-Store läuft im Speicher und wird nur beim sauberen Beenden (SIGINT/S
 
 ## 4. Docker / Compose
 
-- `Dockerfile`: Setzt `PORT=8080`, `DATA_DIR=/app/data`, `WEB_ROOT=/app/web`. Läuft als Nutzer `appuser`.
+- `Dockerfile`: Setzt `PORT=8080`, `DATA_DIR=/app/data`, `WEB_ROOT=/app/web`. Standard-Webressourcen sind im Binary eingebettet; `/app/web` ist nur für zusätzliche oder überschreibende Assets vorgesehen. Läuft als Nutzer `appuser`.
 - `compose.yaml`:
   - Designer: derselbe Laufzeit-Code mit `DESIGNER=1`, Port `3033:8080`, Volume `export` (schreibbar).
   - Runtime: Port `3034:8080`, Env `DDIC=/app/export/ddic.json`, Volume `export` **read-only**.
@@ -182,7 +182,7 @@ Jede Option kann als CLI-Flag oder über die angegebene Umgebungsvariable gesetz
 | `--port` | `PORT` | `3034` | HTTP-Port |
 | `--bind` | `BIND` | `0.0.0.0` | Lauschadresse des HTTP-Servers |
 | `--data-dir` | `DATA_DIR` | `rel-data` | Verzeichnis des SQLite-Stores und der Laufzeitdateien |
-| `--web-root` | `WEB_ROOT` | `web` | Statische UI5-Assets, sofern kein `FIORI_ROOT` gesetzt ist |
+| `--web-root` | `WEB_ROOT` | – (eingebettete Standardressourcen) | Optionales Verzeichnis für zusätzliche oder überschreibende Web-Assets |
 | `--ddic` | `DDIC` | `ddic.json` | Dictionary-Datei |
 | `--ddic-overlay` | `DDIC_OVERLAY` | – | Optionales Overlay; nur im Laufzeitmodus |
 | `--schema` | `SCHEMA` | abgeleitet | Optionale feste Schemadatei (JSON) |
@@ -194,7 +194,7 @@ Jede Option kann als CLI-Flag oder über die angegebene Umgebungsvariable gesetz
 | `--term3270-bind` | `TERM3270_BIND` | `127.0.0.1` | Lauschadresse der 3270-Schnittstelle |
 | `--scripts-dir` | `SCRIPTS_DIR` | – | Rhai-Skripte pro Set (Hooks) |
 | `--ext-dir` | `EXT_DIR` | – | App-Assets, ausgeliefert unter `/ext/<app>/` |
-| `--fiori-root` | `FIORI_ROOT` | `WEB_ROOT` | Quelle der Web-Assets (`file://` oder `zip://`) |
+| `--fiori-root` | `FIORI_ROOT` | – | Optionale Quelle zusätzlicher oder überschreibender Web-Assets (`file://` oder `zip://`); hat Vorrang vor `WEB_ROOT` |
 | `--model-root` | `MODEL_ROOT` | – | Gemeinsame Quelle für Modell, Skripte und Extensions (`file://` oder `zip://`) |
 | `--designer-root` | `DESIGNER_ROOT` | – | Designer-Dateiquelle (`file://`) |
 
@@ -290,7 +290,7 @@ Voraussetzung ist, dass `Invoice` und `Contact` jeweils ein entsprechendes `comp
 |---|---|---|
 | `PORT` | Dockerfile | 8080 |
 | `DATA_DIR` | Dockerfile | `/app/data` |
-| `WEB_ROOT` | Dockerfile | `/app/web` |
+| `WEB_ROOT` | Dockerfile | `/app/web` (optionales Overlay-Verzeichnis; Standardressourcen im Binary) |
 | `DDIC` | compose (runtime, designer) | `/app/export/ddic.json` |
 | `DESIGNER` | compose (designer) | `1` |
 

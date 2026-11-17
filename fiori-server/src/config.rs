@@ -53,9 +53,9 @@ pub struct Cli {
     #[arg(long, env = "DATA_DIR")]
     pub data_dir: Option<PathBuf>,
 
-    /// Verzeichnis mit den statischen Web-Assets.
-    #[arg(long, env = "WEB_ROOT", default_value = "web")]
-    pub web_root: PathBuf,
+    /// Optionales Verzeichnis mit zusaetzlichen oder ueberschreibenden Web-Assets.
+    #[arg(long, env = "WEB_ROOT")]
+    pub web_root: Option<PathBuf>,
 
     /// Data Dictionary (JSON). Pflicht im Laufzeitmodus; im Designer die
     /// Datei, die gepflegt wird.
@@ -112,8 +112,8 @@ pub struct Cli {
     #[arg(long, env = "EXT_DIR")]
     pub ext_dir: Option<PathBuf>,
 
-    /// Quelle der statischen Web-Assets: `file://<pfad>` oder `zip://<pfad>`.
-    /// Ohne Angabe gilt `WEB_ROOT`.
+    /// Optionale Quelle zusaetzlicher oder ueberschreibender Web-Assets:
+    /// `file://<pfad>` oder `zip://<pfad>`. Die Standardressourcen sind eingebettet.
     #[arg(long, env = "FIORI_ROOT")]
     pub fiori_root: Option<String>,
 
@@ -171,7 +171,7 @@ pub struct ServerConfig {
     pub port: u16,
     pub bind: IpAddr,
     pub data_dir: PathBuf,
-    pub web_root: PathBuf,
+    pub web_root: Option<PathBuf>,
     pub ddic: Option<PathBuf>,
     /// Overlay zur `ddic.json`; nur im Laufzeitmodus wirksam.
     pub ddic_overlay: Option<PathBuf>,
@@ -189,7 +189,7 @@ pub struct ServerConfig {
     pub scripts_dir: Option<PathBuf>,
     /// Asset-Verzeichnis je App (`<ext_dir>/<app>/`); `None` schaltet sie aus.
     pub ext_dir: Option<PathBuf>,
-    /// Quelle der Web-Assets (`file://` oder `zip://`); `None`: `web_root`.
+    /// Optionale Quelle zusaetzlicher Web-Assets (`file://` oder `zip://`).
     pub fiori_root: Option<String>,
     /// Quelle fuer Modell, Skripte und Extensions; `None`: Einzelpfade.
     pub model_root: Option<String>,
@@ -214,7 +214,7 @@ impl ServerConfig {
             port,
             bind: IpAddr::from([0, 0, 0, 0]),
             data_dir: data_dir.into(),
-            web_root: "web".into(),
+            web_root: None,
             ddic: None,
             ddic_overlay: None,
             schema: None,

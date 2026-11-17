@@ -1,19 +1,97 @@
 //! Aufloesung der Quellen aus `FIORI_ROOT`, `MODEL_ROOT` und `DESIGNER_ROOT`.
 //!
-//! * `FIORI_ROOT`: statische Web-Assets (`file://` oder `zip://`). Ohne Angabe `WEB_ROOT`.
+//! * Web-Assets: Standardressourcen sind eingebettet. `FIORI_ROOT` oder `WEB_ROOT`
+//!   ergaenzen sie und ueberschreiben Dateien gleichen Namens.
 //! * `MODEL_ROOT`: `ddic.json`, Overlay, `scripts/` und `ext/` (`file://` oder `zip://`).
 //!   `DDIC`, `DDIC_OVERLAY` werden dann relativ zur Wurzel gelesen. Ohne Angabe gelten die
 //!   Einzelpfade `DDIC`, `DDIC_OVERLAY`, `SCRIPTS_DIR`, `EXT_DIR` wie bisher.
 //! * `DESIGNER_ROOT`: Verzeichnis fuer den Designer, nur `file://`. `DDIC` ist relativ dazu.
 //!   Der Designer schreibt ausschliesslich auf das Dateisystem.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, bail};
-use file_repo::{DirRepository, FileRepository, Limits};
+use bytes::Bytes;
+use file_repo::{DirRepository, FileRepository, Limits, RepoError};
 
 use crate::config::ServerConfig;
+
+mod embedded_web {
+    include!(concat!(env!("OUT_DIR"), "/embedded_web.rs"));
+}
+
+struct EmbeddedWebRepository;
+
+impl FileRepository for EmbeddedWebRepository {
+    fn read(&self, path: &str) -> Result<Bytes, RepoError> {
+        let name = file_repo::normalize(path)?;
+        embedded_web::FILES
+            .iter()
+            .find(|(file, _)| *file == name)
+            .map(|(_, contents)| Bytes::from_static(contents))
+            .ok_or(RepoError::NotFound(path.to_string()))
+    }
+
+    fn list(&self, dir: &str) -> Result<Vec<String>, RepoError> {
+        let prefix = file_repo::normalize(dir)?;
+        let prefix = if prefix.is_empty() {
+            String::new()
+        } else {
+            format!("{prefix}/")
+        };
+        let mut names = BTreeSet::new();
+        for (file, _) in embedded_web::FILES {
+            if let Some(rest) = file.strip_prefix(&prefix) {
+                if let Some(first) = rest.split('/').next() {
+                    if !first.is_empty() {
+                        names.insert(first.to_string());
+                    }
+                }
+            }
+        }
+        Ok(names.into_iter().collect())
+    }
+
+    fn exists(&self, path: &str) -> bool {
+        let Ok(name) = file_repo::normalize(path) else {
+            return false;
+        };
+        name.is_empty()
+            || embedded_web::FILES.iter().any(|(file, _)| {
+                *file == name
+                    || file
+                        .strip_prefix(&name)
+                        .is_some_and(|rest| rest.starts_with('/'))
+            })
+    }
+}
+
+struct OverlayRepository {
+    custom: Arc<dyn FileRepository>,
+    embedded: Arc<dyn FileRepository>,
+}
+
+impl FileRepository for OverlayRepository {
+    fn read(&self, path: &str) -> Result<Bytes, RepoError> {
+        match self.custom.read(path) {
+            Ok(contents) => Ok(contents),
+            Err(RepoError::NotFound(_)) => self.embedded.read(path),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn list(&self, dir: &str) -> Result<Vec<String>, RepoError> {
+        let mut names: BTreeSet<_> = self.custom.list(dir)?.into_iter().collect();
+        names.extend(self.embedded.list(dir)?);
+        Ok(names.into_iter().collect())
+    }
+
+    fn exists(&self, path: &str) -> bool {
+        self.custom.exists(path) || self.embedded.exists(path)
+    }
+}
 
 /// Datei innerhalb einer Quelle.
 #[derive(Clone)]
@@ -78,14 +156,23 @@ fn open(uri: &str) -> anyhow::Result<Arc<dyn FileRepository>> {
 
 /// Quellen aus der Konfiguration aufloesen. Fehler brechen den Start ab.
 pub fn resolve(config: &ServerConfig) -> anyhow::Result<Sources> {
-    let fiori: Arc<dyn FileRepository> = match &config.fiori_root {
-        Some(uri) => open(uri)?,
-        None => Arc::new(DirRepository::new(&config.web_root)),
+    let custom_fiori: Option<(Arc<dyn FileRepository>, String)> = match &config.fiori_root {
+        Some(uri) => Some((open(uri)?, uri.clone())),
+        None => config.web_root.as_ref().map(|root| {
+            (
+                Arc::new(DirRepository::new(root)) as Arc<dyn FileRepository>,
+                root.display().to_string(),
+            )
+        }),
     };
-    let fiori_label = config
-        .fiori_root
-        .clone()
-        .unwrap_or_else(|| config.web_root.display().to_string());
+    let embedded: Arc<dyn FileRepository> = Arc::new(EmbeddedWebRepository);
+    let (fiori, fiori_label): (Arc<dyn FileRepository>, String) = match custom_fiori {
+        Some((custom, label)) => (
+            Arc::new(OverlayRepository { custom, embedded }),
+            format!("{label} + embedded defaults"),
+        ),
+        None => (embedded, "embedded defaults".to_string()),
+    };
 
     let ddic_rel = config
         .ddic

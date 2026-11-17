@@ -214,7 +214,9 @@ Das Manifest ist eine Fiori-Elements-V4-App mit Flexible Column Layout:
 * `/` liefert die Startseite; `/flp/site.json` (`flp.rs:43`) beschreibt Kacheln und Inbounds.
 * Die Kachel für `videos` verweist auf den Intent `Video-List`.
 * `/apps/{app}/Component.js` liefert `sap.fe.core.AppComponent` mit `metadata.manifest: "json"`.
-* Statische Assets liegen unter `WEB_ROOT` (`web/`), Fallback über `ServeDir`.
+* Standard-Webressourcen sind im Server-Binary eingebettet. `WEB_ROOT` oder `FIORI_ROOT`
+  kann zusätzliche Dateien bereitstellen und eingebettete Dateien gleichen Pfads überschreiben.
+  `FIORI_ROOT` unterstützt Verzeichnisse und ZIP-Quellen.
 
 ---
 
@@ -398,7 +400,7 @@ Darstellungen für Actions. Einstiegspunkte sind die passenden Generatoren unter
 * Das Runtime-Image startet `/app/video-runtime` (nicht mehr `pjl-runtime`). `video-runtime`
   ist `pjl-runtime` plus die Video-Erweiterungen aus Abschnitt 10.
 * `WEB_ROOT` für eigene statische Assets. Liegt dort eine App-Datei, wird sie über den
-  Fallback-Dienst ausgeliefert.
+  Fallback-Dienst ausgeliefert; Standarddateien müssen nicht auf der Festplatte liegen.
 * Migration erneut auslösen: `docker compose ... run --rm migrate --force`.
 
 ### 8.7 Zusätzliche Apps und Einstiegspunkte

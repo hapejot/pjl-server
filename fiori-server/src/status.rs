@@ -153,7 +153,7 @@ pub fn config_json(config: &ServerConfig) -> Value {
         "port": config.port,
         "bind": config.bind.to_string(),
         "data_dir": config.data_dir.display().to_string(),
-        "web_root": config.web_root.display().to_string(),
+        "web_root": config.web_root.as_ref().map(|p| p.display().to_string()),
         "ddic": config.ddic.as_ref().map(|p| p.display().to_string()),
         "ddic_overlay": config.ddic_overlay.as_ref().map(|p| p.display().to_string()),
         "schema": config.schema.as_ref().map(|p| p.display().to_string()),

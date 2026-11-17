@@ -1,0 +1,339 @@
+{
+ "format": 1,
+ "source": "Seeds aus vorfertigung/ddic.json",
+ "exported_at": "2026-11-17T22:08:25+00:00",
+ "order": [
+  "FertigungsauftragSet",
+  "AuftragsdokumentSet",
+  "FertigungsvorgangSet",
+  "KomponenteSet",
+  "RueckmeldungSet"
+ ],
+ "sets": [
+  {
+   "set": "FertigungsauftragSet",
+   "type": "Fertigungsauftrag",
+   "keys": [
+    "ID",
+    "IsActiveEntity"
+   ],
+   "draft": true,
+   "count": 3,
+   "file": "FertigungsauftragSet.json",
+   "navigations": {
+    "Owner": {
+     "target_set": "SystemUserSet",
+     "to_one": true,
+     "refs": [
+      [
+       "Owner_ID",
+       "ID"
+      ]
+     ]
+    },
+    "CreatedBy": {
+     "target_set": "SystemUserSet",
+     "to_one": true,
+     "refs": [
+      [
+       "CreatedBy_ID",
+       "ID"
+      ]
+     ]
+    },
+    "ChangedBy": {
+     "target_set": "SystemUserSet",
+     "to_one": true,
+     "refs": [
+      [
+       "ChangedBy_ID",
+       "ID"
+      ]
+     ]
+    },
+    "_Komponenten": {
+     "target_set": "KomponenteSet",
+     "to_one": false,
+     "refs": []
+    },
+    "_Vorgaenge": {
+     "target_set": "FertigungsvorgangSet",
+     "to_one": false,
+     "refs": []
+    },
+    "_Dokumente": {
+     "target_set": "AuftragsdokumentSet",
+     "to_one": false,
+     "refs": []
+    },
+    "SiblingEntity": {
+     "target_set": "FertigungsauftragSet",
+     "to_one": true,
+     "refs": []
+    },
+    "DraftAdministrativeData": {
+     "target_set": null,
+     "to_one": true,
+     "refs": []
+    }
+   }
+  },
+  {
+   "set": "AuftragsdokumentSet",
+   "type": "Auftragsdokument",
+   "keys": [
+    "ID",
+    "IsActiveEntity"
+   ],
+   "draft": true,
+   "count": 1,
+   "file": "AuftragsdokumentSet.json",
+   "navigations": {
+    "Owner": {
+     "target_set": "SystemUserSet",
+     "to_one": true,
+     "refs": [
+      [
+       "Owner_ID",
+       "ID"
+      ]
+     ]
+    },
+    "CreatedBy": {
+     "target_set": "SystemUserSet",
+     "to_one": true,
+     "refs": [
+      [
+       "CreatedBy_ID",
+       "ID"
+      ]
+     ]
+    },
+    "ChangedBy": {
+     "target_set": "SystemUserSet",
+     "to_one": true,
+     "refs": [
+      [
+       "ChangedBy_ID",
+       "ID"
+      ]
+     ]
+    },
+    "auftrag": {
+     "target_set": "FertigungsauftragSet",
+     "to_one": true,
+     "refs": [
+      [
+       "auftrag_ID",
+       "ID"
+      ]
+     ]
+    },
+    "SiblingEntity": {
+     "target_set": "AuftragsdokumentSet",
+     "to_one": true,
+     "refs": []
+    },
+    "DraftAdministrativeData": {
+     "target_set": null,
+     "to_one": true,
+     "refs": []
+    }
+   }
+  },
+  {
+   "set": "FertigungsvorgangSet",
+   "type": "Fertigungsvorgang",
+   "keys": [
+    "ID",
+    "IsActiveEntity"
+   ],
+   "draft": true,
+   "count": 2,
+   "file": "FertigungsvorgangSet.json",
+   "navigations": {
+    "Owner": {
+     "target_set": "SystemUserSet",
+     "to_one": true,
+     "refs": [
+      [
+       "Owner_ID",
+       "ID"
+      ]
+     ]
+    },
+    "CreatedBy": {
+     "target_set": "SystemUserSet",
+     "to_one": true,
+     "refs": [
+      [
+       "CreatedBy_ID",
+       "ID"
+      ]
+     ]
+    },
+    "ChangedBy": {
+     "target_set": "SystemUserSet",
+     "to_one": true,
+     "refs": [
+      [
+       "ChangedBy_ID",
+       "ID"
+      ]
+     ]
+    },
+    "auftrag": {
+     "target_set": "FertigungsauftragSet",
+     "to_one": true,
+     "refs": [
+      [
+       "auftrag_ID",
+       "ID"
+      ]
+     ]
+    },
+    "_Confirmations": {
+     "target_set": "RueckmeldungSet",
+     "to_one": false,
+     "refs": []
+    },
+    "SiblingEntity": {
+     "target_set": "FertigungsvorgangSet",
+     "to_one": true,
+     "refs": []
+    },
+    "DraftAdministrativeData": {
+     "target_set": null,
+     "to_one": true,
+     "refs": []
+    }
+   }
+  },
+  {
+   "set": "KomponenteSet",
+   "type": "Komponente",
+   "keys": [
+    "ID",
+    "IsActiveEntity"
+   ],
+   "draft": true,
+   "count": 2,
+   "file": "KomponenteSet.json",
+   "navigations": {
+    "Owner": {
+     "target_set": "SystemUserSet",
+     "to_one": true,
+     "refs": [
+      [
+       "Owner_ID",
+       "ID"
+      ]
+     ]
+    },
+    "CreatedBy": {
+     "target_set": "SystemUserSet",
+     "to_one": true,
+     "refs": [
+      [
+       "CreatedBy_ID",
+       "ID"
+      ]
+     ]
+    },
+    "ChangedBy": {
+     "target_set": "SystemUserSet",
+     "to_one": true,
+     "refs": [
+      [
+       "ChangedBy_ID",
+       "ID"
+      ]
+     ]
+    },
+    "auftrag": {
+     "target_set": "FertigungsauftragSet",
+     "to_one": true,
+     "refs": [
+      [
+       "auftrag_ID",
+       "ID"
+      ]
+     ]
+    },
+    "SiblingEntity": {
+     "target_set": "KomponenteSet",
+     "to_one": true,
+     "refs": []
+    },
+    "DraftAdministrativeData": {
+     "target_set": null,
+     "to_one": true,
+     "refs": []
+    }
+   }
+  },
+  {
+   "set": "RueckmeldungSet",
+   "type": "Rueckmeldung",
+   "keys": [
+    "ID",
+    "IsActiveEntity"
+   ],
+   "draft": true,
+   "count": 1,
+   "file": "RueckmeldungSet.json",
+   "navigations": {
+    "Owner": {
+     "target_set": "SystemUserSet",
+     "to_one": true,
+     "refs": [
+      [
+       "Owner_ID",
+       "ID"
+      ]
+     ]
+    },
+    "CreatedBy": {
+     "target_set": "SystemUserSet",
+     "to_one": true,
+     "refs": [
+      [
+       "CreatedBy_ID",
+       "ID"
+      ]
+     ]
+    },
+    "ChangedBy": {
+     "target_set": "SystemUserSet",
+     "to_one": true,
+     "refs": [
+      [
+       "ChangedBy_ID",
+       "ID"
+      ]
+     ]
+    },
+    "operation": {
+     "target_set": "FertigungsvorgangSet",
+     "to_one": true,
+     "refs": [
+      [
+       "operation_ID",
+       "ID"
+      ]
+     ]
+    },
+    "SiblingEntity": {
+     "target_set": "RueckmeldungSet",
+     "to_one": true,
+     "refs": []
+    },
+    "DraftAdministrativeData": {
+     "target_set": null,
+     "to_one": true,
+     "refs": []
+    }
+   }
+  }
+ ]
+}

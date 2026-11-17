@@ -1,0 +1,14 @@
+[
+ {
+  "ID": "86113cc6-ff2f-4098-aabe-1617d61b1930",
+  "name": "DOC-1001",
+  "dokumentenart": "Zeichnung",
+  "version": "01",
+  "teildokument": "000",
+  "material": "MAT-1001",
+  "materialtext": "Kabelsatz Steuerung",
+  "dateiname": "ZS-1001.pdf",
+  "beschreibung": "Montagezeichnung",
+  "auftrag_ID": "10000000-0000-4000-8000-000000000001"
+ }
+]

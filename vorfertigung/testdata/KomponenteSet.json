@@ -1,0 +1,20 @@
+[
+ {
+  "ID": "12b6272f-44ec-4b99-9831-411df8ad8f6c",
+  "name": "K-100",
+  "materialtext": "Steckverbinder",
+  "einheit": "ST",
+  "bedarf": "16",
+  "entnommen": "4",
+  "auftrag_ID": "10000000-0000-4000-8000-000000000001"
+ },
+ {
+  "ID": "08182e8e-e47e-4224-9481-4cff6800adea",
+  "name": "K-200",
+  "materialtext": "Leitung",
+  "einheit": "M",
+  "bedarf": "24",
+  "entnommen": "6",
+  "auftrag_ID": "10000000-0000-4000-8000-000000000001"
+ }
+]

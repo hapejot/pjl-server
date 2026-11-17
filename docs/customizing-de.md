@@ -456,6 +456,13 @@ Die Runtime spielt Seeds beim Start nur ein, wenn das zugehörige EntitySet leer
 Änderungen oder Löschungen der Seed-Definition verändern keine bereits vorhandenen
 Laufzeitdatensätze.
 
+Seed-Zeilen werden direkt als aktive Datensätze angelegt, auch bei draftfähigen
+Entitäten. `IsActiveEntity` muss dafür nicht angegeben werden. Bei `owned`-Beziehungen
+werden die Eltern vor ihren Kindern geladen, unabhängig von der Reihenfolge der
+Entitäten im Dictionary. Referenzierte Eltern ohne eigene Seeds müssen bereits existieren.
+Für Verweise feste `ID`-Werte vergeben und im Kind den Fremdschlüssel passend zu
+`many_property` setzen: beispielsweise `operation_ID` bei `many_property: "operation"`.
+
 ## 15. Bekannte Einschränkungen
 
 * **Designer: `ui`-Blöcke sind nicht editierbar.** Beim Speichern im Designer werden die

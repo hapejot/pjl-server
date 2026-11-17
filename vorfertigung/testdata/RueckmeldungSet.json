@@ -1,0 +1,35 @@
+[
+ {
+  "name": "RM-001",
+  "ausweisnummer": "9001",
+  "mengeneinheit": "ST",
+  "gutmenge": "2",
+  "ausschuss": "0",
+  "zeiteinheit": "H",
+  "saldo": "4",
+  "rueckmeldezeit": "1.5",
+  "operation_ID": "1000123/0010"
+ },
+ {
+  "name": "RM-002",
+  "ausweisnummer": "9001",
+  "mengeneinheit": "ST",
+  "gutmenge": "2",
+  "ausschuss": "0",
+  "zeiteinheit": "H",
+  "saldo": "4",
+  "rueckmeldezeit": "1.5",
+  "operation_ID": "1000123/0020"
+ },
+ {
+  "name": "RM-003",
+  "ausweisnummer": "9001",
+  "mengeneinheit": "ST",
+  "gutmenge": "2",
+  "ausschuss": "0",
+  "zeiteinheit": "H",
+  "saldo": "4",
+  "rueckmeldezeit": "1.5",
+  "operation_ID": "1000123/0020"
+ }
+]

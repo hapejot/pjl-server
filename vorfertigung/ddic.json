@@ -1,154 +1,768 @@
 {
-  "packages": [
-    { "name": "vorfertigung" },
-    { "name": "units" }
+  "apps": [
+    {
+      "icon": "sap-icon://factory",
+      "main_entity": "Fertigungsauftrag",
+      "name": "vorfertigung",
+      "package": {
+        "name": "vorfertigung"
+      },
+      "subtitle": "Fertigungsaufträge",
+      "title": "Vorfertigung"
+    }
   ],
-  "package_files": ["units"],
+  "component_uses": [],
+  "components": [],
   "entities": [
     {
-      "name": "Fertigungsauftrag",
-      "package": "vorfertigung",
-      "type_name": "Auftrag",
-      "type_name_plural": "Aufträge",
-      "fields": [
-        { "Atom": { "name": "name", "label": "Auftrag", "edm_type": "Edm.String", "max_length": 30 } },
-        { "Atom": { "name": "halle", "label": "Halle", "edm_type": "Edm.String", "max_length": 80 } },
-        { "Atom": { "name": "arbeitsplatz", "label": "Arbeitsplatz", "edm_type": "Edm.String", "max_length": 80 } },
-        { "Atom": { "name": "serialnummer", "label": "Serialnummer", "edm_type": "Edm.String", "max_length": 80 } },
-        { "Atom": { "name": "material", "label": "Material", "edm_type": "Edm.String", "max_length": 40 } },
-        { "Atom": { "name": "materialtext", "label": "Materialtext", "edm_type": "Edm.String", "max_length": 160 } },
-        { "Atom": { "name": "kontierung", "label": "Kontierung", "edm_type": "Edm.String", "max_length": 80 } },
-        { "Atom": { "name": "vorgang", "label": "Vorgang", "edm_type": "Edm.String", "max_length": 20 } },
-        { "Atom": { "name": "vorgangstext", "label": "Vorgangstext", "edm_type": "Edm.String", "max_length": 160 } },
-        { "Atom": { "name": "status", "label": "Status", "edm_type": "Edm.String", "max_length": 80 } },
-        { "Atom": { "name": "einheit", "label": "Einheit", "edm_type": "Edm.String", "max_length": 10, "value_list": { "EntityRef": { "entity_set": "UnitOfMeasureSet", "key_property": "code", "display_property": "name", "filters": [], "prefer_dialog": false } } } },
-        { "Measure": { "name": "gutmenge", "label": "Gutmenge", "precision": 13, "scale": 3, "unit_field": "einheit", "kind": "Unit" } },
-        { "Measure": { "name": "ausschuss", "label": "Ausschuss", "precision": 13, "scale": 3, "unit_field": "einheit", "kind": "Unit" } },
-        { "Measure": { "name": "sollmenge", "label": "Sollmenge", "precision": 13, "scale": 3, "unit_field": "einheit", "kind": "Unit" } },
-        { "Measure": { "name": "vorgaengermenge", "label": "Vorgänger", "precision": 13, "scale": 3, "unit_field": "einheit", "kind": "Unit" } },
-        { "Atom": { "name": "spaetester_start", "label": "Spätester Start", "edm_type": "Edm.DateTimeOffset" } },
-        { "Atom": { "name": "spaetestes_ende", "label": "Spätestes Ende", "edm_type": "Edm.DateTimeOffset" } },
-        { "Atom": { "name": "prioritaet", "label": "Priorität", "edm_type": "Edm.String", "max_length": 30 } },
-        { "Atom": { "name": "auftragsart", "label": "Auftragsart", "edm_type": "Edm.String", "max_length": 30 } },
-        { "Atom": { "name": "zeichnung", "label": "Zeichnung", "edm_type": "Edm.String", "max_length": 80 } }
-      ],
-      "selection_fields": ["halle", "arbeitsplatz", "serialnummer", "material", "name", "kontierung"],
-      "data_points": ["vorgang", "status", "gutmenge", "ausschuss", "sollmenge", "vorgaengermenge", "materialtext", "spaetester_start", "spaetestes_ende"],
       "actions": [
-        { "name": "starten", "label": "Vorgang starten", "list": true, "header": true },
-        { "name": "zuruecksetzen", "label": "Vorgang zurücksetzen", "list": true, "header": true }
+        {
+          "header": true,
+          "label": "Vorgang starten",
+          "list": true,
+          "name": "starten"
+        },
+        {
+          "header": true,
+          "label": "Vorgang zurücksetzen",
+          "list": true,
+          "name": "zuruecksetzen"
+        }
       ],
-      "list_views": [
-        { "name": "default", "columns": [
-          { "field": "name", "width": "9em", "priority": "high" },
-          { "field": "vorgang", "width": "7em" },
-          { "field": "status", "width": "10em" },
-          { "field": "vorgangstext", "width": "16em" },
-          { "field": "materialtext", "width": "15em", "priority": "high" },
-          "material", "serialnummer", "gutmenge", "sollmenge", "spaetester_start", "spaetestes_ende", "prioritaet"
-        ] }
+      "data_points": [
+        "vorgang",
+        "status",
+        "gutmenge",
+        "ausschuss",
+        "sollmenge",
+        "vorgaengermenge",
+        "materialtext",
+        "spaetester_start",
+        "spaetestes_ende"
       ],
       "facets": [
-        { "facet": "General", "title": "Auftrag", "fields": ["name", "halle", "arbeitsplatz", "kontierung", "serialnummer", "material", "materialtext", "vorgang", "vorgangstext", "status", "einheit", "gutmenge", "ausschuss", "sollmenge", "vorgaengermenge", "spaetester_start", "spaetestes_ende", "prioritaet", "auftragsart", "zeichnung"] },
-        { "facet": "_Komponenten", "title": "Komponenten" },
-        { "facet": "_Rueckmeldungen", "title": "Rückmeldungen" },
-        { "facet": "_Vorgaenge", "title": "Vorgänge" },
-        { "facet": "_Dokumente", "title": "Dokumente" }
+        {
+          "facet": "General",
+          "fields": [
+            "name",
+            "halle",
+            "arbeitsplatz",
+            "kontierung",
+            "serialnummer",
+            "material",
+            "materialtext",
+            "vorgang",
+            "vorgangstext",
+            "status",
+            "einheit",
+            "gutmenge",
+            "ausschuss",
+            "sollmenge",
+            "vorgaengermenge",
+            "spaetester_start",
+            "spaetestes_ende",
+            "prioritaet",
+            "auftragsart",
+            "zeichnung"
+          ],
+          "title": "Auftrag"
+        }
       ],
-      "seed": [
-        { "ID": "10000000-0000-4000-8000-000000000001", "name": "1000123", "halle": "Halle 1", "arbeitsplatz": "Montage 01", "serialnummer": "SN-1001", "material": "MAT-1001", "materialtext": "Kabelsatz Steuerung", "kontierung": "KST-100", "vorgang": "0020", "vorgangstext": "Kabelsatz montieren", "status": "In Bearbeitung", "einheit": "ST", "gutmenge": 2, "ausschuss": 0, "sollmenge": 8, "vorgaengermenge": 8, "spaetester_start": "2026-11-17T07:00:00Z", "spaetestes_ende": "2026-11-20T15:00:00Z", "prioritaet": "Hoch", "auftragsart": "Fertigung", "zeichnung": "ZS-1001" },
-        { "ID": "10000000-0000-4000-8000-000000000002", "name": "1000124", "halle": "Halle 1", "arbeitsplatz": "Montage 02", "serialnummer": "", "material": "MAT-1002", "materialtext": "Leuchtenbaugruppe", "kontierung": "KST-100", "vorgang": "0010", "vorgangstext": "Baugruppe vorbereiten", "status": "Geplant", "einheit": "ST", "gutmenge": 0, "ausschuss": 0, "sollmenge": 10, "vorgaengermenge": 0, "spaetester_start": "2026-11-19T07:00:00Z", "spaetestes_ende": "2026-11-23T15:00:00Z", "prioritaet": "Normal", "auftragsart": "Fertigung", "zeichnung": "ZS-1002" },
-        { "ID": "10000000-0000-4000-8000-000000000003", "name": "1000125", "halle": "Halle 2", "arbeitsplatz": "Prüfung 01", "serialnummer": "SN-1003", "material": "MAT-1003", "materialtext": "Schaltschrankmodul", "kontierung": "KST-200", "vorgang": "0030", "vorgangstext": "Modul prüfen", "status": "Abgeschlossen", "einheit": "ST", "gutmenge": 5, "ausschuss": 0, "sollmenge": 5, "vorgaengermenge": 5, "spaetester_start": "2026-11-10T07:00:00Z", "spaetestes_ende": "2026-11-13T15:00:00Z", "prioritaet": "Normal", "auftragsart": "Fertigung", "zeichnung": "ZS-1003" }
-      ]
+      "fields": [
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Auftrag",
+            "max_length": 30,
+            "name": "name"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Halle",
+            "max_length": 80,
+            "name": "halle"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Arbeitsplatz",
+            "max_length": 80,
+            "name": "arbeitsplatz"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Serialnummer",
+            "max_length": 80,
+            "name": "serialnummer"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Material",
+            "max_length": 40,
+            "name": "material"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Materialtext",
+            "max_length": 160,
+            "name": "materialtext"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Kontierung",
+            "max_length": 80,
+            "name": "kontierung"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Vorgang",
+            "max_length": 20,
+            "name": "vorgang"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Vorgangstext",
+            "max_length": 160,
+            "name": "vorgangstext"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Status",
+            "max_length": 80,
+            "name": "status"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Einheit",
+            "max_length": 10,
+            "name": "einheit",
+            "value_list": {
+              "EntityRef": {
+                "display_property": "name",
+                "entity_set": "UnitOfMeasureSet",
+                "filters": [],
+                "key_property": "code",
+                "prefer_dialog": false
+              }
+            }
+          }
+        },
+        {
+          "Measure": {
+            "kind": "Unit",
+            "label": "Gutmenge",
+            "name": "gutmenge",
+            "precision": 13,
+            "scale": 3,
+            "unit_field": "einheit"
+          }
+        },
+        {
+          "Measure": {
+            "kind": "Unit",
+            "label": "Ausschuss",
+            "name": "ausschuss",
+            "precision": 13,
+            "scale": 3,
+            "unit_field": "einheit"
+          }
+        },
+        {
+          "Measure": {
+            "kind": "Unit",
+            "label": "Sollmenge",
+            "name": "sollmenge",
+            "precision": 13,
+            "scale": 3,
+            "unit_field": "einheit"
+          }
+        },
+        {
+          "Measure": {
+            "kind": "Unit",
+            "label": "Vorgänger",
+            "name": "vorgaengermenge",
+            "precision": 13,
+            "scale": 3,
+            "unit_field": "einheit"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.DateTimeOffset",
+            "label": "Spätester Start",
+            "name": "spaetester_start"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.DateTimeOffset",
+            "label": "Spätestes Ende",
+            "name": "spaetestes_ende"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Priorität",
+            "max_length": 30,
+            "name": "prioritaet"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Auftragsart",
+            "max_length": 30,
+            "name": "auftragsart"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Zeichnung",
+            "max_length": 80,
+            "name": "zeichnung"
+          }
+        }
+      ],
+      "list_views": [
+        {
+          "columns": [
+            {
+              "field": "name",
+              "priority": "high",
+              "width": "9em"
+            },
+            {
+              "field": "vorgang",
+              "width": "7em"
+            },
+            {
+              "field": "status",
+              "width": "10em"
+            },
+            {
+              "field": "vorgangstext",
+              "width": "16em"
+            },
+            {
+              "field": "materialtext",
+              "priority": "high",
+              "width": "15em"
+            },
+            {
+              "field": "material"
+            },
+            {
+              "field": "serialnummer"
+            },
+            {
+              "field": "gutmenge"
+            },
+            {
+              "field": "sollmenge"
+            },
+            {
+              "field": "spaetester_start"
+            },
+            {
+              "field": "spaetestes_ende"
+            },
+            {
+              "field": "prioritaet"
+            }
+          ],
+          "name": "default"
+        }
+      ],
+      "name": "Fertigungsauftrag",
+      "package": "vorfertigung",
+      "selection_fields": [
+        "halle",
+        "arbeitsplatz",
+        "serialnummer",
+        "material",
+        "name",
+        "kontierung"
+      ],
+      "type_name": "Auftrag",
+      "type_name_plural": "Aufträge"
     },
     {
+      "fields": [
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Material",
+            "max_length": 40,
+            "name": "name"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Materialtext",
+            "max_length": 160,
+            "name": "materialtext"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Einheit",
+            "max_length": 10,
+            "name": "einheit",
+            "value_list": {
+              "EntityRef": {
+                "display_property": "name",
+                "entity_set": "UnitOfMeasureSet",
+                "filters": [],
+                "key_property": "code",
+                "prefer_dialog": false
+              }
+            }
+          }
+        },
+        {
+          "Measure": {
+            "kind": "Unit",
+            "label": "Bedarfsmenge",
+            "name": "bedarf",
+            "precision": 13,
+            "scale": 3,
+            "unit_field": "einheit"
+          }
+        },
+        {
+          "Measure": {
+            "kind": "Unit",
+            "label": "Entnommen",
+            "name": "entnommen",
+            "precision": 13,
+            "scale": 3,
+            "unit_field": "einheit"
+          }
+        }
+      ],
+      "list_views": [
+        {
+          "columns": [
+            {
+              "field": "name"
+            },
+            {
+              "field": "materialtext"
+            },
+            {
+              "field": "bedarf"
+            },
+            {
+              "field": "entnommen"
+            }
+          ],
+          "name": "default"
+        }
+      ],
       "name": "Komponente",
       "package": "vorfertigung",
       "type_name": "Komponente",
-      "type_name_plural": "Komponenten",
-      "fields": [
-        { "Atom": { "name": "name", "label": "Material", "edm_type": "Edm.String", "max_length": 40 } },
-        { "Atom": { "name": "materialtext", "label": "Materialtext", "edm_type": "Edm.String", "max_length": 160 } },
-        { "Atom": { "name": "einheit", "label": "Einheit", "edm_type": "Edm.String", "max_length": 10, "value_list": { "EntityRef": { "entity_set": "UnitOfMeasureSet", "key_property": "code", "display_property": "name", "filters": [], "prefer_dialog": false } } } },
-        { "Measure": { "name": "bedarf", "label": "Bedarfsmenge", "precision": 13, "scale": 3, "unit_field": "einheit", "kind": "Unit" } },
-        { "Measure": { "name": "entnommen", "label": "Entnommen", "precision": 13, "scale": 3, "unit_field": "einheit", "kind": "Unit" } }
-      ],
-      "list_views": [{ "name": "default", "columns": ["name", "materialtext", "bedarf", "entnommen"] }],
-      "seed": [
-        { "name": "K-100", "materialtext": "Steckverbinder", "einheit": "ST", "bedarf": 16, "entnommen": 4, "auftrag_ID": "10000000-0000-4000-8000-000000000001" },
-        { "name": "K-200", "materialtext": "Leitung", "einheit": "M", "bedarf": 24, "entnommen": 6, "auftrag_ID": "10000000-0000-4000-8000-000000000001" }
-      ]
+      "type_name_plural": "Komponenten"
     },
     {
+      "facets": [
+        {
+          "facet": "General",
+          "fields": [
+            "name",
+            "auftrag",
+            "mengeneinheit",
+            "gutmenge",
+            "ausschuss"
+          ],
+          "title": "Gut-/Ausschussmenge"
+        },
+        {
+          "facet": "Zeitrueckmeldung",
+          "fields": [
+            "ausweisnummer",
+            "zeiteinheit",
+            "saldo",
+            "rueckmeldezeit"
+          ],
+          "title": "Zeitrückmeldung"
+        }
+      ],
+      "fields": [
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Rückmeldung",
+            "max_length": 30,
+            "name": "name"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Ausweisnummer",
+            "max_length": 30,
+            "name": "ausweisnummer"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Mengeneinheit",
+            "max_length": 10,
+            "name": "mengeneinheit",
+            "value_list": {
+              "EntityRef": {
+                "display_property": "name",
+                "entity_set": "UnitOfMeasureSet",
+                "filters": [],
+                "key_property": "code",
+                "prefer_dialog": false
+              }
+            }
+          }
+        },
+        {
+          "Measure": {
+            "kind": "Unit",
+            "label": "Gutmenge",
+            "name": "gutmenge",
+            "precision": 13,
+            "scale": 3,
+            "unit_field": "mengeneinheit"
+          }
+        },
+        {
+          "Measure": {
+            "kind": "Unit",
+            "label": "Ausschuss",
+            "name": "ausschuss",
+            "precision": 13,
+            "scale": 3,
+            "unit_field": "mengeneinheit"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Zeiteinheit",
+            "max_length": 10,
+            "name": "zeiteinheit",
+            "value_list": {
+              "EntityRef": {
+                "display_property": "name",
+                "entity_set": "UnitOfMeasureSet",
+                "filters": [],
+                "key_property": "code",
+                "prefer_dialog": false
+              }
+            }
+          }
+        },
+        {
+          "Measure": {
+            "kind": "Unit",
+            "label": "Saldo",
+            "name": "saldo",
+            "precision": 13,
+            "scale": 3,
+            "unit_field": "zeiteinheit"
+          }
+        },
+        {
+          "Measure": {
+            "kind": "Unit",
+            "label": "Rückmeldezeit",
+            "name": "rueckmeldezeit",
+            "precision": 13,
+            "scale": 3,
+            "unit_field": "zeiteinheit"
+          }
+        }
+      ],
+      "list_views": [
+        {
+          "columns": [
+            {
+              "field": "name"
+            },
+            {
+              "field": "ausweisnummer"
+            },
+            {
+              "field": "gutmenge"
+            },
+            {
+              "field": "ausschuss"
+            },
+            {
+              "field": "saldo"
+            },
+            {
+              "field": "rueckmeldezeit"
+            }
+          ],
+          "name": "default"
+        }
+      ],
       "name": "Rueckmeldung",
       "package": "vorfertigung",
       "type_name": "Rückmeldung",
-      "type_name_plural": "Rückmeldungen",
-      "fields": [
-        { "Atom": { "name": "name", "label": "Rückmeldung", "edm_type": "Edm.String", "max_length": 30 } },
-        { "Atom": { "name": "ausweisnummer", "label": "Ausweisnummer", "edm_type": "Edm.String", "max_length": 30 } },
-        { "Atom": { "name": "mengeneinheit", "label": "Mengeneinheit", "edm_type": "Edm.String", "max_length": 10, "value_list": { "EntityRef": { "entity_set": "UnitOfMeasureSet", "key_property": "code", "display_property": "name", "filters": [], "prefer_dialog": false } } } },
-        { "Measure": { "name": "gutmenge", "label": "Gutmenge", "precision": 13, "scale": 3, "unit_field": "mengeneinheit", "kind": "Unit" } },
-        { "Measure": { "name": "ausschuss", "label": "Ausschuss", "precision": 13, "scale": 3, "unit_field": "mengeneinheit", "kind": "Unit" } },
-        { "Atom": { "name": "zeiteinheit", "label": "Zeiteinheit", "edm_type": "Edm.String", "max_length": 10, "value_list": { "EntityRef": { "entity_set": "UnitOfMeasureSet", "key_property": "code", "display_property": "name", "filters": [], "constant_filters": [{ "target_property": "dimension", "value": "time" }], "prefer_dialog": false } } } },
-        { "Measure": { "name": "saldo", "label": "Saldo", "precision": 13, "scale": 3, "unit_field": "zeiteinheit", "kind": "Unit" } },
-        { "Measure": { "name": "rueckmeldezeit", "label": "Rückmeldezeit", "precision": 13, "scale": 3, "unit_field": "zeiteinheit", "kind": "Unit" } }
-      ],
-      "list_views": [{ "name": "default", "columns": ["name", "ausweisnummer", "gutmenge", "ausschuss", "saldo", "rueckmeldezeit"] }],
-      "facets": [
-        { "facet": "General", "title": "Gut-/Ausschussmenge", "fields": ["name", "auftrag", "mengeneinheit", "gutmenge", "ausschuss"] },
-        { "facet": "Zeitrueckmeldung", "title": "Zeitrückmeldung", "fields": ["ausweisnummer", "zeiteinheit", "saldo", "rueckmeldezeit"] }
-      ],
-      "seed": [
-        { "name": "RM-001", "ausweisnummer": "9001", "mengeneinheit": "ST", "gutmenge": 2, "ausschuss": 0, "zeiteinheit": "H", "saldo": 4, "rueckmeldezeit": 1.5, "auftrag_ID": "10000000-0000-4000-8000-000000000001" }
-      ]
+      "type_name_plural": "Rückmeldungen"
     },
     {
+      "fields": [
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Vorgang",
+            "max_length": 20,
+            "name": "name"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Beschreibung",
+            "max_length": 160,
+            "name": "beschreibung"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Status",
+            "max_length": 80,
+            "name": "status"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Arbeitsplatz",
+            "max_length": 80,
+            "name": "arbeitsplatz"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.DateTimeOffset",
+            "label": "Spätester Start",
+            "name": "spaetester_start"
+          }
+        }
+      ],
+      "list_views": [
+        {
+          "columns": [
+            {
+              "field": "name"
+            },
+            {
+              "field": "beschreibung"
+            },
+            {
+              "field": "status"
+            },
+            {
+              "field": "arbeitsplatz"
+            },
+            {
+              "field": "spaetester_start"
+            }
+          ],
+          "name": "default"
+        }
+      ],
       "name": "Fertigungsvorgang",
       "package": "vorfertigung",
       "type_name": "Vorgang",
-      "type_name_plural": "Vorgänge",
-      "fields": [
-        { "Atom": { "name": "name", "label": "Vorgang", "edm_type": "Edm.String", "max_length": 20 } },
-        { "Atom": { "name": "beschreibung", "label": "Beschreibung", "edm_type": "Edm.String", "max_length": 160 } },
-        { "Atom": { "name": "status", "label": "Status", "edm_type": "Edm.String", "max_length": 80 } },
-        { "Atom": { "name": "arbeitsplatz", "label": "Arbeitsplatz", "edm_type": "Edm.String", "max_length": 80 } },
-        { "Atom": { "name": "spaetester_start", "label": "Spätester Start", "edm_type": "Edm.DateTimeOffset" } }
-      ],
-      "list_views": [{ "name": "default", "columns": ["name", "beschreibung", "status", "arbeitsplatz", "spaetester_start"] }],
-      "seed": [
-        { "name": "0010", "beschreibung": "Material bereitstellen", "status": "Abgeschlossen", "arbeitsplatz": "Montage 01", "spaetester_start": "2026-11-16T07:00:00Z", "auftrag_ID": "10000000-0000-4000-8000-000000000001" },
-        { "name": "0020", "beschreibung": "Kabelsatz montieren", "status": "In Bearbeitung", "arbeitsplatz": "Montage 01", "spaetester_start": "2026-11-17T07:00:00Z", "auftrag_ID": "10000000-0000-4000-8000-000000000001" }
-      ]
+      "type_name_plural": "Vorgänge"
     },
     {
+      "fields": [
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Dokument",
+            "max_length": 40,
+            "name": "name"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Dokumentenart",
+            "max_length": 30,
+            "name": "dokumentenart"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Version",
+            "max_length": 10,
+            "name": "version"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Teildokument",
+            "max_length": 10,
+            "name": "teildokument"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Material",
+            "max_length": 40,
+            "name": "material"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Materialtext",
+            "max_length": 160,
+            "name": "materialtext"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Dateiname",
+            "max_length": 160,
+            "name": "dateiname"
+          }
+        },
+        {
+          "Atom": {
+            "edm_type": "Edm.String",
+            "label": "Beschreibung",
+            "max_length": 160,
+            "name": "beschreibung"
+          }
+        }
+      ],
+      "list_views": [
+        {
+          "columns": [
+            {
+              "field": "dokumentenart"
+            },
+            {
+              "field": "name"
+            },
+            {
+              "field": "version"
+            },
+            {
+              "field": "teildokument"
+            },
+            {
+              "field": "material"
+            },
+            {
+              "field": "materialtext"
+            },
+            {
+              "field": "dateiname"
+            },
+            {
+              "field": "beschreibung"
+            }
+          ],
+          "name": "default"
+        }
+      ],
       "name": "Auftragsdokument",
       "package": "vorfertigung",
       "type_name": "Dokument",
-      "type_name_plural": "Dokumente",
-      "fields": [
-        { "Atom": { "name": "name", "label": "Dokument", "edm_type": "Edm.String", "max_length": 40 } },
-        { "Atom": { "name": "dokumentenart", "label": "Dokumentenart", "edm_type": "Edm.String", "max_length": 30 } },
-        { "Atom": { "name": "version", "label": "Version", "edm_type": "Edm.String", "max_length": 10 } },
-        { "Atom": { "name": "teildokument", "label": "Teildokument", "edm_type": "Edm.String", "max_length": 10 } },
-        { "Atom": { "name": "material", "label": "Material", "edm_type": "Edm.String", "max_length": 40 } },
-        { "Atom": { "name": "materialtext", "label": "Materialtext", "edm_type": "Edm.String", "max_length": 160 } },
-        { "Atom": { "name": "dateiname", "label": "Dateiname", "edm_type": "Edm.String", "max_length": 160 } },
-        { "Atom": { "name": "beschreibung", "label": "Beschreibung", "edm_type": "Edm.String", "max_length": 160 } }
-      ],
-      "list_views": [{ "name": "default", "columns": ["dokumentenart", "name", "version", "teildokument", "material", "materialtext", "dateiname", "beschreibung"] }],
-      "seed": [
-        { "name": "DOC-1001", "dokumentenart": "Zeichnung", "version": "01", "teildokument": "000", "material": "MAT-1001", "materialtext": "Kabelsatz Steuerung", "dateiname": "ZS-1001.pdf", "beschreibung": "Montagezeichnung", "auftrag_ID": "10000000-0000-4000-8000-000000000001" }
-      ]
+      "type_name_plural": "Dokumente"
+    }
+  ],
+  "package_files": [
+    "units"
+  ],
+  "packages": [
+    {
+      "name": "vorfertigung"
+    },
+    {
+      "name": "units"
     }
   ],
   "relationships": [
-    { "name": "auftrag_komponenten", "one": "Fertigungsauftrag", "one_field": "_Komponenten", "many": "Komponente", "many_property": "auftrag", "one_label": "Komponenten", "many_label": "Auftrag", "package": "vorfertigung" },
-    { "name": "auftrag_rueckmeldungen", "one": "Fertigungsauftrag", "one_field": "_Rueckmeldungen", "many": "Rueckmeldung", "many_property": "auftrag", "one_label": "Rückmeldungen", "many_label": "Auftrag", "package": "vorfertigung" },
-    { "name": "auftrag_vorgaenge", "one": "Fertigungsauftrag", "one_field": "_Vorgaenge", "many": "Fertigungsvorgang", "many_property": "auftrag", "one_label": "Vorgänge", "many_label": "Auftrag", "package": "vorfertigung" },
-    { "name": "auftrag_dokumente", "one": "Fertigungsauftrag", "one_field": "_Dokumente", "many": "Auftragsdokument", "many_property": "auftrag", "one_label": "Dokumente", "many_label": "Auftrag", "package": "vorfertigung" }
+    {
+      "many": "Komponente",
+      "many_label": "Auftrag",
+      "many_property": "auftrag",
+      "name": "auftrag_komponenten",
+      "one": "Fertigungsauftrag",
+      "one_field": "_Komponenten",
+      "one_label": "Komponenten",
+      "owned": true,
+      "package": "vorfertigung"
+    },
+    {
+      "many": "Fertigungsvorgang",
+      "many_label": "Auftrag",
+      "many_property": "auftrag",
+      "name": "auftrag_vorgaenge",
+      "one": "Fertigungsauftrag",
+      "one_field": "_Vorgaenge",
+      "one_label": "Vorgänge",
+      "owned": true,
+      "package": "vorfertigung"
+    },
+    {
+      "many": "Auftragsdokument",
+      "many_label": "Auftrag",
+      "many_property": "auftrag",
+      "name": "auftrag_dokumente",
+      "one": "Fertigungsauftrag",
+      "one_field": "_Dokumente",
+      "one_label": "Dokumente",
+      "owned": true,
+      "package": "vorfertigung"
+    },
+    {
+      "many": "Rueckmeldung",
+      "many_label": "Vorgang",
+      "many_property": "operation",
+      "name": "vorgang_rueckmeldung",
+      "one": "Fertigungsvorgang",
+      "one_field": "_Confirmations",
+      "one_label": "Rückmeldungen",
+      "owned": true,
+      "package": "vorfertigung"
+    }
   ],
-  "apps": [
-    { "name": "vorfertigung", "title": "Vorfertigung", "subtitle": "Fertigungsaufträge", "main_entity": "Fertigungsauftrag", "icon": "sap-icon://factory", "package": { "name": "vorfertigung" } }
-  ]
+  "value_lists": []
 }

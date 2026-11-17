@@ -1,0 +1,50 @@
+[
+ {
+  "name": "0010",
+  "beschreibung": "Material bereitstellen",
+  "status": "Abgeschlossen",
+  "arbeitsplatz": "Montage 01",
+  "spaetester_start": "2026-11-16T07:00:00Z",
+  "auftrag_ID": "1000123"
+ },
+ {
+  "name": "0020",
+  "beschreibung": "Kabelsatz montieren",
+  "status": "In Bearbeitung",
+  "arbeitsplatz": "Montage 01",
+  "spaetester_start": "2026-11-17T07:00:00Z",
+  "auftrag_ID": "1000123"
+ },
+ {
+  "name": "0010",
+  "beschreibung": "Material bereitstellen",
+  "status": "Abgeschlossen",
+  "arbeitsplatz": "Montage 01",
+  "spaetester_start": "2026-11-16T07:00:00Z",
+  "auftrag_ID": "1000124"
+ },
+ {
+  "name": "0020",
+  "beschreibung": "Kabelsatz montieren",
+  "status": "In Bearbeitung",
+  "arbeitsplatz": "Montage 01",
+  "spaetester_start": "2026-11-17T07:00:00Z",
+  "auftrag_ID": "1000124"
+ },
+ {
+  "name": "0010",
+  "beschreibung": "Material bereitstellen",
+  "status": "Abgeschlossen",
+  "arbeitsplatz": "Montage 01",
+  "spaetester_start": "2026-11-16T07:00:00Z",
+  "auftrag_ID": "1000125"
+ },
+ {
+  "name": "0020",
+  "beschreibung": "Kabelsatz montieren",
+  "status": "In Bearbeitung",
+  "arbeitsplatz": "Montage 01",
+  "spaetester_start": "2026-11-17T07:00:00Z",
+  "auftrag_ID": "1000125"
+ }
+]

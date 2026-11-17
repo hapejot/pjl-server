@@ -183,26 +183,41 @@ async fn shutdown_signal() {
     }
 }
 
-/// Festwerte aus `ddic.json` in die Listen-Entitäten schreiben (je Liste ein Set
-/// `{Liste}Set`). IDs sind deterministisch (`value_list::entry_id`), Verweise aus
-/// Fremdschluesseln bleiben also ueber Neustarts gueltig. Vorhandene Eintraege
-/// werden aktualisiert statt geloescht; geloescht wird nur, was nicht mehr in der
-/// Liste steht.
 /// Stammdaten-Startzeilen (`EntitySpec.seed`) einspielen.
 ///
 /// Nur wenn das EntitySet leer ist: vorhandene Daten bleiben unangetastet. Die Zeilen
-/// werden als aktive Saetze angelegt (Entwurf + Aktivierung wie bei den Festwertlisten).
-///
-/// TODO: Handle updates to existing value lists instead of only seeding when empty.
-///
+/// werden direkt aktiv angelegt, Kompositions-Eltern vor ihren Kindern.
 async fn seed_entities(store: &dyn DraftDataStore, ddic: &DataDictionary) -> anyhow::Result<()> {
-    use data_store::EntityKey;
     use odata::query::ODataQuery;
 
-    for entity in ddic.entities() {
-        if entity.seed().is_empty() {
-            continue;
-        }
+    let mut pending: Vec<_> = ddic
+        .entities()
+        .into_iter()
+        .filter(|entity| !entity.seed().is_empty())
+        .collect();
+    while !pending.is_empty() {
+        let next = pending
+            .iter()
+            .position(|entity| {
+                !ddic.relationships().any(|relationship| {
+                    relationship.is_owned()
+                        && relationship.many_opt() == Some(entity.name())
+                        && pending
+                            .iter()
+                            .any(|parent| relationship.one_opt() == Some(parent.name()))
+                })
+            })
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "cannot seed cyclic composition dependencies: {}",
+                    pending
+                        .iter()
+                        .map(|entity| entity.name())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            })?;
+        let entity = pending.remove(next);
         let set = entity.setname();
         let existing = store
             .get_collection(&set, &ODataQuery::new())
@@ -211,25 +226,24 @@ async fn seed_entities(store: &dyn DraftDataStore, ddic: &DataDictionary) -> any
         if !existing.is_empty() {
             continue;
         }
-        for row in entity.seed() {
-            let data = serde_json::to_value(row)?;
-            let created = store
+        for (index, row) in entity.seed().iter().enumerate() {
+            let mut data = serde_json::to_value(row)?;
+            data["IsActiveEntity"] = serde_json::Value::Bool(true);
+            store
                 .create_entity(&set, &data)
                 .await
-                .map_err(|e| anyhow::anyhow!("cannot seed {set}: {e}"))?;
-            // Nicht draft-faehige Entitäten (Stammdaten) sind mit dem Anlegen aktiv.
-            if entity.draft_enabled() {
-                store
-                    .draft_activate(&set, &EntityKey::new(created.id(), false))
-                    .await
-                    .map_err(|e| anyhow::anyhow!("cannot activate {set}: {e}"))?;
-            }
+                .map_err(|e| anyhow::anyhow!("cannot seed {set} row {}: {e}", index + 1))?;
         }
         info!("{} seed rows loaded into {set}", entity.seed().len());
     }
     Ok(())
 }
 
+/// Festwerte aus `ddic.json` in die Listen-Entitäten schreiben (je Liste ein Set
+/// `{Liste}Set`). IDs sind deterministisch (`value_list::entry_id`), Verweise aus
+/// Fremdschluesseln bleiben also ueber Neustarts gueltig. Vorhandene Eintraege
+/// werden aktualisiert statt geloescht; geloescht wird nur, was nicht mehr in der
+/// Liste steht.
 pub async fn seed_value_lists(
     store: &dyn DraftDataStore,
     ddic: &DataDictionary,
@@ -519,6 +533,83 @@ fn router(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use data_store::{DataStore, EntityKey};
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn seed_entities_loads_active_compositions_in_dependency_order() {
+        let order_id = "10000000-0000-4000-8000-000000000001";
+        let operation_id = "20000000-0000-4000-8000-000000000001";
+        let confirmation_id = "30000000-0000-4000-8000-000000000001";
+        let model = json!({
+            "packages": [{"name": "test"}],
+            "entities": [
+                {
+                    "name": "Order", "package": "test", "type_name_plural": "Orders",
+                    "fields": [{"Atom": {"name": "name", "label": "Name", "edm_type": "Edm.String"}}],
+                    "seed": [{"ID": order_id, "name": "Original", "IsActiveEntity": false}]
+                },
+                {
+                    "name": "Operation", "package": "test", "type_name_plural": "Operations",
+                    "fields": [],
+                    "seed": [{"ID": operation_id, "order_ID": order_id}]
+                },
+                {
+                    "name": "Confirmation", "package": "test", "type_name_plural": "Confirmations",
+                    "fields": [],
+                    "seed": [{"ID": confirmation_id, "operation_ID": operation_id}]
+                },
+                {
+                    "name": "Catalog", "package": "test", "type_name_plural": "Catalogs",
+                    "draft_enabled": false, "fields": [], "seed": [{}]
+                }
+            ],
+            "relationships": [
+                {"name": "order_operations", "package": "test", "one": "Order",
+                    "one_field": "_Operations", "many": "Operation", "many_property": "order", "owned": true},
+                {"name": "operation_confirmations", "package": "test", "one": "Operation",
+                    "one_field": "_Confirmations", "many": "Confirmation", "many_property": "operation", "owned": true}
+            ],
+            "apps": []
+        });
+
+        for reverse in [false, true] {
+            let mut model = model.clone();
+            if reverse {
+                model["entities"].as_array_mut().unwrap().reverse();
+            }
+            let ddic: DataDictionary = serde_json::from_value(model).unwrap();
+            let mut active = ddic.clone();
+            active.activate();
+            let schema = spec_schema::schema_from_ddic(&active).unwrap();
+            let store = RelationalStore::open_in_memory(Arc::new(StaticSchema::new(schema)))
+                .await
+                .unwrap();
+
+            seed_entities(&store, &ddic).await.unwrap();
+
+            for set in ["OrderSet", "OperationSet", "ConfirmationSet", "CatalogSet"] {
+                let rows = store
+                    .get_collection(set, &odata::query::ODataQuery::new())
+                    .await
+                    .unwrap();
+                assert_eq!(rows.len(), 1, "{set}, reverse={reverse}");
+                assert!(rows[0].is_active_entity(), "{set}");
+                assert!(rows[0].draft_admin_data().is_none(), "{set}");
+            }
+            let key = EntityKey::new_active(order_id);
+            store
+                .patch_entity("OrderSet", &key, &json!({"name": "Changed"}))
+                .await
+                .unwrap();
+            seed_entities(&store, &ddic).await.unwrap();
+            let order = store
+                .read_entity("OrderSet", &key, &odata::query::ODataQuery::new())
+                .await
+                .unwrap();
+            assert_eq!(order.get("name"), Some(json!("Changed")));
+        }
+    }
 
     #[test]
     fn active_dictionary_is_written_to_data_dir() {

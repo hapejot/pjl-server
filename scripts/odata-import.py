@@ -9,6 +9,12 @@ Ablauf:
   * Fremdschluessel, die auf dem Ziel anders heissen (z. B. `status_ID` GUID in
     der Quelle, `status_code` mit Code-Schluessel auf dem Ziel), werden ueber den
     Quelldatensatz uebersetzt: Quell-ID -> Schluesselwert der Zielentitaet.
+  * Fremdschluessel `..._ID` duerfen statt einer GUID den Namen (`name`) des
+    referenzierten Satzes enthalten, z. B. `"auftrag_ID": "1000123"`, oder einen
+    Pfad ueber die Eltern, z. B. `"operation_ID": "1000123/0010"`. Gesucht wird
+    zuerst in den Importdateien, dann auf dem Ziel. Der Treffer muss eindeutig sein.
+  * Saetze ohne `ID` erhalten eine feste GUID aus Set, Name und Fremdschluesseln.
+    Ein erneuter Import findet sie wieder und legt keine Duplikate an.
   * Fehler je Satz werden gesammelt, der Lauf geht weiter. Exit-Code 1 bei Fehlern.
 
 Verwendung:
@@ -19,12 +25,20 @@ Verwendung:
 import argparse
 import json
 import os
+import re
 import sys
+import urllib.parse
+import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from odata_common import Client, DRAFT_PROPERTIES, Model, ODataError  # noqa: E402
+from odata_common import Client, DRAFT_PROPERTIES, Model, ODataError, quote  # noqa: E402
 
 MAX_REPORTED_ERRORS = 20
+GUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+NAME_PROPERTY = "name"
+AUDIT_KEYS = {"Owner_ID", "CreatedBy_ID", "ChangedBy_ID"}
+# Fester Namensraum: dieselbe Eingabe ergibt bei jedem Lauf dieselbe GUID.
+ID_NAMESPACE = uuid.UUID("6f1c2a7e-3d4b-5e8f-9a0b-1c2d3e4f5a6b")
 
 
 def load_json(path):
@@ -73,15 +87,112 @@ def translate_foreign_keys(target_type, target_model, source_record, source_inde
             body[prop] = parent[referenced]
 
 
-def import_set(client, model, set_name, records, source_index, report, dry_run):
+class NameResolver:
+    """Loest Namen in `..._ID`-Fremdschluesseln zur GUID des referenzierten Satzes auf.
+
+    Ein Pfad `Elternname/Name` (beliebig tief) waehlt unter gleichnamigen Saetzen
+    den, dessen Fremdschluessel auf einen Elternsatz mit diesem Namen zeigt.
+    """
+
+    def __init__(self, client, model, source_index):
+        self.client = client
+        self.model = model
+        self.source_index = source_index
+        self.cache = {}
+
+    def resolve(self, target_set, path):
+        key = (target_set, path)
+        if key not in self.cache:
+            ids = self._ids(target_set, path)
+            if not ids:
+                raise ValueError(f"{target_set}: kein Satz mit {NAME_PROPERTY}={path!r}")
+            if len(ids) > 1:
+                raise ValueError(f"{target_set}: {NAME_PROPERTY}={path!r} ist nicht eindeutig ({len(ids)} Saetze)")
+            self.cache[key] = ids.pop()
+        return self.cache[key]
+
+    def _ids(self, target_set, path):
+        target_type = self.model.set_type(target_set)
+        if NAME_PROPERTY not in target_type.properties:
+            return set()
+        prefix, _, name = path.rpartition("/")
+        candidates = self._named(target_set, target_type, name)
+        if not prefix:
+            return set(candidates)
+        return {
+            cid for cid, rec in candidates.items()
+            if any(rec.get(prop) in self._ids(parent_set, prefix)
+                   for prop, parent_set in foreign_keys(target_type, self.model))
+        }
+
+    def _named(self, target_set, target_type, name):
+        """ID -> Satz aller Saetze mit diesem Namen, zuerst aus den Importdateien, sonst vom Ziel."""
+        found = {
+            str(r["ID"]): r for r in self.source_index.get(target_set, {}).values()
+            if r.get(NAME_PROPERTY) == name
+        }
+        if found:
+            return found
+        condition = f"{NAME_PROPERTY} eq {quote(name)}"
+        if target_type.draft:
+            condition += " and IsActiveEntity eq true"
+        select = ",".join(["ID"] + [prop for prop, _ in foreign_keys(target_type, self.model)])
+        query = urllib.parse.urlencode({"$filter": condition, "$select": select}, quote_via=urllib.parse.quote)
+        _, page = self.client.request("GET", f"/{target_set}?{query}")
+        return {str(r["ID"]): r for r in (page or {}).get("value", [])}
+
+
+def foreign_keys(entity_type, model):
+    """(Property, Zielset) der `..._ID`-Fremdschluessel auf GUID-Schluessel, ohne Verwaltungsfelder."""
+    result = []
+    for nav in entity_type.navigations.values():
+        if not nav["to_one"]:
+            continue
+        target_set = set_for_type(model, nav["target"])
+        for prop, referenced in nav["refs"]:
+            if target_set and referenced == "ID" and prop.endswith("_ID") and prop not in AUDIT_KEYS:
+                result.append((prop, target_set))
+    return result
+
+
+def resolve_names(target_type, model, resolver, body):
+    """Nicht-GUID-Werte in `..._ID`-Fremdschluesseln ueber den Namen des Ziels aufloesen."""
+    for prop, target_set in foreign_keys(target_type, model):
+        value = body.get(prop)
+        if isinstance(value, str) and value and not GUID.match(value):
+            body[prop] = resolver.resolve(target_set, value)
+
+
+def derived_id(set_name, target_type, model, body):
+    """Feste GUID fuer Saetze ohne ID: aus Set, Name und (aufgeloesten) Fremdschluesseln."""
+    if body.get(NAME_PROPERTY) not in (None, ""):
+        basis = {"name": body[NAME_PROPERTY],
+                 "fk": {prop: body.get(prop) for prop, _ in foreign_keys(target_type, model)}}
+    else:
+        basis = {k: v for k, v in body.items() if k != "ID"}
+    return str(uuid.uuid5(ID_NAMESPACE, json.dumps([set_name, basis], sort_keys=True, ensure_ascii=False)))
+
+
+def import_set(client, model, set_name, records, source_index, resolver, report, dry_run):
     target_type = model.set_type(set_name)
+    generated = set()
     for record in records:
         body = {k: v for k, v in record.items() if k in target_type.properties and k not in DRAFT_PROPERTIES}
+        label = record.get("ID") or record.get(NAME_PROPERTY) or "?"
         try:
+            resolve_names(target_type, model, resolver, body)
             translate_foreign_keys(target_type, model, record, source_index, set_name, report, body)
+            if target_type.business_keys() == ["ID"] and body.get("ID") in (None, ""):
+                body["ID"] = derived_id(set_name, target_type, model, body)
+                if body["ID"] in generated:
+                    raise ValueError("doppelt in der Importdatei (gleicher Name und gleiche Fremdschluessel)")
+                generated.add(body["ID"])
             if any(k not in body for k in target_type.business_keys()):
-                report.error(set_name, f"Schluessel {target_type.keys} fehlt im Satz")
+                report.error(set_name, f"{label}: Schluessel {target_type.keys} fehlt im Satz")
                 continue
+            if "ID" in body:
+                # Aufgeloeste Fassung fuer Namenssuchen der Kind-Sets.
+                source_index.setdefault(set_name, {})[str(body["ID"])] = {**record, **body}
             key = target_type.key_expr(body, active=True)
             path = f"/{set_name}({key})"
             status, current = client.request("GET", path, accept_status=(404,))
@@ -102,8 +213,8 @@ def import_set(client, model, set_name, records, source_index, report, dry_run):
                         body["IsActiveEntity"] = True
                     client.request("POST", f"/{set_name}", body)
                 report.count(set_name, "created")
-        except ODataError as err:
-            report.error(set_name, str(err))
+        except (ODataError, ValueError) as err:
+            report.error(set_name, f"{label}: {err}")
 
 
 def main():
@@ -134,12 +245,13 @@ def main():
     source_index = {}
     for set_name in sets:
         records = load_json(os.path.join(args.source, sources[set_name]["file"]))
-        source_index[set_name] = {str(r["ID"]): r for r in records if "ID" in r}
+        source_index[set_name] = {str(r["ID"]): r for r in records if r.get("ID") not in (None, "")}
 
+    resolver = NameResolver(client, model, source_index)
     report = Report()
     for set_name in order:
         records = load_json(os.path.join(args.source, sources[set_name]["file"]))
-        import_set(client, model, set_name, records, source_index, report, args.dry_run)
+        import_set(client, model, set_name, records, source_index, resolver, report, args.dry_run)
         stats = report.per_set.get(set_name, {"created": 0, "updated": 0, "unchanged": 0, "errors": 0})
         print(f"{set_name:32s} neu {stats['created']:5d}  aktualisiert {stats['updated']:5d}  "
               f"unveraendert {stats['unchanged']:5d}  Fehler {stats['errors']:4d}")

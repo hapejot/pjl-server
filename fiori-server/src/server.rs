@@ -476,6 +476,9 @@ fn router(
         .nest("/flp/", flp::router())
         .route("/apps/{app}/Component.js", get(flp::app_component_handler))
         .route("/apps/{app}/manifest.json", get(flp::app_manifest_handler))
+        .route("/ddic/diagram", get(crate::ddic_diagram::index))
+        .route("/ddic/diagram.js", get(crate::ddic_diagram::script))
+        .route("/ddic/diagram.json", get(crate::ddic_diagram::model))
         .route(
             "/apps/{app}/Component-preload.js",
             get(flp::component_preload_handler),

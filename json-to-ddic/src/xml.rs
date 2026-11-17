@@ -16,12 +16,12 @@ struct Element {
 }
 
 impl Element {
-    fn start(event: &BytesStart<'_>, reader: &Reader<&[u8]>) -> Result<Self> {
-        let name = reader.decoder().decode(event.name().as_ref())?.into_owned();
+    fn start(event: &BytesStart<'_>) -> Result<Self> {
+        let name = event.name().as_ref().to_owned();
         let mut attributes = Map::new();
         for attribute in event.attributes() {
             let attribute = attribute.context("XML-Attribut lesen")?;
-            let key = reader.decoder().decode(attribute.key.as_ref())?;
+            let key = attribute.key.as_ref();
             if key == "xmlns" || key.starts_with("xmlns:") {
                 continue;
             }
@@ -29,7 +29,7 @@ impl Element {
                 format!("@{key}"),
                 Value::String(
                     attribute
-                        .decoded_and_normalized_value(XmlVersion::Explicit1_0, reader.decoder())?
+                        .normalized_value(XmlVersion::Explicit1_0)?
                         .into_owned(),
                 ),
             );
@@ -134,18 +134,18 @@ pub fn parse_xml(input: &str) -> Result<Value> {
     let mut declaration_seen = false;
     loop {
         match reader.read_event().context("XML lesen")? {
-            Event::Start(event) => stack.push(Element::start(&event, &reader)?),
-            Event::Empty(event) => finish(Element::start(&event, &reader)?, &mut stack, &mut root)?,
+            Event::Start(event) => stack.push(Element::start(&event)?),
+            Event::Empty(event) => finish(Element::start(&event)?, &mut stack, &mut root)?,
             Event::End(_) => {
                 let element = stack.pop().context("XML-Endelement ohne Anfang")?;
                 finish(element, &mut stack, &mut root)?;
             }
-            Event::Text(event) => append_text(&event.xml10_content()?, &mut stack)?,
+            Event::Text(event) => append_text(&event.xml10_content(), &mut stack)?,
             Event::CData(event) => {
                 if stack.is_empty() {
                     bail!("CDATA ausserhalb des XML-Wurzelelements");
                 }
-                append_text(&event.xml10_content()?, &mut stack)?;
+                append_text(&event.xml10_content(), &mut stack)?;
             }
             Event::GeneralRef(event) => {
                 if stack.is_empty() {
@@ -154,8 +154,8 @@ pub fn parse_xml(input: &str) -> Result<Value> {
                 if let Some(character) = event.resolve_char_ref()? {
                     append_text(&character.to_string(), &mut stack)?;
                 } else {
-                    let name = event.decode()?;
-                    let text = resolve_predefined_entity(&name)
+                    let name = event.as_ref();
+                    let text = resolve_predefined_entity(name)
                         .with_context(|| format!("Unbekannte XML-Entity: &{name};"))?;
                     append_text(text, &mut stack)?;
                 }
@@ -165,12 +165,12 @@ pub fn parse_xml(input: &str) -> Result<Value> {
                     bail!("XML-Deklaration nur einmal vor dem Wurzelelement erlaubt");
                 }
                 declaration_seen = true;
-                if declaration.version()?.as_ref() != b"1.0" {
+                if declaration.version()?.as_ref() != "1.0" {
                     bail!("Nur XML 1.0 wird unterstuetzt");
                 }
                 if let Some(encoding) = declaration.encoding() {
                     let encoding = encoding?;
-                    if !encoding.eq_ignore_ascii_case(b"utf-8") {
+                    if !encoding.eq_ignore_ascii_case("utf-8") {
                         bail!("XML-Eingabe muss UTF-8 verwenden");
                     }
                 }

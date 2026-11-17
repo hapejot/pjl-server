@@ -10,6 +10,19 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  diagram:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: npm
+    - run: npm ci
+    - run: npm test
+    - name: Check generated diagram JavaScript
+      run: git diff --exit-code -- fiori-server/static/ddic-diagram.js
+
   build:
 
     runs-on: ubuntu-latest

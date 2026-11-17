@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DDIC-Diagramm</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font: 14px/1.45 "72", "Segoe UI", Arial, sans-serif;
+      color: #172b4d;
+      background: #f5f7fa;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; height: 100vh; display: flex; flex-direction: column; }
+    header {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+      padding: 14px 20px; background: #fff; border-bottom: 1px solid #dfe3e8;
+      box-shadow: 0 2px 6px #172b4d0d; z-index: 1;
+    }
+    .brand { margin-right: auto; }
+    h1 { margin: 0; font-size: 19px; font-weight: 650; }
+    .subtitle { color: #61758a; font-size: 12px; }
+    .control, button {
+      height: 36px; border: 1px solid #c8d0d9; border-radius: 6px;
+      background: #fff; color: inherit; font: inherit;
+    }
+    .control { width: min(250px, 42vw); padding: 0 10px; }
+    button { min-width: 36px; padding: 0 10px; cursor: pointer; }
+    button:hover { background: #f0f5fa; border-color: #7d9bb8; }
+    #stats { min-width: 130px; color: #61758a; font-size: 12px; text-align: right; }
+    main { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+    svg { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+    svg:active { cursor: grabbing; }
+    .edge { fill: none; stroke: #8ba2b8; stroke-width: 2; }
+    .edge.owned { stroke: #d78a28; }
+    .edge-label { fill: #52677b; font-size: 12px; text-anchor: middle; }
+    .edge-end { fill: #52677b; font-size: 11px; font-weight: 700; }
+    .entity-card { cursor: grab; user-select: none; filter: drop-shadow(0 3px 5px #172b4d18); }
+    .entity-card:active { cursor: grabbing; }
+    .card-bg { fill: white; stroke: #cbd5df; stroke-width: 1.3; }
+    .card-header { fill: #eaf2f8; }
+    .entity-card.selected .card-bg { stroke: #1769aa; stroke-width: 2.5; }
+    .entity-card.selected .card-header { fill: #dcecf8; }
+    .entity-name { fill: #172b4d; font-size: 15px; font-weight: 700; }
+    .entity-package { fill: #60758a; font-size: 11px; }
+    .field-name { fill: #243b53; font-size: 12px; }
+    .field-type { fill: #75879a; font-size: 11px; text-anchor: end; }
+    .field-row { stroke: #edf0f3; }
+    .badge { fill: #e4f3e8; }
+    .badge.fk { fill: #e8f0fa; }
+    .badge-text { fill: #28743a; font-size: 9px; font-weight: 700; text-anchor: middle; }
+    .badge-text.fk { fill: #28618c; }
+    .muted { fill: #61758a; font-size: 12px; }
+    #message {
+      position: absolute; inset: 20px auto auto 50%; transform: translateX(-50%);
+      padding: 10px 14px; border-radius: 6px; background: #fff; color: #52677b;
+      box-shadow: 0 2px 8px #172b4d1a; display: none;
+    }
+    #message.error { color: #a32121; }
+    @media (max-width: 650px) {
+      header { gap: 8px; padding: 10px; }
+      .brand { width: 100%; }
+      #stats { min-width: auto; margin-left: auto; }
+      .control { flex: 1; min-width: 125px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <h1>DDIC-Diagramm</h1>
+      <div class="subtitle">1:N von oben nach unten · Tabellen und Hintergrund durch Ziehen verschieben</div>
+    </div>
+    <input id="search" class="control" type="search" placeholder="Entität oder Feld suchen" aria-label="Entitäten und Felder suchen">
+    <select id="package" class="control" aria-label="Paket filtern">
+      <option value="">Alle Pakete</option>
+    </select>
+    <div id="stats"></div>
+    <button id="zoom-out" title="Verkleinern" aria-label="Verkleinern">−</button>
+    <button id="zoom-in" title="Vergrößern" aria-label="Vergrößern">+</button>
+    <button id="fit" title="Alles einpassen" aria-label="Alles einpassen">Einpassen</button>
+  </header>
+  <main>
+    <svg id="diagram" viewBox="0 0 1400 900" role="img" aria-label="Entitätsdiagramm">
+      <g id="scene"><g id="edges"></g><g id="nodes"></g></g>
+    </svg>
+    <div id="message">DDIC wird geladen …</div>
+  </main>
+  <script src="/ddic/diagram.js"></script>
+</body>
+</html>

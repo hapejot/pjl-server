@@ -31,20 +31,42 @@ impl Annotations {
             annotations: Vec::new(),
         };
 
-        main_annotations.annotations.push(
-            Annotation::new("UI.HeaderInfo").record(
-                Record::new("UI.HeaderInfoType")
-                    .add(PropertyValue::new("TypeName").string(x.type_name()))
-                    .add(PropertyValue::new("TypeNamePlural").string(x.type_name_plural()))
-                    .add(PropertyValue::new("Title").record(
-                        Record::new("UI.DataField").add(PropertyValue::new("Value").path("name")),
-                    )),
-            ),
-        );
-
         main_annotations
             .annotations
             .extend(line_item_annotations(ddic, x, app_entities));
+        if !x.data_points().is_empty() {
+            let mut header_facets = Collection::new();
+            for field in x.data_points() {
+                let title = format!("{{@i18n>{}.{field}}}", x.name());
+                let value_path = match x.field_by_name(field) {
+                    Some(FieldSpec::Lookup {
+                        name,
+                        entity,
+                        collection: false,
+                        ..
+                    }) => ddic.fk_column(entity, name),
+                    _ => field.clone(),
+                };
+                let mut data_point = Annotation::new("UI.DataPoint").record(
+                    Record::new("UI.DataPointType")
+                        .add(PropertyValue::new("Value").path(value_path))
+                        .add(PropertyValue::new("Title").string(title.clone())),
+                );
+                data_point.qualifier = Some(field.clone());
+                main_annotations.annotations.push(data_point);
+                header_facets = header_facets.add_record(
+                    Record::new("UI.ReferenceFacet")
+                        .add(PropertyValue::new("Label").string(title))
+                        .add(
+                            PropertyValue::new("Target")
+                                .annotation_path(format!("@UI.DataPoint#{field}")),
+                        ),
+                );
+            }
+            main_annotations
+                .annotations
+                .push(Annotation::new("UI.HeaderFacets").collection(header_facets));
+        }
         // Nur App-Hauptentitaeten sind Sprungziele. Bei Join-Entitaeten (M:N ohne eigenen
         // Inhalt) wuerde der Schluessel-Fallback die ID der Zwischenzeile statt des Ziels senden.
         if app_entities.iter().any(|a| a == x.name()) {

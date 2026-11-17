@@ -99,7 +99,7 @@ Die UUIDv5-Namespace-Konstante `KEY_NAMESPACE` macht den Import wiederholbar ohn
 
 ### 3.4 Name-Feld (`name`)
 
-Jede Entität bekommt ein Feld `name` (Titel im Object Page Header, `UI.HeaderInfo`):
+Jede Entität bekommt ein Feld `name`:
 
 1. vorhandene Spalte `name` hat Vorrang,
 2. sonst Eintrag in `NAME_SOURCE`: `videos.file_name`, `scenes.title`,
@@ -176,7 +176,7 @@ Die Oberfläche besteht aus drei Schichten, die alle aus dem DDIC generiert werd
 
 | Annotation | Quelle / Inhalt |
 |---|---|
-| `UI.HeaderInfo` | Typname und Pluralname aus der Entität; Titel ist das Feld `name` |
+| `UI.DataPoint` / `UI.HeaderFacets` | `data_points` im Runtime-Overlay; schreibgeschützte Werte im Object-Page-Kopf, Felder bleiben im Formular editierbar |
 | `UI.LineItem` | Spalten aus `list_views`; ohne Ansichten eine Fallback-Spalte (bevorzugt `name`) |
 | `UI.PresentationVariant` | je Listenansicht, verweist auf deren `UI.LineItem` |
 | `UI.Facets` / `UI.FieldGroup` | Object-Page-Abschnitte und Feldgruppen aus DDIC und Overlay |

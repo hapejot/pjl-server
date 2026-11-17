@@ -9,8 +9,8 @@ async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = {git = "https://github.com/hapejot/serde-yaml.git"}
-indexmap = "=2.2.6"
-hashbrown = "=0.14.5"
+indexmap = "*"
+hashbrown = "*"
 data-store = { version = "0.1.0", path = "../data-store" }
 odata = { version = "0.1.0", path = "../odata" }
 uuid = { version = "1.24.0", features = ["serde", "v4"] }
@@ -22,7 +22,7 @@ thiserror = "2.0.20"
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 data-store = { version = "0.1.0", path = "../data-store", features = ["conformance"] }
-tempfile = "=3.10.1"
+tempfile = "3.27"
 
 [features]
 debug-tools = []

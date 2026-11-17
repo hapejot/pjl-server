@@ -88,26 +88,18 @@ impl Model {
         let mut last_nav: Option<String> = None;
         loop {
             let event = reader.read_event().context("ungueltiges $metadata-XML")?;
-            let decoder = reader.decoder();
             match event {
                 Event::Eof => break,
                 Event::Start(e) | Event::Empty(e) => {
-                    handle_start(
-                        &e,
-                        decoder,
-                        &mut model,
-                        &mut current,
-                        &mut in_key,
-                        &mut last_nav,
-                    )?;
+                    handle_start(&e, &mut model, &mut current, &mut in_key, &mut last_nav)?;
                 }
                 Event::End(e) => match e.local_name().as_ref() {
-                    b"EntityType" => {
+                    "EntityType" => {
                         if let Some(t) = current.take() {
                             model.types.insert(t.name.clone(), t);
                         }
                     }
-                    b"Key" => in_key = false,
+                    "Key" => in_key = false,
                     _ => {}
                 },
                 _ => {}
@@ -183,36 +175,33 @@ impl Model {
 
 fn handle_start(
     e: &BytesStart,
-    decoder: quick_xml::encoding::Decoder,
     model: &mut Model,
     current: &mut Option<EntityType>,
     in_key: &mut bool,
     last_nav: &mut Option<String>,
 ) -> Result<()> {
     match e.local_name().as_ref() {
-        b"EntityType" => {
+        "EntityType" => {
             *current = Some(EntityType {
-                name: attr(e, "Name", decoder)?.unwrap_or_default(),
+                name: attr(e, "Name")?.unwrap_or_default(),
                 ..Default::default()
             });
         }
-        b"Key" => *in_key = true,
-        b"PropertyRef" if *in_key => {
-            if let (Some(t), Some(name)) = (current.as_mut(), attr(e, "Name", decoder)?) {
+        "Key" => *in_key = true,
+        "PropertyRef" if *in_key => {
+            if let (Some(t), Some(name)) = (current.as_mut(), attr(e, "Name")?) {
                 t.keys.push(name);
             }
         }
-        b"Property" => {
-            if let (Some(t), Some(name)) = (current.as_mut(), attr(e, "Name", decoder)?) {
+        "Property" => {
+            if let (Some(t), Some(name)) = (current.as_mut(), attr(e, "Name")?) {
                 t.properties.push(name);
             }
         }
-        b"NavigationProperty" => {
-            if let (Some(t), Some(name), Some(typ)) = (
-                current.as_mut(),
-                attr(e, "Name", decoder)?,
-                attr(e, "Type", decoder)?,
-            ) {
+        "NavigationProperty" => {
+            if let (Some(t), Some(name), Some(typ)) =
+                (current.as_mut(), attr(e, "Name")?, attr(e, "Type")?)
+            {
                 let collection = typ.starts_with("Collection(");
                 let target = strip_type(&typ);
                 *last_nav = Some(name.clone());
@@ -226,22 +215,20 @@ fn handle_start(
                 );
             }
         }
-        b"ReferentialConstraint" => {
+        "ReferentialConstraint" => {
             // Gehoert zur zuletzt gelesenen Navigation desselben Typs.
             if let (Some(t), Some(prop), Some(referenced)) = (
                 current.as_mut(),
-                attr(e, "Property", decoder)?,
-                attr(e, "ReferencedProperty", decoder)?,
+                attr(e, "Property")?,
+                attr(e, "ReferencedProperty")?,
             ) {
                 if let Some(nav) = last_nav.as_ref().and_then(|n| t.navigations.get_mut(n)) {
                     nav.refs.push((prop, referenced));
                 }
             }
         }
-        b"EntitySet" => {
-            if let (Some(name), Some(typ)) =
-                (attr(e, "Name", decoder)?, attr(e, "EntityType", decoder)?)
-            {
+        "EntitySet" => {
+            if let (Some(name), Some(typ)) = (attr(e, "Name")?, attr(e, "EntityType")?) {
                 model.sets.insert(name, strip_type(&typ));
             }
         }
@@ -250,17 +237,12 @@ fn handle_start(
     Ok(())
 }
 
-fn attr(
-    e: &BytesStart,
-    name: &str,
-    decoder: quick_xml::encoding::Decoder,
-) -> Result<Option<String>> {
+fn attr(e: &BytesStart, name: &str) -> Result<Option<String>> {
     for a in e.attributes() {
         let a = a?;
-        if a.key.local_name().as_ref() == name.as_bytes() {
+        if a.key.local_name().as_ref() == name {
             return Ok(Some(
-                a.decoded_and_normalized_value(XmlVersion::Implicit1_0, decoder)?
-                    .into_owned(),
+                a.normalized_value(XmlVersion::Implicit1_0)?.into_owned(),
             ));
         }
     }
@@ -271,4 +253,58 @@ fn attr(
 fn strip_type(name: &str) -> String {
     let inner = name.trim_start_matches("Collection(").trim_end_matches(')');
     inner.rsplit('.').next().unwrap_or(inner).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_namespaced_metadata_with_unicode_and_escaped_attributes() {
+        let model = Model::parse(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+            <edmx:Edmx xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx">
+                <edmx:DataServices>
+                    <Schema xmlns="http://docs.oasis-open.org/odata/ns/edm" Namespace="Service">
+                        <EntityType Name="Category">
+                            <Key><PropertyRef Name="ID"/></Key>
+                            <Property Name="ID" Type="Edm.Guid"/>
+                        </EntityType>
+                        <EntityType Name="Product">
+                            <Key>
+                                <PropertyRef Name="ID"/>
+                                <PropertyRef Name="IsActiveEntity"/>
+                            </Key>
+                            <Property Name="ID" Type="Edm.Guid"/>
+                            <Property Name="IsActiveEntity" Type="Edm.Boolean"/>
+                            <Property Name="Catégorie_ID" Type="Edm.Guid"/>
+                            <NavigationProperty Name="Cat&#xE9;gory" Type="Service.Category">
+                                <ReferentialConstraint Property="Catégorie_ID" ReferencedProperty="ID"/>
+                            </NavigationProperty>
+                        </EntityType>
+                        <EntityContainer Name="Container">
+                            <EntitySet Name="Cat&#xE9;gories" EntityType="Service.Category"/>
+                            <EntitySet Name="Products" EntityType="Service.Product"/>
+                        </EntityContainer>
+                    </Schema>
+                </edmx:DataServices>
+            </edmx:Edmx>"#,
+        )
+        .unwrap();
+
+        let product = model.set_type("Products").unwrap();
+        assert_eq!(product.business_keys(), ["ID"]);
+        assert!(product.is_draft());
+        assert!(product.properties.iter().any(|p| p == "Catégorie_ID"));
+        let navigation = &product.navigations["Catégory"];
+        assert_eq!(navigation.target, "Category");
+        assert!(navigation.to_one);
+        assert_eq!(navigation.refs, [("Catégorie_ID".into(), "ID".into())]);
+        assert_eq!(
+            model
+                .order(&["Products".into(), "Catégories".into()])
+                .unwrap(),
+            ["Catégories", "Products"]
+        );
+    }
 }

@@ -9,9 +9,10 @@ nur die konkrete Implementierung (`YamlStore`) wird ausgetauscht.
 
 - Rust; das Crate verwendet Edition 2021 (siehe `Cargo.toml`).
 
-**Hinweis zu Abhängigkeitsversionen:** `Cargo.toml` pinnt `indexmap`,
-`hashbrown` und `tempfile` auf konkrete Versionen. Vor einer Änderung dieser
-Pins die Toolchain-Kompatibilität und `Cargo.lock` prüfen.
+**Hinweis zu Abhängigkeitsversionen:** Die früheren exakten Pins für `indexmap`,
+`hashbrown` und `tempfile` sind aufgehoben. Die aufgelösten Versionen stehen in
+der `Cargo.lock` des Workspaces. Nach Updates die Toolchain-Kompatibilität mit
+`cargo test --workspace --locked` prüfen.
 
 ## Struktur
 

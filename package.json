@@ -1,0 +1,12 @@
+{
+  "name": "pjl-ddic-diagram",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test fiori-server/tests/ddic-diagram.test.cjs"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

@@ -8,7 +8,7 @@ description = "SQLite-Implementierung des in `data-store` definierten DataStore-
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 data-store = { version = "0.1.0", path = "../data-store" }
 odata = { version = "0.1.0", path = "../odata" }
 uuid = { version = "1.24.0", features = ["serde", "v4"] }
@@ -18,7 +18,7 @@ tracing = "0.1.44"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 data-store = { version = "0.1.0", path = "../data-store", features = ["conformance"] }
 anyhow = "1.0.104"
-tempfile = "=3.10.1"
+tempfile = "3.27"
 
 [features]
 debug-tools = []

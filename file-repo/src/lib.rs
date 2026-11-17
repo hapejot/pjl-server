@@ -197,7 +197,7 @@ impl ZipRepository {
             {
                 return Err(RepoError::LimitExceeded(format!(
                     "Kompressionsverhaeltnis von '{}' ueber {}:1",
-                    entry.name(),
+                    entry.name().map_err(|e| RepoError::Zip(e.to_string()))?,
                     limits.max_ratio
                 )));
             }
@@ -209,7 +209,10 @@ impl ZipRepository {
             let mut entry = archive
                 .by_index(i)
                 .map_err(|e| RepoError::Zip(e.to_string()))?;
-            let raw_name = entry.name().to_string();
+            let raw_name = entry
+                .name()
+                .map_err(|e| RepoError::Zip(e.to_string()))?
+                .into_owned();
             let is_dir = entry.is_dir() || raw_name.ends_with('/');
             let name = normalize(&raw_name)?;
             if name.is_empty() {

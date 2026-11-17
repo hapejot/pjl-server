@@ -369,7 +369,19 @@ das lässt sich über `ui` lösen.
 | `--scripts-dir` | `SCRIPTS_DIR` | Rhai-Skripte |
 
 Ein Overlay (`overlay/ddic.overlay.json`) ergänzt die Basis, ohne sie zu verändern. Es eignet sich für
-Dinge, die nicht bei jeder Migration neu erzeugt werden sollen.
+Dinge, die nicht bei jeder Migration neu erzeugt werden sollen. Mit `entities[].data_points` lassen
+sich skalare Felder für die Anzeige als DataPoints im Object-Page-Kopf auswählen:
+
+```json
+{
+  "entities": [
+    { "name": "Order", "data_points": ["status", "amount"] }
+  ]
+}
+```
+
+Die DataPoints sind im Kopf schreibgeschützt. Die Felder bleiben zusätzlich im normalen
+Bearbeitungsformular editierbar.
 
 ## 14. Arbeitsablauf
 

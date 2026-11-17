@@ -10,6 +10,7 @@
 //! - `list_views`: je Ansicht per `name`. Gleichnamige ersetzen die Basis,
 //!   unbekannte werden angehaengt.
 //! - `facets`: Object-Page-Abschnitte je Schluessel (siehe `FacetSpec`).
+//! - `data_points`: skalare Felder fuer den schreibgeschuetzten Object-Page-Kopf.
 //! - Unbekannte Entitaeten, Pakete und Felder sind Fehler.
 //! - `fields` ist nicht Teil des Overlays (unbekannte Schluessel werden abgelehnt).
 
@@ -49,6 +50,8 @@ pub struct OverlayEntity {
     pub filter_defaults: BTreeMap<String, FilterDefault>,
     #[serde(default)]
     pub selection_fields: Vec<String>,
+    #[serde(default)]
+    pub data_points: Vec<String>,
     #[serde(default)]
     pub facets: Vec<FacetSpec>,
 }
@@ -135,6 +138,21 @@ pub fn apply(base: DataDictionary, overlay: &Overlay) -> anyhow::Result<DataDict
             }
         }
 
+        if !oe.data_points.is_empty() {
+            let fields = obj
+                .as_object_mut()
+                .context("ddic: Entitaet ist kein Objekt")?
+                .entry("data_points")
+                .or_insert_with(|| json!([]))
+                .as_array_mut()
+                .context("ddic: 'data_points' ist kein Array")?;
+            for field in &oe.data_points {
+                if !fields.iter().any(|f| f.as_str() == Some(field.as_str())) {
+                    fields.push(json!(field));
+                }
+            }
+        }
+
         if !oe.facets.is_empty() {
             let facets = obj
                 .as_object_mut()
@@ -208,6 +226,34 @@ fn validate(base: &DataDictionary, overlay: &Overlay) -> anyhow::Result<()> {
             if !ok {
                 bail!(
                     "overlay: Entitaet '{}': selection_fields nennt '{field}', das weder Atom noch einwertige Navigation ist",
+                    oe.name
+                );
+            }
+        }
+        let mut data_points_seen = Vec::new();
+        for field in &oe.data_points {
+            if data_points_seen.contains(&field.as_str()) {
+                bail!(
+                    "overlay: Entitaet '{}': data_points nennt '{field}' mehrfach",
+                    oe.name
+                );
+            }
+            data_points_seen.push(field.as_str());
+            let is_scalar = entity.fields().any(|f| {
+                f.name() == field
+                    && matches!(
+                        f,
+                        spec::FieldSpec::Atom { .. }
+                            | spec::FieldSpec::Measure { .. }
+                            | spec::FieldSpec::Lookup {
+                                collection: false,
+                                ..
+                            }
+                    )
+            });
+            if !is_scalar {
+                bail!(
+                    "overlay: Entitaet '{}': data_points nennt '{field}', das kein skalares Atom-, Measure- oder Lookup-Feld ist",
                     oe.name
                 );
             }

@@ -1031,17 +1031,6 @@
         <ReturnType Type="Service.Note"/>
       </Action>
       <Annotations Target="Service.AppointmentKind">
-        <Annotation Term="UI.HeaderInfo">
-          <Record Type="UI.HeaderInfoType">
-            <PropertyValue Property="TypeName" String="AppointmentKind"/>
-            <PropertyValue Property="TypeNamePlural" String="AppointmentKind"/>
-            <PropertyValue Property="Title">
-              <Record Type="UI.DataField">
-                <PropertyValue Property="Value" Path="name"/>
-              </Record>
-            </PropertyValue>
-          </Record>
-        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataField">
@@ -1099,17 +1088,6 @@
         <Annotation Term="Common.Label" String="Sortierung"/>
       </Annotations>
       <Annotations Target="Service.Customer">
-        <Annotation Term="UI.HeaderInfo">
-          <Record Type="UI.HeaderInfoType">
-            <PropertyValue Property="TypeName" String="Kunde"/>
-            <PropertyValue Property="TypeNamePlural" String="Kunden"/>
-            <PropertyValue Property="Title">
-              <Record Type="UI.DataField">
-                <PropertyValue Property="Value" Path="name"/>
-              </Record>
-            </PropertyValue>
-          </Record>
-        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataFieldWithIntentBasedNavigation">
@@ -1343,17 +1321,6 @@
         <Annotation Term="Common.Label" String="Projekte"/>
       </Annotations>
       <Annotations Target="Service.SystemUser">
-        <Annotation Term="UI.HeaderInfo">
-          <Record Type="UI.HeaderInfoType">
-            <PropertyValue Property="TypeName" String="SystemUser"/>
-            <PropertyValue Property="TypeNamePlural" String="System Users"/>
-            <PropertyValue Property="Title">
-              <Record Type="UI.DataField">
-                <PropertyValue Property="Value" Path="name"/>
-              </Record>
-            </PropertyValue>
-          </Record>
-        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataFieldWithIntentBasedNavigation">
@@ -1628,17 +1595,6 @@
         <Annotation Term="Org.OData.Core.V1.Computed" Bool="true"/>
       </Annotations>
       <Annotations Target="Service.TaskStatus">
-        <Annotation Term="UI.HeaderInfo">
-          <Record Type="UI.HeaderInfoType">
-            <PropertyValue Property="TypeName" String="TaskStatus"/>
-            <PropertyValue Property="TypeNamePlural" String="TaskStatus"/>
-            <PropertyValue Property="Title">
-              <Record Type="UI.DataField">
-                <PropertyValue Property="Value" Path="name"/>
-              </Record>
-            </PropertyValue>
-          </Record>
-        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataField">
@@ -1696,17 +1652,6 @@
         <Annotation Term="Common.Label" String="Sortierung"/>
       </Annotations>
       <Annotations Target="Service.ProjectStatus">
-        <Annotation Term="UI.HeaderInfo">
-          <Record Type="UI.HeaderInfoType">
-            <PropertyValue Property="TypeName" String="ProjectStatus"/>
-            <PropertyValue Property="TypeNamePlural" String="ProjectStatus"/>
-            <PropertyValue Property="Title">
-              <Record Type="UI.DataField">
-                <PropertyValue Property="Value" Path="name"/>
-              </Record>
-            </PropertyValue>
-          </Record>
-        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataField">
@@ -1764,17 +1709,6 @@
         <Annotation Term="Common.Label" String="Sortierung"/>
       </Annotations>
       <Annotations Target="Service.DevObject">
-        <Annotation Term="UI.HeaderInfo">
-          <Record Type="UI.HeaderInfoType">
-            <PropertyValue Property="TypeName" String="Entwicklungsobjekt"/>
-            <PropertyValue Property="TypeNamePlural" String="Entwicklungsobjekte"/>
-            <PropertyValue Property="Title">
-              <Record Type="UI.DataField">
-                <PropertyValue Property="Value" Path="name"/>
-              </Record>
-            </PropertyValue>
-          </Record>
-        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataFieldWithIntentBasedNavigation">
@@ -2033,17 +1967,6 @@
         </Annotation>
       </Annotations>
       <Annotations Target="Service.Article">
-        <Annotation Term="UI.HeaderInfo">
-          <Record Type="UI.HeaderInfoType">
-            <PropertyValue Property="TypeName" String="Wissensartikel"/>
-            <PropertyValue Property="TypeNamePlural" String="Wissensartikel"/>
-            <PropertyValue Property="Title">
-              <Record Type="UI.DataField">
-                <PropertyValue Property="Value" Path="name"/>
-              </Record>
-            </PropertyValue>
-          </Record>
-        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataFieldWithIntentBasedNavigation">
@@ -2322,17 +2245,6 @@
         </Annotation>
       </Annotations>
       <Annotations Target="Service.Task">
-        <Annotation Term="UI.HeaderInfo">
-          <Record Type="UI.HeaderInfoType">
-            <PropertyValue Property="TypeName" String="Aufgabe"/>
-            <PropertyValue Property="TypeNamePlural" String="Aufgaben"/>
-            <PropertyValue Property="Title">
-              <Record Type="UI.DataField">
-                <PropertyValue Property="Value" Path="name"/>
-              </Record>
-            </PropertyValue>
-          </Record>
-        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataFieldWithIntentBasedNavigation">
@@ -2617,17 +2529,6 @@
         </Annotation>
       </Annotations>
       <Annotations Target="Service.Project">
-        <Annotation Term="UI.HeaderInfo">
-          <Record Type="UI.HeaderInfoType">
-            <PropertyValue Property="TypeName" String="Projekt"/>
-            <PropertyValue Property="TypeNamePlural" String="Projekte"/>
-            <PropertyValue Property="Title">
-              <Record Type="UI.DataField">
-                <PropertyValue Property="Value" Path="name"/>
-              </Record>
-            </PropertyValue>
-          </Record>
-        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataFieldWithIntentBasedNavigation">
@@ -2984,17 +2885,6 @@
         <Annotation Term="Common.Label" String="Mitglieder"/>
       </Annotations>
       <Annotations Target="Service.Appointment">
-        <Annotation Term="UI.HeaderInfo">
-          <Record Type="UI.HeaderInfoType">
-            <PropertyValue Property="TypeName" String="Termin"/>
-            <PropertyValue Property="TypeNamePlural" String="Termine"/>
-            <PropertyValue Property="Title">
-              <Record Type="UI.DataField">
-                <PropertyValue Property="Value" Path="name"/>
-              </Record>
-            </PropertyValue>
-          </Record>
-        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataFieldWithIntentBasedNavigation">
@@ -3343,17 +3233,6 @@
         </Annotation>
       </Annotations>
       <Annotations Target="Service.Priority">
-        <Annotation Term="UI.HeaderInfo">
-          <Record Type="UI.HeaderInfoType">
-            <PropertyValue Property="TypeName" String="Priority"/>
-            <PropertyValue Property="TypeNamePlural" String="Priority"/>
-            <PropertyValue Property="Title">
-              <Record Type="UI.DataField">
-                <PropertyValue Property="Value" Path="name"/>
-              </Record>
-            </PropertyValue>
-          </Record>
-        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataField">
@@ -3411,17 +3290,6 @@
         <Annotation Term="Common.Label" String="Sortierung"/>
       </Annotations>
       <Annotations Target="Service.ArticleCategory">
-        <Annotation Term="UI.HeaderInfo">
-          <Record Type="UI.HeaderInfoType">
-            <PropertyValue Property="TypeName" String="ArticleCategory"/>
-            <PropertyValue Property="TypeNamePlural" String="ArticleCategory"/>
-            <PropertyValue Property="Title">
-              <Record Type="UI.DataField">
-                <PropertyValue Property="Value" Path="name"/>
-              </Record>
-            </PropertyValue>
-          </Record>
-        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataField">
@@ -3479,17 +3347,6 @@
         <Annotation Term="Common.Label" String="Sortierung"/>
       </Annotations>
       <Annotations Target="Service.DevKind">
-        <Annotation Term="UI.HeaderInfo">
-          <Record Type="UI.HeaderInfoType">
-            <PropertyValue Property="TypeName" String="DevKind"/>
-            <PropertyValue Property="TypeNamePlural" String="DevKind"/>
-            <PropertyValue Property="Title">
-              <Record Type="UI.DataField">
-                <PropertyValue Property="Value" Path="name"/>
-              </Record>
-            </PropertyValue>
-          </Record>
-        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataField">
@@ -3547,17 +3404,6 @@
         <Annotation Term="Common.Label" String="Sortierung"/>
       </Annotations>
       <Annotations Target="Service.ReleaseStatus">
-        <Annotation Term="UI.HeaderInfo">
-          <Record Type="UI.HeaderInfoType">
-            <PropertyValue Property="TypeName" String="ReleaseStatus"/>
-            <PropertyValue Property="TypeNamePlural" String="ReleaseStatus"/>
-            <PropertyValue Property="Title">
-              <Record Type="UI.DataField">
-                <PropertyValue Property="Value" Path="name"/>
-              </Record>
-            </PropertyValue>
-          </Record>
-        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataField">
@@ -3615,17 +3461,6 @@
         <Annotation Term="Common.Label" String="Sortierung"/>
       </Annotations>
       <Annotations Target="Service.ProjectMember">
-        <Annotation Term="UI.HeaderInfo">
-          <Record Type="UI.HeaderInfoType">
-            <PropertyValue Property="TypeName" String="Projektmitglied"/>
-            <PropertyValue Property="TypeNamePlural" String="Projektmitglieder"/>
-            <PropertyValue Property="Title">
-              <Record Type="UI.DataField">
-                <PropertyValue Property="Value" Path="name"/>
-              </Record>
-            </PropertyValue>
-          </Record>
-        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataField">
@@ -3831,17 +3666,6 @@
         </Annotation>
       </Annotations>
       <Annotations Target="Service.Release">
-        <Annotation Term="UI.HeaderInfo">
-          <Record Type="UI.HeaderInfoType">
-            <PropertyValue Property="TypeName" String="Release"/>
-            <PropertyValue Property="TypeNamePlural" String="Releases"/>
-            <PropertyValue Property="Title">
-              <Record Type="UI.DataField">
-                <PropertyValue Property="Value" Path="name"/>
-              </Record>
-            </PropertyValue>
-          </Record>
-        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataFieldWithIntentBasedNavigation">
@@ -4106,17 +3930,6 @@
         </Annotation>
       </Annotations>
       <Annotations Target="Service.Contact">
-        <Annotation Term="UI.HeaderInfo">
-          <Record Type="UI.HeaderInfoType">
-            <PropertyValue Property="TypeName" String="Ansprechpartner"/>
-            <PropertyValue Property="TypeNamePlural" String="Ansprechpartner"/>
-            <PropertyValue Property="Title">
-              <Record Type="UI.DataField">
-                <PropertyValue Property="Value" Path="name"/>
-              </Record>
-            </PropertyValue>
-          </Record>
-        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataFieldWithIntentBasedNavigation">
@@ -4371,17 +4184,6 @@
         <Annotation Term="Common.Label" String="Termine"/>
       </Annotations>
       <Annotations Target="Service.Note">
-        <Annotation Term="UI.HeaderInfo">
-          <Record Type="UI.HeaderInfoType">
-            <PropertyValue Property="TypeName" String="Notiz"/>
-            <PropertyValue Property="TypeNamePlural" String="Notizen"/>
-            <PropertyValue Property="Title">
-              <Record Type="UI.DataField">
-                <PropertyValue Property="Value" Path="name"/>
-              </Record>
-            </PropertyValue>
-          </Record>
-        </Annotation>
         <Annotation Term="UI.LineItem">
           <Collection>
             <Record Type="UI.DataFieldWithIntentBasedNavigation">

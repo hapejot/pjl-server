@@ -11,6 +11,7 @@ use spec::data_dictionary::DataDictionary;
 pub mod auth;
 pub mod batch;
 pub mod config;
+pub mod ddic_diagram;
 pub mod ddic_file;
 pub mod ddic_store;
 // pub mod ddic_loader;

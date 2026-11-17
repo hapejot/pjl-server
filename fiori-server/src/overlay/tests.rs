@@ -1,5 +1,5 @@
 use super::*;
-use spec::{EntitySpec, FieldSpec, ListView};
+use spec::{AtomValueList, EntitySpec, FieldSpec, ListView, ValueEntry, ValueList};
 
 fn base() -> DataDictionary {
     let mut d = DataDictionary::empty();
@@ -89,6 +89,50 @@ fn list_view_columns_accept_width_and_priority() {
     assert_eq!(default.columns()[0].priority(), Some(spec::Priority::High));
     assert_eq!(default.columns()[1].width(), None);
     assert_eq!(default.columns()[1].priority(), None);
+}
+
+#[test]
+fn data_points_are_merged_and_unknown_fields_are_rejected() {
+    let overlay = parse(r#"{"entities":[{"name":"Video","data_points":["file_size"]}]}"#).unwrap();
+    let d = apply(base(), &overlay).unwrap();
+    assert_eq!(video(&d).data_points(), ["file_size"]);
+
+    let invalid = parse(r#"{"entities":[{"name":"Video","data_points":["missing"]}]}"#).unwrap();
+    let err = apply(base(), &invalid).unwrap_err().to_string();
+    assert!(err.contains("data_points"), "{err}");
+}
+
+#[test]
+fn value_list_field_can_be_configured_as_a_data_point() {
+    let list_id = "79714635-4b3e-51a6-be78-dc009beb5f3c";
+    let mut base = base();
+    base.add_value_list(ValueList::new(
+        list_id,
+        "VideoStatus",
+        vec![ValueEntry::new("open", "Open", 1)],
+    ));
+    assert!(base.add_field(
+        "Video",
+        FieldSpec::atom("status", "Status", "Edm.String").with_value_list(
+            AtomValueList::FieldValueList {
+                list_id: list_id.into(),
+                prefer_dialog: false,
+            },
+        ),
+    ));
+
+    let overlay = parse(r#"{"entities":[{"name":"Video","data_points":["status"]}]}"#).unwrap();
+    let mut ddic = apply(base, &overlay).unwrap();
+    ddic.apply_value_list_lookups().unwrap();
+    let video = video(&ddic);
+    assert_eq!(video.data_points(), ["status"]);
+    assert!(matches!(
+        video.field_by_name("status"),
+        Some(FieldSpec::Lookup {
+            collection: false,
+            ..
+        })
+    ));
 }
 
 fn names(columns: &[spec::ListColumn]) -> Vec<&str> {

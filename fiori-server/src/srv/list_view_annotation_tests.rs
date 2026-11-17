@@ -1,5 +1,5 @@
 use super::*;
-use spec::{FieldSpec, ListView, Relationship};
+use spec::{AtomValueList, FieldSpec, ListView, Relationship, ValueEntry, ValueList};
 
 fn atom(name: &str) -> FieldSpec {
     FieldSpec::Atom {
@@ -63,24 +63,105 @@ fn link_atoms_become_clickable_fields() {
 }
 
 #[test]
-fn header_type_names_are_display_texts_not_technical_names() {
+fn entity_annotations_do_not_add_header_info() {
+    let e = active_video(vec![]);
+    let anns = Annotations::from_entity(&DataDictionary::new(), &e, &[], &[]);
+    let main = anns.iter().find(|a| a.target == "Service.Video").unwrap();
+    assert!(
+        main.annotations.iter().all(|a| a.term != "UI.HeaderInfo"),
+        "Object Page header info is not generated"
+    );
+}
+
+#[test]
+fn configured_data_points_become_read_only_header_facets() {
     let mut e = active_video(vec![]);
-    let header = |e: &spec::EntitySpec| {
-        let anns = Annotations::from_entity(&DataDictionary::new(), e, &[], &[]);
-        let main = anns.iter().find(|a| a.target == "Service.Video").unwrap();
-        serde_json::to_string(
-            main.annotations
-                .iter()
-                .find(|a| a.term == "UI.HeaderInfo")
-                .unwrap(),
-        )
-        .unwrap()
-    };
-    let h = header(&e);
-    assert!(h.contains("\"Videos\""), "Plural aus type_name_plural");
-    assert!(!h.contains("VideoSet"));
-    e.set_type_name(Some("Film".into()));
-    assert!(header(&e).contains("\"Film\""), "TypeName aus type_name");
+    e.set_data_points(vec!["title".into()]);
+    let anns = Annotations::from_entity(&DataDictionary::new(), &e, &[], &[]);
+    let main = anns.iter().find(|a| a.target == "Service.Video").unwrap();
+
+    let data_point = main
+        .annotations
+        .iter()
+        .find(|a| a.term == "UI.DataPoint")
+        .unwrap();
+    assert_eq!(data_point.qualifier.as_deref(), Some("title"));
+    assert_eq!(
+        data_point.record.as_ref().unwrap().property_values[0]
+            .path
+            .as_deref(),
+        Some("title")
+    );
+    assert_eq!(
+        data_point.record.as_ref().unwrap().property_values[1]
+            .string
+            .as_deref(),
+        Some("{@i18n>Video.title}")
+    );
+    let header_facets = main
+        .annotations
+        .iter()
+        .find(|a| a.term == "UI.HeaderFacets")
+        .unwrap();
+    assert_eq!(
+        header_facets.collection.as_ref().unwrap().records[0].property_values[1]
+            .annotation_path
+            .as_deref(),
+        Some("@UI.DataPoint#title")
+    );
+}
+
+#[test]
+fn value_list_data_point_uses_the_text_annotated_foreign_key() {
+    let list_id = "79714635-4b3e-51a6-be78-dc009beb5f3c";
+    let mut ddic = DataDictionary::empty();
+    ddic.add_package(spec::package::Package::new("core"));
+    ddic.add_value_list(ValueList::new(
+        list_id,
+        "VideoStatus",
+        vec![ValueEntry::new("open", "Open", 1)],
+    ));
+    let mut video = spec::EntitySpec::new("Video", "core", "Videos")
+        .field(atom("name"))
+        .field(
+            FieldSpec::atom("status", "Status", "Edm.String").with_value_list(
+                AtomValueList::FieldValueList {
+                    list_id: list_id.into(),
+                    prefer_dialog: false,
+                },
+            ),
+        );
+    video.set_data_points(vec!["status".into()]);
+    ddic.add_entity(video);
+    ddic.apply_value_list_lookups().unwrap();
+    ddic.activate();
+    let entity = ddic.active_entity("Video").unwrap();
+    let anns = Annotations::from_entity(&ddic, entity, &[], &[]);
+    let data_point = anns[0]
+        .annotations
+        .iter()
+        .find(|a| a.term == "UI.DataPoint")
+        .unwrap();
+    assert_eq!(
+        data_point.record.as_ref().unwrap().property_values[0]
+            .path
+            .as_deref(),
+        Some("status_ID")
+    );
+    let status_text = anns
+        .iter()
+        .find(|a| a.target == "Service.Video/status_ID")
+        .unwrap();
+    assert_eq!(
+        status_text
+            .annotations
+            .iter()
+            .find(|a| a.term == "Common.Text")
+            .unwrap()
+            .path
+            .as_deref(),
+        Some("status/name")
+    );
 }
 
 fn active_video(views: Vec<ListView>) -> spec::EntitySpec {

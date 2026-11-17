@@ -501,11 +501,11 @@ impl FieldSpec {
     }
 }
 
-/// Application-level entity specification — describes an entity's own fields and header layout.
+/// Application-level entity specification — describes an entity's own fields and UI layout.
 ///
 /// Entities may be introduced by `Relationship` declarations without an explicit `EntitySpec`.
 /// In that case they get default fields (ID + Name). An `EntitySpec` refines the entity
-/// with additional fields, header info, and data points.
+/// with additional fields and read-only header data points.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntitySpec {
     /// Draft-Unterstuetzung; bestehende Dictionaries bleiben draft-faehig.
@@ -522,7 +522,7 @@ pub struct EntitySpec {
     /// Logical package grouping (e.g. "itil", "asset_management").
     pub(crate) package: String,
 
-    /// Singular display name for the Object Page header (e.g. "Customer").
+    /// Singular display name used for the entity's `name` field (e.g. "Customer").
     /// Frei definierbar, unabhaengig vom Entitaetsnamen. Fehlt er, gilt der Name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) type_name: Option<String>,
@@ -545,6 +545,10 @@ pub struct EntitySpec {
     /// Felder der Filterleiste in dieser Reihenfolge (`UI.SelectionFields`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) selection_fields: Vec<String>,
+
+    /// Felder, die als schreibgeschuetzte DataPoints im Object-Page-Kopf angezeigt werden.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) data_points: Vec<String>,
 
     /// Einstellungen je Object-Page-Facette (Tabellenabschnitt einer to-many Navigation).
     /// Fehlt ein Eintrag, gelten die Standardwerte.
@@ -1071,6 +1075,11 @@ impl EntitySpec {
         self.selection_fields = fields;
     }
 
+    /// Ersetzt die als DataPoints im Object-Page-Kopf angezeigten Felder.
+    pub fn set_data_points(&mut self, fields: Vec<String>) {
+        self.data_points = fields;
+    }
+
     /// Haengt ein Feld an die Feldliste an.
     pub fn add_field(&mut self, field: FieldSpec) {
         self.fields.push(field);
@@ -1129,6 +1138,7 @@ impl EntitySpec {
             list_views: vec![],
             filter_defaults: BTreeMap::new(),
             selection_fields: vec![],
+            data_points: vec![],
             facets: vec![],
             audited: true,
             ui: None,
@@ -1207,6 +1217,11 @@ impl EntitySpec {
     /// Felder der Filterleiste in Reihenfolge.
     pub fn selection_fields(&self) -> &[String] {
         &self.selection_fields
+    }
+
+    /// Felder, die als DataPoints im Object-Page-Kopf angezeigt werden.
+    pub fn data_points(&self) -> &[String] {
+        &self.data_points
     }
 
     /// Vorbelegte Filterwerte je Feld.

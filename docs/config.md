@@ -83,6 +83,19 @@ Das aufbereitete Dictionary wird zur Diagnose nach `DATA_DIR/active-ddic.json`
 geschrieben. `DATA_DIR` muss daher auch beim PostgreSQL-Betrieb beschreibbar sein;
 das Arbeitsverzeichnis des Servers muss nicht beschreibbar sein.
 
+Die read-only Diagrammansicht unter `/ddic/diagram` visualisiert Entitäten, Schlüssel und Beziehungen. Im Designer zeigt sie den gespeicherten DDIC-Stand, in der Runtime das geladene Dictionary.
+Die Startanordnung platziert die 1-Seite einer Beziehung oberhalb der N-Seite, soweit Zyklen dies zulassen.
+Tabellen lassen sich einzeln durch Ziehen verschieben; die Beziehungslinien folgen dabei.
+Ziehen am Hintergrund verschiebt den Ausschnitt. Manuelle Tabellenpositionen bleiben beim Filtern und
+bei „Einpassen“ erhalten, aber nicht nach einem Neuladen der Seite. Das Dictionary wird dabei nicht verändert.
+
+Der Quellcode der Diagrammansicht liegt in `fiori-server/frontend/ddic-diagram.ts`.
+Im Repository-Wurzelverzeichnis installiert `npm ci` die Entwicklungswerkzeuge;
+`npm run typecheck` prüft die Typen und `npm test` übersetzt die Ansicht und führt ihre Regressionstests aus.
+`npm run build` erzeugt `fiori-server/static/ddic-diagram.js`, das zusammen mit der TypeScript-Quelle
+versioniert und vom Rust-Server eingebettet wird. Nach Änderungen an TypeScript immer neu erzeugen,
+bevor der Server gebaut wird. Unveränderte Rust-/Docker-Builds benötigen dadurch kein Node.js.
+
 ## 2b. Festwertlisten
 
 Festwertlisten sind für Statuswerte und ähnliche kleine, selten geänderte Auswahllisten gedacht. Sie werden nur im Designer gepflegt.

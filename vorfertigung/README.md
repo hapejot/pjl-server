@@ -11,8 +11,7 @@ Im Repository-Wurzelverzeichnis:
 ```sh
 cargo run --release --bin pjl-runtime -- \
   --bind 127.0.0.1 --port 8092 \
-  --ddic vorfertigung/ddic.json --data-dir vorfertigung/data \
-  --scripts-dir vorfertigung/scripts
+  --model-root vorfertigung --data-dir vorfertigung/data
 ```
 
 Das Launchpad ist unter <http://localhost:8092/> erreichbar. Die UI5-Ressourcen
@@ -22,6 +21,12 @@ starten. Die SQLite-Daten werden beim regulären Beenden gespeichert.
 
 Die Beispieldaten werden nur eingespielt, wenn das jeweilige Entity-Set leer ist.
 Zum erneuten Einspielen eine neue, leere `--data-dir` verwenden.
+
+Die Mengeneinheiten liegen im wiederverwendbaren Paket `packages/units.json`;
+`ddic.json` referenziert es über `package_files`. Sie stammen aus dem CRM-Beispiel und sind um `ST` für die
+vorhandenen Aufträge ergänzt. Stunden (`H`) haben hier drei Nachkommastellen,
+damit auch anteilige Stunden der Zeitrückmeldung angezeigt werden. Die
+Zeiteinheit-Wertehilfe ist auf Einheiten der Dimension `time` beschränkt.
 
 ## Umfang und Grenzen
 

@@ -36,8 +36,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DDIC: /app/model/ddic.json
-      SCRIPTS_DIR: /app/scripts
+      MODEL_ROOT: /app/model
       STORE_PG_URL: postgres://crm:${CRM_DB_PASSWORD}@db:5432/crm
       PORT: "8080"
       RUST_LOG: info
@@ -45,8 +44,7 @@ services:
       - "8090:8080"
       - "3271:3270"
     volumes:
-      - ./ddic.json:/app/model/ddic.json:ro
-      - ./scripts:/app/scripts:ro
+      - ./:/app/model:ro
     restart: unless-stopped
 
 volumes:

@@ -13,6 +13,7 @@ pub mod batch;
 pub mod config;
 pub mod ddic_diagram;
 pub mod ddic_file;
+pub mod ddic_packages;
 pub mod ddic_store;
 // pub mod ddic_loader;
 pub mod extension;

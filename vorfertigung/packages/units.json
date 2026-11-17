@@ -1,0 +1,33 @@
+{
+  "entities": [
+    {
+      "name": "UnitOfMeasure",
+      "package": "units",
+      "type_name": "Mengeneinheit",
+      "type_name_plural": "Mengeneinheiten",
+      "audited": false,
+      "draft_enabled": false,
+      "fields": [
+        { "Atom": { "name": "code", "label": "Code", "edm_type": "Edm.String", "max_length": 3, "unit_scale_field": "decimal_places", "code_list": "UnitsOfMeasure" } },
+        { "Atom": { "name": "name", "label": "Bezeichnung", "edm_type": "Edm.String", "max_length": 50 } },
+        { "Atom": { "name": "decimal_places", "label": "Nachkommastellen", "edm_type": "Edm.Byte" } },
+        { "Atom": { "name": "dimension", "label": "Dimension", "edm_type": "Edm.String", "max_length": 20 } }
+      ],
+      "seed": [
+        { "code": "PCS", "name": "Stück", "decimal_places": 0, "dimension": "count" },
+        { "code": "ST", "name": "Stück (ST)", "decimal_places": 0, "dimension": "count" },
+        { "code": "KG", "name": "Kilogramm", "decimal_places": 3, "dimension": "mass" },
+        { "code": "G", "name": "Gramm", "decimal_places": 0, "dimension": "mass" },
+        { "code": "L", "name": "Liter", "decimal_places": 3, "dimension": "volume" },
+        { "code": "M", "name": "Meter", "decimal_places": 2, "dimension": "length" },
+        { "code": "H87", "name": "Stück (H87)", "decimal_places": 0, "dimension": "count" },
+        { "code": "KWH", "name": "Kilowattstunde", "decimal_places": 2, "dimension": "energy" },
+        { "code": "TO", "name": "Tonne", "decimal_places": 3, "dimension": "mass" },
+        { "code": "H", "name": "Stunde", "decimal_places": 3, "dimension": "time" },
+        { "code": "MIN", "name": "Minute", "decimal_places": 0, "dimension": "time" },
+        { "code": "S", "name": "Sekunde", "decimal_places": 0, "dimension": "time" },
+        { "code": "D", "name": "Tag", "decimal_places": 0, "dimension": "time" }
+      ]
+    }
+  ]
+}

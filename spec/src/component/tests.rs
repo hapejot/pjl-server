@@ -3,6 +3,7 @@ use super::*;
 fn comp() -> ComponentSpec {
     ComponentSpec {
         name: "TimeRange".into(),
+        package: None,
         kind: ComponentKind::TimeRange,
         script: Some("components/TimeRange".into()),
         unit: TimeUnit::Minutes,

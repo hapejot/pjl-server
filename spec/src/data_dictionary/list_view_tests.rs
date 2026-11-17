@@ -59,6 +59,24 @@ fn valid_views_pass() {
 }
 
 #[test]
+fn measures_are_valid_list_columns() {
+    let mut d = DataDictionary::empty();
+    d.add_package(Package::new("core"));
+    d.add_entity(
+        EntitySpec::new("Order", "core", "Orders")
+            .field(atom("unit"))
+            .field(FieldSpec::measure(
+                "amount",
+                "Amount",
+                "unit",
+                crate::MeasureKind::Unit,
+            ))
+            .list_view(ListView::new("default", &["amount"])),
+    );
+    assert!(d.validate_list_views().is_ok());
+}
+
+#[test]
 fn unknown_column_is_rejected() {
     let d = ddic(vec![ListView::new("default", &["nope"])]);
     let err = d.validate_list_views().unwrap_err();

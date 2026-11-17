@@ -37,6 +37,9 @@ pub enum TimeUnit {
 #[serde(deny_unknown_fields)]
 pub struct ComponentSpec {
     pub(crate) name: String,
+    /// Optionales Paket fuer die Ablage in einer Paketdatei.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) package: Option<String>,
     pub(crate) kind: ComponentKind,
     /// Rhai-Modul mit den Regeln, relativ zum Skriptverzeichnis (z. B. `components/TimeRange`).
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -29,7 +29,6 @@ fn model_root_zip_provides_ddic_scripts_and_ext() {
 
     let mut config = ServerConfig::defaults(crate::config::ServerMode::Runtime);
     config.model_root = Some(format!("zip://{}", zp.display()));
-    config.ddic = Some(PathBuf::from("ddic.json"));
 
     let sources = resolve(&config).unwrap();
     assert!(sources.ddic.repo.exists("ddic.json"));
@@ -42,25 +41,52 @@ fn model_root_zip_provides_ddic_scripts_and_ext() {
 }
 
 #[test]
-fn model_root_rejects_legacy_script_and_ext_dirs() {
-    let mut config = ServerConfig::defaults(crate::config::ServerMode::Runtime);
-    config.model_root = Some("zip:///nonexistent.zip".into());
-    config.scripts_dir = Some(PathBuf::from("x"));
+fn model_root_is_required() {
+    let config = ServerConfig::defaults(crate::config::ServerMode::Runtime);
     assert!(resolve(&config).is_err());
 }
 
 #[test]
-fn designer_root_must_be_file() {
+fn designer_uses_model_root_and_requires_file() {
     let mut config = ServerConfig::defaults(crate::config::ServerMode::Runtime);
     config.designer = true;
-    config.designer_root = Some("zip:///x.zip".into());
+    config.model_root = Some("zip:///x.zip".into());
     assert!(designer_path(&config).is_err());
 
-    config.designer_root = Some("file:///srv/designer".into());
-    config.ddic = Some(PathBuf::from("ddic.json"));
+    config.model_root = Some("file:///srv/designer".into());
     assert_eq!(
         designer_path(&config).unwrap(),
         PathBuf::from("/srv/designer/ddic.json")
+    );
+}
+
+#[test]
+fn directory_model_supplies_runtime_sources_but_designer_skips_them() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("scripts")).unwrap();
+    std::fs::create_dir(dir.path().join("ext")).unwrap();
+    std::fs::write(
+        dir.path().join("scripts/OrderSet.rhai"),
+        "fn before_read(ctx) { ctx }",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("ddic.json"), r#"{"entities":[],"apps":[]}"#).unwrap();
+    let mut config = ServerConfig::defaults(crate::config::ServerMode::Runtime);
+    config.model_root = Some(dir.path().to_string_lossy().into_owned());
+    let sources = resolve(&config).unwrap();
+    assert_eq!(sources.ddic.fs_path, Some(dir.path().join("ddic.json")));
+    assert_eq!(
+        sources.scripts.unwrap().fs_dir,
+        Some(dir.path().join("scripts"))
+    );
+    assert_eq!(sources.ext.unwrap().fs_dir, Some(dir.path().join("ext")));
+    config.designer = true;
+    let sources = resolve(&config).unwrap();
+    assert!(sources.scripts.is_none());
+    assert!(sources.ext.is_none());
+    assert_eq!(
+        designer_path(&config).unwrap(),
+        dir.path().join("ddic.json")
     );
 }
 
@@ -99,7 +125,7 @@ fn fiori_root_zip_is_served_with_content_type() {
 #[test]
 fn embedded_web_assets_are_served_without_a_web_directory() {
     let mut config = ServerConfig::defaults(crate::config::ServerMode::Runtime);
-    config.ddic = Some(PathBuf::from("ddic.json"));
+    config.model_root = Some(".".into());
 
     let sources = resolve(&config).unwrap();
     assert!(sources.fiori.exists("favicon.svg"));
@@ -116,7 +142,7 @@ fn web_root_assets_override_and_extend_embedded_assets() {
     std::fs::write(dir.path().join("custom.js"), b"custom asset").unwrap();
 
     let mut config = ServerConfig::defaults(crate::config::ServerMode::Runtime);
-    config.ddic = Some(PathBuf::from("ddic.json"));
+    config.model_root = Some(".".into());
     config.web_root = Some(dir.path().to_path_buf());
 
     let sources = resolve(&config).unwrap();
@@ -150,7 +176,7 @@ fn fiori_root_zip_overrides_embedded_assets() {
     std::fs::write(&zip_path, buf.into_inner()).unwrap();
 
     let mut config = ServerConfig::defaults(crate::config::ServerMode::Runtime);
-    config.ddic = Some(PathBuf::from("ddic.json"));
+    config.model_root = Some(".".into());
     config.fiori_root = Some(format!("zip://{}", zip_path.display()));
 
     let sources = resolve(&config).unwrap();

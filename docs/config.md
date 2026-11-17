@@ -15,6 +15,13 @@ Es gibt ein Binary, `pjl-runtime`. Mit `--designer` (bzw. `DESIGNER=1`) läuft e
 
 Die vollständige Liste der Flags steht in Anhang A.
 
+`--model-root` (oder `MODEL_ROOT`) ist für Runtime und Designer erforderlich.
+Die Quelle enthält `ddic.json` sowie optional `packages/`, `scripts/`, `ext/`
+und die per `--ddic-overlay` ausgewählte Overlay-Datei. Die Runtime unterstützt
+Verzeichnisse und `zip://`-Archive; der Designer benötigt ein beschreibbares
+Verzeichnis. Die bisherigen Einzeloptionen `--ddic`, `--scripts-dir`, `--ext-dir`
+und `--designer-root` sowie ihre Umgebungsvariablen entfallen.
+
 ## 2. Data Dictionary (das fachliche Modell)
 
 Das Modell besteht aus Packages, Entities, Fields, Relations und Apps. Es wird im Designer in einem Store gehalten und ist im Quellcode in `spec/src/` typisiert:
@@ -24,17 +31,57 @@ Das Modell besteht aus Packages, Entities, Fields, Relations und Apps. Es wird i
 - `relationship.rs`: `Relationship` (Komposition oder Assoziation, Kardinalität, Fremdschlüssel)
 - `app.rs`: `App` (FLP-Kachel, Titel, Icon, Hauptentität)
 
-Die Modelldaten werden in `ddic.json` gehalten. Der Designer (Abschnitt 2a) pflegt sie, die Runtime liest sie beim Start. Die Designer-Set-Abbildung steht in `fiori-server/src/ddic_store.rs`; `fiori-server/src/ddic_loader.rs` lädt das Dictionary für den Laufzeitserver.
+Die Modelldaten stehen in `ddic.json` und optional referenzierten Paketdateien. Der Designer (Abschnitt 2a) pflegt sie, die Runtime liest sie beim Start. Die Designer-Set-Abbildung steht in `fiori-server/src/ddic_store.rs`.
+
+### Wiederverwendbare Paketdateien
+
+Eine bestehende einzelne `ddic.json` funktioniert unverändert. Optional referenziert
+das Hauptdictionary Paketdateien:
+
+```json
+{
+  "packages": [{"name": "units"}, {"name": "app"}],
+  "package_files": ["units"],
+  "entities": [],
+  "relationships": [],
+  "apps": []
+}
+```
+
+Zu `units` gehört die vorhandene Datei `packages/units.json` relativ zum
+Hauptdictionary, auch innerhalb einer `MODEL_ROOT`-ZIP-Datei. Paketnamen bestehen
+aus ASCII-Buchstaben, Ziffern, `_` oder `-`. Die Paketdatei kann `entities`,
+`relationships`, `value_lists`, `components` und `component_uses` enthalten.
+Ein fehlendes `package` an diesen Definitionen wird beim Laden auf den Paketnamen
+gesetzt; ein abweichendes Paket ist ein Fehler. `component_uses` gehören zur
+Datei der zugehörigen Entität. Felder bleiben in ihrer Entität verschachtelt.
+`packages`, `package_files` und `apps` stehen ausschließlich zentral.
+Verschachtelte Paketreferenzen, fehlende Dateien und doppelte Definitionen
+(auch identische) werden abgelehnt. Eine Paketdatei wird nicht automatisch angelegt;
+Paketdefinition und Referenz müssen zunächst manuell erstellt werden.
+
+Der Designer legt Objekte mit einem referenzierten Paket in dessen Datei ab,
+andere bleiben zentral. Die Paketzuordnung von Festwertlisten und Komponenten
+ist optional und im Designer über `package` auswählbar. Bei einem Paketwechsel
+werden die betroffenen Dateien gemeinsam mit einem Wiederherstellungsjournal
+geschrieben. Nach einem Abbruch stellt der Designer vor dem nächsten Öffnen
+den vorherigen Stand wieder her; die Runtime verweigert bis dahin das Laden.
+Das Journal gilt für das gesamte Dictionary-Verzeichnis; zur Wiederherstellung
+muss der Designer mit dem Dictionary geöffnet werden, das die Transaktion begann.
+Ist das Journal beschädigt, ist eine manuelle Wiederherstellung aus einer
+Sicherung nötig. Schreibende Designer erkennen externe Änderungen seit dem
+Laden und verweigern das Überschreiben; externe Editoren müssen während einer
+Designer-Schreibtransaktion pausieren, da sie die Dateisperre nicht beachten.
 
 ## 2a. Der Designer
 
-Der Designer ist kein eigenes Programm, sondern der Laufzeitserver mit `--designer` (Env `DESIGNER=1`). Er arbeitet ausschließlich auf `ddic.json`: keine Skripte, keine Datenbank, kein Entwurfszustand.
+Der Designer ist kein eigenes Programm, sondern der Laufzeitserver mit `--designer` (Env `DESIGNER=1`). Er arbeitet auf `ddic.json` und deren referenzierten Paketdateien: keine Skripte, keine Datenbank, kein Entwurfszustand.
 
 **Ablauf**
 
-1. Der Designer öffnet `ddic.json` (`--ddic`, Standard `ddic.json`). Fehlt die Datei, wird eine leere angelegt.
+1. Der Designer öffnet `ddic.json` im mit `--model-root` angegebenen Verzeichnis. Fehlt die Datei, wird eine leere angelegt.
 2. Die Oberfläche zeigt das eincompilierte Metamodell (`DataDictionary::new()`) mit den Kern-Entitäten `Entity`, `Field`, `Relation`, `Value`, `ValueList`, `Package` und `App`. Weitere Designer-Sets bilden unter anderem Listenansichten, Facetten, UI-Konfiguration, Komponenten und Seeds ab.
-3. Jede Anlage, Änderung oder Löschung wird im `DdicStore` (`fiori-server/src/ddic_store.rs`) auf die Sets abgebildet, ins Dictionary übernommen, validiert und dann atomar geschrieben (Temp-Datei `ddic.json.tmp`, danach Rename). Scheitert die Validierung, bleibt die Datei unverändert und der Request bekommt einen Konflikt.
+3. Jede Anlage, Änderung oder Löschung wird im `DdicStore` (`fiori-server/src/ddic_store.rs`) auf die Sets abgebildet, ins Dictionary übernommen und validiert. Eine einzelne Datei wird per Temp-Datei und Rename geschrieben, Paketdateien mit dem oben beschriebenen Wiederherstellungsjournal. Scheitert die Validierung, bleiben die Dateien unverändert und der Request bekommt einen Konflikt.
 4. Lesen greift nur auf den Speicherstand zu und schreibt nichts.
 
 **Persistierte Sets**
@@ -69,7 +116,7 @@ Für einen Multiline-Abschnitt, dessen besondere Darstellung erhalten bleiben so
 
 **Regeln**
 
-- Ein Objekt braucht ein gültiges Paket (`package_ID`); unbekannte Pakete werden abgelehnt.
+- Entitäten, Beziehungen und Apps brauchen ein gültiges Paket (`package_ID`). Für Komponenten und Festwertlisten ist `package` optional; im Paketformat werden unbekannte Pakete abgelehnt.
 - Eine App braucht eine vorhandene Hauptentität (`main_entity_ID`) und ein Paket.
 - Löschen einer Entität entfernt ihre Felder und Beziehungen. Löschen einer Festwertliste entfernt ihre Werte und die Zuordnung an Feldern.
 - Doppelte Namen (Entität, Paket, App, Feld je Entität, Code je Festwertliste) werden abgelehnt.
@@ -126,7 +173,7 @@ Festwertliste anlegen (`ValueListSet`), Werte anlegen (`ValueSet` mit `list_ID`)
 
 ## 2c. Skripte (Hooks)
 
-Mit `--scripts-dir` (Env `SCRIPTS_DIR`) lädt die Runtime Rhai-Skripte, eine Datei `<set>.rhai` pro Entity Set. Sie können Lese- und Schreibzugriffe prüfen oder verändern:
+Aus `scripts/` innerhalb von `MODEL_ROOT` lädt die Runtime Rhai-Skripte, eine Datei `<set>.rhai` pro Entity Set. Sie können Lese- und Schreibzugriffe prüfen oder verändern:
 
 - `before_<op>` / `after_<op>` für `create`, `patch`, `delete`, `draft_edit`, `draft_activate`, `draft_prepare`
 - `before_read` (Query, z. B. `$filter` ergänzen oder reduzieren) und `after_read` (einmal pro Request; Listen dürfen Sätze ändern oder entfernen)
@@ -136,17 +183,17 @@ Mit `--scripts-dir` (Env `SCRIPTS_DIR`) lädt die Runtime Rhai-Skripte, eine Dat
   Dabei werden alle enthaltenen Felder ausgegeben, auch personenbezogene Daten;
   im produktiven Betrieb nur gezielt ausgewählte Inhalte loggen.
 
-Änderungen an den Dateien werden automatisch neu geladen. Ein Skript mit Fehler bleibt wirkungslos und die vorherige Version aktiv. Der Designer nutzt keine Skripte.
+Bei Dateisystemquellen werden Änderungen an den Dateien automatisch neu geladen; ZIP-Quellen werden beim Start eingelesen. Ein Skript mit Fehler bleibt wirkungslos und die vorherige Version aktiv. Der Designer nutzt keine Skripte.
 
 
 ## 3. Wo die Konfiguration abgelegt wird
 
 ```
-pjl-runtime --designer       Metamodell-Oberfläche, schreibt sofort
+pjl-runtime --designer --model-root export   Metamodell-Oberfläche, schreibt sofort
         |
         v
 export/ddic.json             semantisches Dictionary (einzige Wahrheit)
-        |  Start des Runtime-Servers (--ddic)
+        |  Start des Runtime-Servers (--model-root export)
         v
 rel-data/data.sqlite         Fachdaten der Laufzeit
 ```
@@ -166,7 +213,7 @@ Der SQLite-Store läuft im Speicher und wird nur beim sauberen Beenden (SIGINT/S
 - `Dockerfile`: Setzt `PORT=8080`, `DATA_DIR=/app/data`, `WEB_ROOT=/app/web`. Standard-Webressourcen sind im Binary eingebettet; `/app/web` ist nur für zusätzliche oder überschreibende Assets vorgesehen. Läuft als Nutzer `appuser`.
 - `compose.yaml`:
   - Designer: derselbe Laufzeit-Code mit `DESIGNER=1`, Port `3033:8080`, Volume `export` (schreibbar).
-  - Runtime: Port `3034:8080`, Env `DDIC=/app/export/ddic.json`, Volume `export` **read-only**.
+  - Runtime: Port `3034:8080`, Env `MODEL_ROOT=/app/export`, Volume `export` **read-only**.
   - Optionaler Postgres-Dienst im Profil `dev` (Port 5433).
 
 Der Austausch läuft über das gemeinsame Volume `export`. Der Runtime-Container startet erst nach dem Designer.
@@ -198,8 +245,7 @@ Jede Option kann als CLI-Flag oder über die angegebene Umgebungsvariable gesetz
 | `--bind` | `BIND` | `0.0.0.0` | Lauschadresse des HTTP-Servers |
 | `--data-dir` | `DATA_DIR` | `rel-data` | Verzeichnis des SQLite-Stores und der Laufzeitdateien |
 | `--web-root` | `WEB_ROOT` | – (eingebettete Standardressourcen) | Optionales Verzeichnis für zusätzliche oder überschreibende Web-Assets |
-| `--ddic` | `DDIC` | `ddic.json` | Dictionary-Datei |
-| `--ddic-overlay` | `DDIC_OVERLAY` | – | Optionales Overlay; nur im Laufzeitmodus |
+| `--ddic-overlay` | `DDIC_OVERLAY` | – | Optionales Overlay relativ zu `MODEL_ROOT`; nur im Laufzeitmodus |
 | `--schema` | `SCHEMA` | abgeleitet | Optionale feste Schemadatei (JSON) |
 | `--designer` | `DESIGNER` | aus | Designer-Modus: schreibt Änderungen in `ddic.json` |
 | `--auth-user-header` | `AUTH_USER_HEADER` | `X-Forwarded-User` | Benutzer-Header des Auth-Proxys |
@@ -207,11 +253,8 @@ Jede Option kann als CLI-Flag oder über die angegebene Umgebungsvariable gesetz
 | `--store-pg-url` | `STORE_PG_URL` | – (SQLite) | PostgreSQL-Verbindung |
 | `--term3270-port` | `TERM3270_PORT` | deaktiviert | Port der optionalen 3270-Statusschnittstelle |
 | `--term3270-bind` | `TERM3270_BIND` | `127.0.0.1` | Lauschadresse der 3270-Schnittstelle |
-| `--scripts-dir` | `SCRIPTS_DIR` | – | Rhai-Skripte pro Set (Hooks) |
-| `--ext-dir` | `EXT_DIR` | – | App-Assets, ausgeliefert unter `/ext/<app>/` |
 | `--fiori-root` | `FIORI_ROOT` | – | Optionale Quelle zusätzlicher oder überschreibender Web-Assets (`file://` oder `zip://`); hat Vorrang vor `WEB_ROOT` |
-| `--model-root` | `MODEL_ROOT` | – | Gemeinsame Quelle für Modell, Skripte und Extensions (`file://` oder `zip://`) |
-| `--designer-root` | `DESIGNER_ROOT` | – | Designer-Dateiquelle (`file://`) |
+| `--model-root` | `MODEL_ROOT` | erforderlich | Gemeinsame Quelle für Modell, Skripte und Extensions (`file://` oder `zip://`; Designer nur Dateisystem) |
 
 `--designer` aktiviert den Designer, ändert aber nicht den Standardport. Für einen separaten Designer-Port muss `--port` bzw. `PORT` gesetzt werden.
 

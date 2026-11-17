@@ -22,7 +22,7 @@ ddic.json  ── Data Dictionary (Packages, Entities, Relationships, Apps, ui-B
    ├── video-import  (Zeilen -> RelationalStore / SQLite)
    │
    ▼
-pjl-runtime --ddic ddic.json --data-dir <dir>
+pjl-runtime --model-root <modellverzeichnis> --data-dir <dir>
    ├── /Service/$metadata     EDMX mit Annotationen (UI.*, Common.*, Capabilities)
    ├── /Service/<Set>         OData-V4-CRUD inkl. Drafts
    ├── /apps/Video/manifest.json   Fiori-Elements-Manifest (ListReport + ObjectPage)
@@ -246,9 +246,10 @@ Die Spalten der Liste sind explizit und benannt an der Entität definiert:
 `ddic.json` wird bei jeder Migration neu erzeugt. Eigene Anpassungen liegen deshalb in einer
 separaten Datei, die die Runtime optional einliest:
 
-* Datei: `video-store/overlay/ddic.overlay.json`. Compose bindet sie read-only nach
-  `/app/overlay/ddic.overlay.json` ein; `DDIC_OVERLAY` (oder `--ddic-overlay`) zeigt darauf.
-  Ohne Angabe läuft die Runtime ohne Overlay. Änderungen wirken nach `docker compose restart runtime`.
+* Datei: `video-store/overlay/ddic.overlay.json`. Sie liegt im Modell-ZIP unter
+  `overlay/ddic.overlay.json`; `DDIC_OVERLAY` (oder `--ddic-overlay`) gibt diesen
+  Pfad relativ zu `MODEL_ROOT` an. Nach Änderungen muss das ZIP neu gepackt und
+  die Runtime neu gestartet werden.
 * Format: `{"entities": [{ "name": ... }]}`. Die Entität wird über `name` gefunden.
 * Regeln (Merge in `fiori-server/src/overlay.rs`):
   * `package`, `type_name_plural`: überschreiben die Basis.
@@ -398,7 +399,7 @@ Darstellungen für Actions. Einstiegspunkte sind die passenden Generatoren unter
 
 ### 8.6 Konfiguration und Deployment (`compose.yaml`, `Dockerfile`)
 
-* Umgebungsvariablen: `PORT`, `DATA_DIR`, `WEB_ROOT`, `DDIC`, `RUST_LOG`,
+* Umgebungsvariablen: `PORT`, `DATA_DIR`, `WEB_ROOT`, `MODEL_ROOT`, `RUST_LOG`,
   zusätzlich für die Video-Erweiterung `THUMBNAIL_BASE_URL` (Default `http://nuc:9000/proxy`).
 * Authentifizierung: `AUTH_USER_HEADER` (Standard `X-Forwarded-User`) und `AUTH_REQUIRED`
   (Standard aus). Details in 10.12.

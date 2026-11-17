@@ -154,7 +154,7 @@ pub fn config_json(config: &ServerConfig) -> Value {
         "bind": config.bind.to_string(),
         "data_dir": config.data_dir.display().to_string(),
         "web_root": config.web_root.as_ref().map(|p| p.display().to_string()),
-        "ddic": config.ddic.as_ref().map(|p| p.display().to_string()),
+        "model_root": config.model_root,
         "ddic_overlay": config.ddic_overlay.as_ref().map(|p| p.display().to_string()),
         "schema": config.schema.as_ref().map(|p| p.display().to_string()),
         "auth_user_header": config.auth_user_header,

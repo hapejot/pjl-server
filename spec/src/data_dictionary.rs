@@ -73,10 +73,9 @@ impl DataDictionary {
         let _core = Package::new("core");
         let core = Package::new("core");
         let fixed_value_field = |name, label, set| {
-            FieldSpec::atom(name, label, "Edm.String")
-                .with_value_list(crate::entity_spec::AtomValueList::entity_ref(
-                    set, "value", Some("name"),
-                ))
+            FieldSpec::atom(name, label, "Edm.String").with_value_list(
+                crate::entity_spec::AtomValueList::entity_ref(set, "value", Some("name")),
+            )
         };
 
         let entity_ent = EntitySpec::new("Entity", core.name(), "Entities")
@@ -185,10 +184,15 @@ impl DataDictionary {
             .field(FieldSpec::atom("label", "Label", "Edm.String"))
             .field(FieldSpec::atom("sort", "Sort", "Edm.Int64"))
             .without_audit();
+        let package_field = || {
+            FieldSpec::atom("package", "Package", "Edm.String").with_value_list(
+                crate::entity_spec::AtomValueList::entity_ref("PackageSet", "name", Some("name")),
+            )
+        };
         let value_list_ent = EntitySpec::new("ValueList", core.name(), "Value Lists")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
+            .field(package_field())
             .without_audit();
-        // .field(FieldSpec::atom("package", "Package", "Edm.Guid"));
 
         let package_ent = EntitySpec::new("Package", core.name(), "Packages")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
@@ -203,6 +207,7 @@ impl DataDictionary {
 
         let component_ent = EntitySpec::new("Component", core.name(), "Components")
             .field(FieldSpec::atom("name", "Name", "Edm.String"))
+            .field(package_field())
             .field(fixed_value_field("kind", "Kind", "ComponentKindSet"))
             .field(FieldSpec::atom("script", "Script", "Edm.String"))
             .field(fixed_value_field("unit", "Unit", "TimeUnitSet"))
@@ -332,7 +337,11 @@ impl DataDictionary {
         let seed_value_ent = EntitySpec::new("EntitySeedValue", core.name(), "Seed Values")
             .field(FieldSpec::atom("field", "Field", "Edm.String"))
             .field(FieldSpec::atom("value", "Value", "Edm.String"))
-            .field(fixed_value_field("value_type", "Value Type", "SeedValueTypeSet"))
+            .field(fixed_value_field(
+                "value_type",
+                "Value Type",
+                "SeedValueTypeSet",
+            ))
             .without_audit();
 
         let rel = Relationship::new("entity_fields", core.name())
@@ -362,7 +371,13 @@ impl DataDictionary {
             .with_many("Field", "value_list");
         let config_relationships = [
             ("entity_seeds", "Entity", "_Seeds", "EntitySeed", "entity"),
-            ("seed_values", "EntitySeed", "_Values", "EntitySeedValue", "seed"),
+            (
+                "seed_values",
+                "EntitySeed",
+                "_Values",
+                "EntitySeedValue",
+                "seed",
+            ),
             (
                 "entity_list_views",
                 "Entity",
@@ -1240,7 +1255,7 @@ fn check_list_column(active: &DataDictionary, entity: &str, col: &str) -> Result
         .find(|f| f.name() == col)
         .ok_or_else(|| format!("Feld '{col}' existiert nicht"))?;
     match field {
-        FieldSpec::Atom { .. } => Ok(()),
+        FieldSpec::Atom { .. } | FieldSpec::Measure { .. } => Ok(()),
         FieldSpec::Lookup {
             entity: target,
             collection: false,
@@ -1257,9 +1272,6 @@ fn check_list_column(active: &DataDictionary, entity: &str, col: &str) -> Result
         }
         FieldSpec::Lookup { .. } => Err(format!(
             "'{col}' ist eine Sammelnavigation und kann keine Listenspalte sein"
-        )),
-        FieldSpec::Measure { .. } => Err(format!(
-            "Measure '{col}' wird nicht als Spalte unterstuetzt"
         )),
     }
 }

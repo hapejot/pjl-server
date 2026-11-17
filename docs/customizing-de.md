@@ -19,8 +19,8 @@ in Rhai oder Rust.
 | Ebene | Wo | Wann | Neustart nötig |
 |---|---|---|---|
 | Deklarativ | `ddic.json` (Blöcke `ui`, `side_effects`, `link`, `components`, `component_uses` ...) | Formate, Ausblenden, Abschnitte, Spalten, Tabs, wiederverwendbare Bausteine | ja |
-| Assets | `<EXT_DIR>/<app>/` | eigene Fragmente, Module, Controller | ja (Browser-Cache beachten) |
-| Logik | Rhai-Skripte (`SCRIPTS_DIR`), Rust-Extensions | Hooks, Routen, Actions | Rhai: nein (Reload). Rust: ja, Neubau |
+| Assets | `<MODEL_ROOT>/ext/<app>/` | eigene Fragmente, Module, Controller | ja (Browser-Cache beachten) |
+| Logik | Rhai-Skripte (`<MODEL_ROOT>/scripts/`), Rust-Extensions | Hooks, Routen, Actions | Rhai: bei Dateisystemquellen nein (Reload). Rust: ja, Neubau |
 
 Die Vorgaben stammen aus `fiori-server/src/ui_ext.rs`, `spec/src/entity_spec.rs` und `spec/src/app.rs`.
 Die Beispiele beziehen sich auf den Video-Store (`video-store/`).
@@ -98,7 +98,7 @@ Im `ui`-Block einer Entität:
 
 * `key`: Id des Abschnitts.
 * `title`: Text, auch `{{i18nKey}}`.
-* `fragment`: Dateiname ohne `.fragment.xml`, liegt unter `<EXT_DIR>/<app>/fragment/`.
+* `fragment`: Dateiname ohne `.fragment.xml`, liegt unter `<MODEL_ROOT>/ext/<app>/fragment/`.
 * `anchor` / `placement`: Position relativ zu einem Abschnitt (Standard: `GeneralSection`, `After`).
 * `hide_facets`: Standardfacetten der Navigation ausblenden (Id = `<navigation>Section`).
 
@@ -143,7 +143,7 @@ Es gibt drei Teile in der `ddic.json`:
 |---|---|
 | `name` | Eindeutiger Name der Komponente |
 | `kind` | Art. `time_range` hat die Rollen `start` (DateTimeOffset), `end` (DateTimeOffset), `duration` (Int32) |
-| `script` | Rhai-Modul mit den Regeln, relativ zu `SCRIPTS_DIR` (ohne `.rhai`) |
+| `script` | Rhai-Modul mit den Regeln, relativ zu `<MODEL_ROOT>/scripts/` (ohne `.rhai`) |
 | `unit` | Einheit der Dauer. Derzeit nur `minutes` |
 | `step_minutes` | Raster der Zeitpunkte und der Dauer in Minuten. Muss 1 bis 60 sein und 60 teilen |
 
@@ -170,7 +170,7 @@ Es gibt drei Teile in der `ddic.json`:
 Eine zweite Verwendung mit anderen Feldern (z. B. Ist-Zeiten) braucht nur einen weiteren Eintrag
 mit eigener `instance`. Felder, Abschnitt und Regeln werden dann je Einsatz erzeugt.
 
-**c) Regeln** (Rhai-Modul unter `SCRIPTS_DIR/components/`):
+**c) Regeln** (Rhai-Modul unter `<MODEL_ROOT>/scripts/components/`):
 
 ```rhai
 fn before_create(ctx, cfg) { apply_rules(ctx, cfg) }
@@ -261,7 +261,7 @@ Folgen daraus:
 * Änderungen an `ui`, `components` oder `component_uses` wirken erst nach einem Neustart.
 * Für ein neues Fragmentmuster braucht es eine Änderung in `ui_ext.rs`. Das lässt sich nicht
   allein über die `ddic.json` erreichen.
-* Fragmente aus Dateien (`<EXT_DIR>/<app>/fragment/`, Abschnitt 10) und virtuelle Fragmente
+* Fragmente aus Dateien (`<MODEL_ROOT>/ext/<app>/fragment/`, Abschnitt 10) und virtuelle Fragmente
   können nebeneinander bestehen. Sie unterscheiden sich nur im Namensraum.
 
 ## 9. App-Module und Controller-Erweiterungen
@@ -288,11 +288,11 @@ Seiten einer App. Eine ListReport-Erweiterung wirkt daher auf jeder ListReport-S
 
 ## 10. Asset-Verzeichnis
 
-Der Server startet mit `--ext-dir` bzw. `EXT_DIR`. Jede App bekommt ein Unterverzeichnis
+Der Server lädt Assets aus `ext/` unter `--model-root` bzw. `MODEL_ROOT`. Jede App bekommt ein Unterverzeichnis
 mit dem App-Namen (`apps[].name`):
 
 ```
-<EXT_DIR>/
+<MODEL_ROOT>/ext/
   videos/                        <- App "videos"
     Player.js                    -> Modul videos/ext/Player
     TagSearch.js                 -> Modul videos/ext/TagSearch
@@ -315,8 +315,8 @@ gehören in das eigene App-Verzeichnis und werden über einen eigenen Namespace 
 
 ### Im Container (Workbench)
 
-In `workbench/compose.yaml` zeigt `EXT_DIR` auf `/app/model/ext`, das Verzeichnis `workbench/ext/`
-ist als Volume eingebunden (nur lesend). Eigene Fragmente, Module und Controller legt man also unter
+In `workbench/compose.yaml` zeigt `MODEL_ROOT` auf `/app/model`; das Modellverzeichnis ist
+nur lesend eingebunden. Eigene Fragmente, Module und Controller legt man unter
 `workbench/ext/<app>/` ab, z. B. `workbench/ext/appointments/fragment/Notes.fragment.xml`. Das Verzeichnis
 `workbench/ext/` enthält eine `.gitkeep`, damit es nach einem Checkout vorhanden ist. Fehlt es, legt
 Docker es root-eigen an, und die Dateien lassen sich nicht ohne Weiteres pflegen.
@@ -325,8 +325,8 @@ Nach dem Anlegen den Container neu starten und `GET /apps/<Entität>/manifest.js
 
 ## 11. Rhai-Skripte (Hooks)
 
-Skripte liegen in `SCRIPTS_DIR` als `<Entitaet>.rhai`. Sie werden beim Start geladen und bei
-Dateiänderung neu eingelesen (kein Neustart nötig).
+Skripte liegen in `<MODEL_ROOT>/scripts/` als `<Entitaet>.rhai`. Sie werden beim Start geladen
+und bei Dateisystemquellen nach Dateiänderung neu eingelesen (kein Neustart nötig).
 
 ```rhai
 fn before_patch(ctx) {
@@ -341,7 +341,7 @@ fn before_patch(ctx) {
 Verfügbare Funktionen: `before_<op>`, `after_<op>` (Schreiben), `before_read`, `after_read`.
 `op` ist `create`, `patch`, `delete`, `read` u. a. Die Funktion muss `ctx` zurückgeben.
 
-Die Komponenten-Regeln liegen in `SCRIPTS_DIR/components/<Name>.rhai`. Sie werden nicht über den
+Die Komponenten-Regeln liegen in `<MODEL_ROOT>/scripts/components/<Name>.rhai`. Sie werden nicht über den
 Dateinamen zugeordnet, sondern über `component_uses` (Abschnitt 7). Verfügbare Datumsfunktionen:
 `ts_round_minutes(iso, step)`, `ts_add_minutes(iso, n)`, `ts_diff_minutes(a, b)`, `ts_valid(iso)`.
 Zeitpunkte sind ISO-8601-Texte mit Offset.
@@ -359,7 +359,7 @@ Eine Entität kann parameterlose Aktionen auf einzelnen aktiven Datensätzen def
 ]
 ```
 
-In `<SCRIPTS_DIR>/<Entity>Set.rhai` implementiert `action_starten(ctx)` die Aktion:
+In `<MODEL_ROOT>/scripts/<Entity>Set.rhai` implementiert `action_starten(ctx)` die Aktion:
 
 ```rhai
 fn action_starten(ctx) {
@@ -405,10 +405,8 @@ das lässt sich über `ui` lösen.
 
 | Option | Env | Zweck |
 |---|---|---|
-| `--ddic` | `DDIC` | Datenmodell (Pflicht im Runtime-Modus) |
+| `--model-root` | `MODEL_ROOT` | Gemeinsame Modellquelle mit `ddic.json`, `scripts/` und `ext/` (Pflicht) |
 | `--ddic-overlay` | `DDIC_OVERLAY` | Overlay zur `ddic.json` (Listenansichten, Facetten) |
-| `--ext-dir` | `EXT_DIR` | Asset-Verzeichnis je App |
-| `--scripts-dir` | `SCRIPTS_DIR` | Rhai-Skripte |
 
 Ein Overlay (`overlay/ddic.overlay.json`) ergänzt die Basis, ohne sie zu verändern. Es eignet sich für
 Dinge, die nicht bei jeder Migration neu erzeugt werden sollen. Mit `entities[].data_points` lassen
@@ -429,7 +427,7 @@ Bearbeitungsformular editierbar.
 
 1. Gewünschte Änderung zuordnen: Formatierung, Abschnitt, Spalte, Tab, Skript oder Code.
 2. Deklarativ: `ddic.json` anpassen, Schema prüft beim Start (unbekannte Schlüssel sind Fehler).
-3. Assets: Dateien unter `<EXT_DIR>/<app>/` anlegen, Verweise in `ddic.json` prüfen.
+3. Assets: Dateien unter `<MODEL_ROOT>/ext/<app>/` anlegen, Verweise in `ddic.json` prüfen.
 4. Server neu starten (Ausnahme: Rhai-Skripte werden nachgeladen).
 5. Browser: bei geänderten JS-Dateien den Cache leeren, sonst läuft die alte Version weiter.
 6. Manifest prüfen: `GET /apps/<Entität>/manifest.json` (Modul-Liste, Abschnitte, Views).

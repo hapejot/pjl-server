@@ -1,18 +1,16 @@
-//! Aufloesung der Quellen aus `FIORI_ROOT`, `MODEL_ROOT` und `DESIGNER_ROOT`.
+//! Aufloesung der Quellen aus `FIORI_ROOT` und `MODEL_ROOT`.
 //!
 //! * Web-Assets: Standardressourcen sind eingebettet. `FIORI_ROOT` oder `WEB_ROOT`
 //!   ergaenzen sie und ueberschreiben Dateien gleichen Namens.
 //! * `MODEL_ROOT`: `ddic.json`, Overlay, `scripts/` und `ext/` (`file://` oder `zip://`).
-//!   `DDIC`, `DDIC_OVERLAY` werden dann relativ zur Wurzel gelesen. Ohne Angabe gelten die
-//!   Einzelpfade `DDIC`, `DDIC_OVERLAY`, `SCRIPTS_DIR`, `EXT_DIR` wie bisher.
-//! * `DESIGNER_ROOT`: Verzeichnis fuer den Designer, nur `file://`. `DDIC` ist relativ dazu.
-//!   Der Designer schreibt ausschliesslich auf das Dateisystem.
+//!   `DDIC_OVERLAY` wird relativ zur Wurzel gelesen. Der Designer schreibt
+//!   ausschliesslich auf das Dateisystem.
 
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{Context, bail};
+use anyhow::Context;
 use bytes::Bytes;
 use file_repo::{DirRepository, FileRepository, Limits, RepoError};
 
@@ -99,6 +97,8 @@ pub struct FileRef {
     pub repo: Arc<dyn FileRepository>,
     pub rel: String,
     pub label: String,
+    /// Dateisystempfad fuer konsistentes Lesen waehrend Designer-Schreibvorgaengen.
+    pub fs_path: Option<PathBuf>,
 }
 
 /// Verzeichnis innerhalb einer Quelle (Skripte, Extensions).
@@ -118,34 +118,6 @@ pub struct Sources {
     pub overlay: Option<FileRef>,
     pub scripts: Option<DirRef>,
     pub ext: Option<DirRef>,
-}
-
-impl FileRef {
-    /// Einzelne Datei auf dem Dateisystem.
-    fn from_path(path: &Path) -> FileRef {
-        let parent = match path.parent() {
-            Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
-            _ => PathBuf::from("."),
-        };
-        FileRef {
-            repo: Arc::new(DirRepository::new(parent)),
-            rel: path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-            label: path.display().to_string(),
-        }
-    }
-}
-
-impl DirRef {
-    fn from_dir(dir: &Path) -> DirRef {
-        DirRef {
-            repo: Arc::new(DirRepository::new(dir)),
-            fs_dir: Some(dir.to_path_buf()),
-            label: dir.display().to_string(),
-        }
-    }
 }
 
 fn open(uri: &str) -> anyhow::Result<Arc<dyn FileRepository>> {
@@ -174,53 +146,40 @@ pub fn resolve(config: &ServerConfig) -> anyhow::Result<Sources> {
         None => (embedded, "embedded defaults".to_string()),
     };
 
-    let ddic_rel = config
-        .ddic
-        .clone()
-        .context("no data dictionary configured (DDIC)")?;
-
-    let (ddic, overlay, scripts, ext) = match &config.model_root {
-        Some(uri) => {
-            if config.scripts_dir.is_some() || config.ext_dir.is_some() {
-                bail!(
-                    "MODEL_ROOT ist gesetzt: SCRIPTS_DIR und EXT_DIR entfallen (Layout: scripts/, ext/)"
-                );
-            }
-            let repo = open(uri)?;
-            let fs_root = file_repo::file_path(uri);
-            let rel_of = |p: &Path| p.to_string_lossy().into_owned();
-            let ddic = FileRef {
-                repo: repo.clone(),
-                rel: rel_of(&ddic_rel),
-                label: uri.clone(),
-            };
-            let overlay = config.ddic_overlay.as_ref().map(|p| FileRef {
-                repo: repo.clone(),
-                rel: rel_of(p),
-                label: uri.clone(),
-            });
-            let sub = |name: &str| -> anyhow::Result<Option<DirRef>> {
-                if !repo.exists(name) {
-                    return Ok(None);
-                }
-                Ok(Some(DirRef {
-                    repo: file_repo::scoped(repo.clone(), name)?,
-                    fs_dir: fs_root.as_ref().map(|r| r.join(name)),
-                    label: format!("{uri}/{name}"),
-                }))
-            };
-            let scripts = sub("scripts")?;
-            let ext = sub("ext")?;
-            (ddic, overlay, scripts, ext)
-        }
-        None => {
-            let ddic = FileRef::from_path(&ddic_rel);
-            let overlay = config.ddic_overlay.as_deref().map(FileRef::from_path);
-            let scripts = config.scripts_dir.as_deref().map(DirRef::from_dir);
-            let ext = config.ext_dir.as_deref().map(DirRef::from_dir);
-            (ddic, overlay, scripts, ext)
-        }
+    let uri = config
+        .model_root
+        .as_deref()
+        .context("MODEL_ROOT ist erforderlich")?;
+    let repo = open(uri)?;
+    let fs_root = file_repo::file_path(uri);
+    let ddic = FileRef {
+        repo: repo.clone(),
+        rel: "ddic.json".into(),
+        label: format!("{uri}/ddic.json"),
+        fs_path: fs_root.as_ref().map(|root| root.join("ddic.json")),
     };
+    let overlay = config.ddic_overlay.as_ref().map(|p| FileRef {
+        repo: repo.clone(),
+        rel: p.to_string_lossy().into_owned(),
+        label: format!("{uri}/{}", p.display()),
+        fs_path: fs_root.as_ref().map(|root| root.join(p)),
+    });
+    let sub = |name: &str| -> anyhow::Result<Option<DirRef>> {
+        if !repo.exists(name) {
+            return Ok(None);
+        }
+        Ok(Some(DirRef {
+            repo: file_repo::scoped(repo.clone(), name)?,
+            fs_dir: fs_root.as_ref().map(|r| r.join(name)),
+            label: format!("{uri}/{name}"),
+        }))
+    };
+    let scripts = if config.designer {
+        None
+    } else {
+        sub("scripts")?
+    };
+    let ext = if config.designer { None } else { sub("ext")? };
 
     Ok(Sources {
         fiori,
@@ -234,16 +193,13 @@ pub fn resolve(config: &ServerConfig) -> anyhow::Result<Sources> {
 
 /// Dateipfad der Designer-Datei. Der Designer schreibt nur auf das Dateisystem.
 pub fn designer_path(config: &ServerConfig) -> anyhow::Result<PathBuf> {
-    let ddic = config.ddic.clone().context("designer needs --ddic")?;
-    match &config.designer_root {
-        Some(uri) => {
-            let root = file_repo::file_path(uri).with_context(|| {
-                format!("DESIGNER_ROOT '{uri}': der Designer schreibt nur auf file://")
-            })?;
-            Ok(root.join(ddic))
-        }
-        None => Ok(ddic),
-    }
+    let uri = config
+        .model_root
+        .as_deref()
+        .context("MODEL_ROOT ist erforderlich")?;
+    let root = file_repo::file_path(uri)
+        .with_context(|| format!("MODEL_ROOT '{uri}': der Designer schreibt nur auf file://"))?;
+    Ok(root.join("ddic.json"))
 }
 
 #[cfg(test)]

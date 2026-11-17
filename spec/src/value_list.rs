@@ -33,6 +33,9 @@ pub struct ValueList {
     pub(crate) id: String,
     /// Anzeigename im Designer, rein informativ.
     pub(crate) name: String,
+    /// Optionales Paket fuer die Ablage in einer Paketdatei.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) package: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) values: Vec<ValueEntry>,
     /// `true`: der Code ist der Primaerschluessel der Listen-Entitaet (kein GUID, keine
@@ -47,6 +50,7 @@ impl ValueList {
         Self {
             id: id.into(),
             name: name.into(),
+            package: None,
             values,
             code_key: false,
         }

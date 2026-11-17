@@ -7,6 +7,7 @@ fn dictionary(code_key: bool) -> DataDictionary {
     dd.value_lists = vec![ValueList {
         id: LIST.into(),
         name: "ProjectStatus".into(),
+        package: None,
         values: vec![crate::value_list::ValueEntry {
             code: "open".into(),
             label: "Offen".into(),

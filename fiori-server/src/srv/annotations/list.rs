@@ -78,8 +78,8 @@ fn default_line_item_column(entity: &EntitySpec) -> String {
         .unwrap_or_else(|| "name".into())
 }
 
-/// Ein `UI.LineItem`. Spalten sind Atome (`Value = name`) oder einwertige
-/// Navigationen (`Value = nav/name`, Anzeige des Zieltextes). Eine Prioritaet
+/// Ein `UI.LineItem`. Spalten sind Atome und Measures (`Value = name`) oder
+/// einwertige Navigationen (`Value = nav/name`, Anzeige des Zieltextes). Eine Prioritaet
 /// wird als `UI.Importance` am Datenfeld vermerkt.
 fn line_item(
     ddic: &DataDictionary,

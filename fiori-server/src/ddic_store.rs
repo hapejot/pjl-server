@@ -65,6 +65,7 @@ pub(crate) struct Snapshot {
     sets: Sets,
     /// Zuletzt geschriebenes (bzw. gelesenes) JSON; Grundlage fuer das Einmischen.
     base: Value,
+    layout: Option<crate::ddic_packages::Layout>,
     revision: u64,
 }
 
@@ -80,12 +81,13 @@ impl DdicStore {
     /// Oeffnet `ddic.json`. Fehlt die Datei, wird eine leere angelegt.
     pub fn open(path: impl Into<PathBuf>) -> anyhow::Result<Self> {
         let path = path.into();
-        let base = if path.exists() {
-            let text = std::fs::read_to_string(&path)?;
-            serde_json::from_str::<Value>(&text)
-                .map_err(|e| anyhow::anyhow!("'{}' is not valid JSON: {e}", path.display()))?
+        let (base, layout) = if path.exists() {
+            ddic_file::load_files(&path, true)?
         } else {
-            json!({"packages": [], "entities": [], "relationships": [], "apps": []})
+            (
+                json!({"packages": [], "entities": [], "relationships": [], "apps": []}),
+                None,
+            )
         };
         // Pruefen, dass das Dictionary gueltig ist, bevor der Designer startet.
         serde_json::from_value::<DataDictionary>(base.clone())
@@ -99,6 +101,7 @@ impl DdicStore {
             inner: Mutex::new(Snapshot {
                 sets,
                 base,
+                layout,
                 revision: 0,
             }),
             transient: false,
@@ -143,10 +146,10 @@ impl DdicStore {
             ));
         }
         let json = build(&inner.base, &next.sets)?;
-        ddic_file::save(&self.path, &json)
-            .map_err(|e| StoreError::Conflict(format!("cannot write ddic: {e:#}")))?;
+        let layout = save_dictionary(&self.path, inner.layout.as_ref(), &json)?;
         inner.sets = next.sets;
         inner.base = json;
+        inner.layout = layout;
         inner.revision += 1;
         Ok(())
     }
@@ -176,14 +179,25 @@ impl DdicStore {
         let out = f(&mut next)?;
         if !self.transient && PERSISTED.contains(&set) {
             let json = build(&inner.base, &next)?;
-            ddic_file::save(&self.path, &json)
-                .map_err(|e| StoreError::Conflict(format!("cannot write ddic: {e:#}")))?;
+            inner.layout = save_dictionary(&self.path, inner.layout.as_ref(), &json)?;
             inner.base = json;
         }
         inner.sets = next;
         inner.revision += 1;
         Ok(out)
     }
+}
+
+fn save_dictionary(
+    path: &std::path::Path,
+    layout: Option<&crate::ddic_packages::Layout>,
+    json: &Value,
+) -> Result<Option<crate::ddic_packages::Layout>, StoreError> {
+    match layout {
+        Some(layout) => ddic_file::save_packages(path, layout, json).map(Some),
+        None => ddic_file::save(path, json).map(|()| None),
+    }
+    .map_err(|e| StoreError::Conflict(format!("cannot write ddic: {e:#}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -591,7 +605,7 @@ fn project(base: &Value) -> Sets {
             &mut sets,
             "ValueListSet",
             id.to_string(),
-            json!({ "name": name, "code_key": code_key }),
+            json!({ "name": name, "code_key": code_key, "package": text(l, "package") }),
         );
         for v in items(l, "values") {
             let Some(code) = text(v, "code") else {
@@ -668,6 +682,7 @@ fn project(base: &Value) -> Sets {
             id_for("ComponentSet", name),
             json!({
                 "name": name,
+                "package": text(component, "package"),
                 "kind": component.get("kind"),
                 "script": text(component, "script"),
                 "unit": component.get("unit"),
@@ -1613,6 +1628,11 @@ impl ComponentSet<'_> {
             obj.insert("name".into(), json!(name));
             put(
                 &mut obj,
+                "package",
+                &r.get("package").cloned().unwrap_or(Value::Null),
+            );
+            put(
+                &mut obj,
                 "kind",
                 &r.get("kind").cloned().unwrap_or(Value::Null),
             );
@@ -1730,14 +1750,28 @@ impl ValueListSet<'_> {
                     }))
                 })
                 .collect();
-            let mut obj = Map::new();
+            let mut obj = items(self.0.base, "value_lists")
+                .iter()
+                .find(|value| text(value, "id") == Some(id.as_str()))
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
             obj.insert("id".into(), json!(id));
             obj.insert("name".into(), json!(name));
+            put(
+                &mut obj,
+                "package",
+                &r.get("package").cloned().unwrap_or(Value::Null),
+            );
             if r.get("code_key") == Some(&json!(true)) {
                 obj.insert("code_key".into(), json!(true));
+            } else {
+                obj.remove("code_key");
             }
             if !values.is_empty() {
                 obj.insert("values".into(), Value::Array(values));
+            } else {
+                obj.remove("values");
             }
             value_lists.push(Value::Object(obj));
         }
@@ -2086,8 +2120,7 @@ impl DataStore for DdicStore {
         }
         if !self.transient && PERSISTED.contains(&set) {
             let json = build(&inner.base, &next)?;
-            ddic_file::save(&self.path, &json)
-                .map_err(|e| StoreError::Conflict(format!("cannot write ddic: {e:#}")))?;
+            inner.layout = save_dictionary(&self.path, inner.layout.as_ref(), &json)?;
             inner.base = json;
         }
         inner.sets = next;

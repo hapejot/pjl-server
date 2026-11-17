@@ -57,11 +57,6 @@ pub struct Cli {
     #[arg(long, env = "WEB_ROOT")]
     pub web_root: Option<PathBuf>,
 
-    /// Data Dictionary (JSON). Pflicht im Laufzeitmodus; im Designer die
-    /// Datei, die gepflegt wird.
-    #[arg(long, env = "DDIC")]
-    pub ddic: Option<PathBuf>,
-
     /// Optionales Overlay zur `ddic.json` (nur Laufzeit). Ergaenzt oder
     /// ueberschreibt Eigenschaften einzelner Entitaeten, siehe `overlay.rs`.
     #[arg(long, env = "DDIC_OVERLAY")]
@@ -102,37 +97,21 @@ pub struct Cli {
     #[arg(long, env = "TERM3270_BIND", default_value = "127.0.0.1")]
     pub term3270_bind: IpAddr,
 
-    /// Verzeichnis mit Rhai-Skripten `<set>.rhai` (Hooks fuer Lesen und Schreiben).
-    /// Ohne Angabe keine Skripte. Wird im Container als Volume eingebunden.
-    #[arg(long, env = "SCRIPTS_DIR")]
-    pub scripts_dir: Option<PathBuf>,
-
-    /// Verzeichnis mit Assets je App: `<ext-dir>/<app>/` wird unter `/ext/<app>/` ausgeliefert.
-    /// Ohne Angabe keine App-Assets.
-    #[arg(long, env = "EXT_DIR")]
-    pub ext_dir: Option<PathBuf>,
-
     /// Optionale Quelle zusaetzlicher oder ueberschreibender Web-Assets:
     /// `file://<pfad>` oder `zip://<pfad>`. Die Standardressourcen sind eingebettet.
     #[arg(long, env = "FIORI_ROOT")]
     pub fiori_root: Option<String>,
 
     /// Quelle fuer Modell, Skripte und Extensions: `file://<pfad>` oder `zip://<pfad>`.
-    /// Layout: `ddic.json`, `scripts/`, `ext/` im Wurzelverzeichnis. `DDIC` und
-    /// `DDIC_OVERLAY` sind dann relativ zur Wurzel.
+    /// Layout: `ddic.json`, `packages/`, `scripts/`, `ext/` im Wurzelverzeichnis.
+    /// `DDIC_OVERLAY` ist relativ zur Wurzel. Der Designer benoetigt ein Verzeichnis.
     #[arg(long, env = "MODEL_ROOT")]
-    pub model_root: Option<String>,
-
-    /// Verzeichnis des Designers (nur `file://`). `DDIC` ist relativ dazu.
-    #[arg(long, env = "DESIGNER_ROOT")]
-    pub designer_root: Option<String>,
+    pub model_root: String,
 }
 
 impl Cli {
     pub fn into_config(self, mode: ServerMode) -> ServerConfig {
         let (default_port, default_data_dir) = mode.defaults();
-        // Mit MODEL_ROOT liegt das Modell im Wurzelverzeichnis der Quelle.
-        let ddic = self.ddic.or_else(|| Some(PathBuf::from("ddic.json")));
         // Overlay gilt nur fuer die Laufzeit; der Designer schreibt die Datei selbst.
         let ddic_overlay = if self.designer {
             None
@@ -145,7 +124,6 @@ impl Cli {
             bind: self.bind,
             data_dir: self.data_dir.unwrap_or_else(|| default_data_dir.into()),
             web_root: self.web_root,
-            ddic,
             ddic_overlay,
             schema: self.schema,
             designer: self.designer,
@@ -154,11 +132,8 @@ impl Cli {
             store_pg_url: self.store_pg_url,
             term3270_port: self.term3270_port,
             term3270_bind: self.term3270_bind,
-            scripts_dir: self.scripts_dir,
-            ext_dir: self.ext_dir,
             fiori_root: self.fiori_root,
-            model_root: self.model_root,
-            designer_root: self.designer_root,
+            model_root: Some(self.model_root),
         }
     }
 }
@@ -172,7 +147,6 @@ pub struct ServerConfig {
     pub bind: IpAddr,
     pub data_dir: PathBuf,
     pub web_root: Option<PathBuf>,
-    pub ddic: Option<PathBuf>,
     /// Overlay zur `ddic.json`; nur im Laufzeitmodus wirksam.
     pub ddic_overlay: Option<PathBuf>,
     pub schema: Option<PathBuf>,
@@ -185,16 +159,10 @@ pub struct ServerConfig {
     /// 3270-Schnittstelle nur aktiv, wenn gesetzt.
     pub term3270_port: Option<u16>,
     pub term3270_bind: IpAddr,
-    /// Skriptverzeichnis; `None` schaltet die Skript-Hooks aus.
-    pub scripts_dir: Option<PathBuf>,
-    /// Asset-Verzeichnis je App (`<ext_dir>/<app>/`); `None` schaltet sie aus.
-    pub ext_dir: Option<PathBuf>,
     /// Optionale Quelle zusaetzlicher Web-Assets (`file://` oder `zip://`).
     pub fiori_root: Option<String>,
-    /// Quelle fuer Modell, Skripte und Extensions; `None`: Einzelpfade.
+    /// Quelle fuer Modell, Skripte und Extensions; muss beim Serverstart gesetzt sein.
     pub model_root: Option<String>,
-    /// Designer-Verzeichnis (nur `file://`).
-    pub designer_root: Option<String>,
 }
 
 impl ServerConfig {
@@ -205,8 +173,8 @@ impl ServerConfig {
 
     /// Reine Defaults, ohne Kommandozeile und ohne Umgebung.
     ///
-    /// Fuer Tests und eingebettete Verwendung; der Laufzeitmodus bekommt hier
-    /// bewusst kein Dictionary zugewiesen, das muss der Aufrufer setzen.
+    /// Fuer Tests und eingebettete Verwendung; die Modellquelle muss der
+    /// Aufrufer vor dem Serverstart setzen.
     pub fn defaults(mode: ServerMode) -> Self {
         let (port, data_dir) = mode.defaults();
         Self {
@@ -215,7 +183,6 @@ impl ServerConfig {
             bind: IpAddr::from([0, 0, 0, 0]),
             data_dir: data_dir.into(),
             web_root: None,
-            ddic: None,
             ddic_overlay: None,
             schema: None,
             designer: false,
@@ -224,11 +191,8 @@ impl ServerConfig {
             store_pg_url: None,
             term3270_port: None,
             term3270_bind: IpAddr::from([127, 0, 0, 1]),
-            scripts_dir: None,
-            ext_dir: None,
             fiori_root: None,
             model_root: None,
-            designer_root: None,
         }
     }
 }

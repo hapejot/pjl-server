@@ -53,7 +53,7 @@ services:
       # Optionales Overlay (Listenansichten, ausgeblendete ObjectPage-Felder).
       # Relativ zur MODEL_ROOT-Quelle, ohne Overlay fehlt die Standard-Listenansicht des Videos.
       DDIC_OVERLAY: overlay/ddic.overlay.json
-      # App-Assets (Fragmente, Module, Controller): <EXT_DIR>/<app>/ unter /ext/<app>/.
+      # App-Assets (Fragmente, Module, Controller): ext/<app>/ unter /ext/<app>/.
       MODEL_ROOT: zip:///app/app.zip
       STORE_PG_URL: postgres://video:video@db:5432/video
       PORT: "8080"

@@ -6,7 +6,7 @@
 //!
 //! |            | Designer (`--designer`)     | Laufzeit                     |
 //! | ---------- | --------------------------- | ---------------------------- |
-//! | Dictionary | eincompiliertes Metamodell  | `--ddic`                     |
+//! | Dictionary | eincompiliertes Metamodell  | `--model-root`               |
 //! | Store      | `DdicStore` auf `ddic.json` | SQLite / PostgreSQL          |
 
 use std::net::SocketAddr;
@@ -347,12 +347,12 @@ fn load_dictionary(
         return Ok(ddic);
     }
     let file = &sources.ddic;
-    let bytes = file
-        .repo
-        .read(&file.rel)
-        .with_context(|| format!("cannot read data dictionary '{}'", file.label))?;
     info!("loading ddic from {}", file.label);
-    let mut ddic: DataDictionary = serde_json::from_slice(&bytes)
+    let value = match &file.fs_path {
+        Some(path) => crate::ddic_file::load_files(path, false)?.0,
+        None => crate::ddic_packages::load(file.repo.as_ref(), &file.rel)?.0,
+    };
+    let mut ddic: DataDictionary = serde_json::from_value(value)
         .with_context(|| format!("'{}' is not a valid data dictionary", file.label))?;
     // Benutzerverwaltung direkt nach dem Einlesen (nur im Speicher).
     ddic.inject_system_user();
@@ -524,10 +524,10 @@ mod tests {
     fn active_dictionary_is_written_to_data_dir() {
         let dir = tempfile::tempdir().unwrap();
         let mut config = ServerConfig::defaults(crate::config::ServerMode::Runtime);
-        config.ddic = Some(dir.path().join("ddic.json"));
+        config.model_root = Some(dir.path().to_string_lossy().into_owned());
         config.data_dir = dir.path().join("data");
         std::fs::write(
-            config.ddic.as_ref().unwrap(),
+            dir.path().join("ddic.json"),
             r#"{"packages":[],"entities":[],"relationships":[],"apps":[]}"#,
         )
         .unwrap();

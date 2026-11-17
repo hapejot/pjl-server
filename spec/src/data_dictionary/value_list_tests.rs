@@ -10,6 +10,7 @@ fn dictionary() -> DataDictionary {
     dd.value_lists = vec![ValueList {
         id: LIST.into(),
         name: "ProjectStatus".into(),
+        package: None,
         values: vec![
             ValueEntry {
                 code: "open".into(),

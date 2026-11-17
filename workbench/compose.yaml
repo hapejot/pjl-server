@@ -39,7 +39,7 @@ services:
     user: "${WB_UID:-1000}:${WB_GID:-1000}"
     environment:
       DESIGNER: "1"
-      DDIC: /app/model/ddic.json
+      MODEL_ROOT: /app/model
     ports:
       - "8092:8080"
     volumes:
@@ -56,9 +56,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DDIC: /app/model/ddic.json
-      SCRIPTS_DIR: /app/model/scripts
-      EXT_DIR: /app/model/ext
+      MODEL_ROOT: /app/model
       STORE_PG_URL: postgres://workbench:${WB_DB_PASSWORD}@db:5432/workbench
       PORT: "8080"
       RUST_LOG: info
@@ -66,9 +64,7 @@ services:
       - "8091:8080"
       - "3270:3270"
     volumes:
-      - ./ddic.json:/app/model/ddic.json:ro
-      - ./scripts:/app/model/scripts:ro
-      - ./ext:/app/model/ext:ro
+      - ./:/app/model:ro
 
 volumes:
   workbench-db:

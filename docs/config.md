@@ -24,7 +24,7 @@ Das Modell besteht aus Packages, Entities, Fields, Relations und Apps. Es wird i
 - `relationship.rs`: `Relationship` (Komposition oder Assoziation, Kardinalität, Fremdschlüssel)
 - `app.rs`: `App` (FLP-Kachel, Titel, Icon, Hauptentität)
 
-Die Modelldaten werden in `ddic.json` gehalten. Der Designer (Abschnitt 2a) pflegt sie, die Runtime liest sie beim Start. Der Loader für die Store-Sets steht in `fiori-server/src/ddic_loader.rs`, die Felder in Anhang B.
+Die Modelldaten werden in `ddic.json` gehalten. Der Designer (Abschnitt 2a) pflegt sie, die Runtime liest sie beim Start. Die Designer-Set-Abbildung steht in `fiori-server/src/ddic_store.rs`; `fiori-server/src/ddic_loader.rs` lädt das Dictionary für den Laufzeitserver.
 
 ## 2a. Der Designer
 
@@ -33,23 +33,37 @@ Der Designer ist kein eigenes Programm, sondern der Laufzeitserver mit `--design
 **Ablauf**
 
 1. Der Designer öffnet `ddic.json` (`--ddic`, Standard `ddic.json`). Fehlt die Datei, wird eine leere angelegt.
-2. Die Oberfläche zeigt das eincompilierte Metamodell (`DataDictionary::new()`) mit den Entitäten `Entity`, `Field`, `Relation`, `Value`, `ValueList`, `Package`, `App`.
+2. Die Oberfläche zeigt das eincompilierte Metamodell (`DataDictionary::new()`) mit den Kern-Entitäten `Entity`, `Field`, `Relation`, `Value`, `ValueList`, `Package` und `App`. Weitere Designer-Sets bilden unter anderem Listenansichten, Facetten, UI-Konfiguration, Komponenten und Seeds ab.
 3. Jede Anlage, Änderung oder Löschung wird im `DdicStore` (`fiori-server/src/ddic_store.rs`) auf die Sets abgebildet, ins Dictionary übernommen, validiert und dann atomar geschrieben (Temp-Datei `ddic.json.tmp`, danach Rename). Scheitert die Validierung, bleibt die Datei unverändert und der Request bekommt einen Konflikt.
 4. Lesen greift nur auf den Speicherstand zu und schreibt nichts.
 
 **Persistierte Sets**
 
+Der `DdicStore` persistiert die folgenden 27 Sets. Die Pfade bezeichnen die jeweilige Abbildung in `ddic.json`; `[]` steht für ein Array-Element.
+
 | Set | Bedeutung | Abbildung in `ddic.json` |
 |---|---|---|
-| `PackageSet` | Pakete | `packages` |
-| `EntitySet` | Entitäten | `entities` |
-| `FieldSet` | Atom-Felder einer Entität | `entities[].fields[].Atom` |
-| `RelationSet` | Beziehungen | `relationships` |
-| `AppSet` | Launchpad-Kacheln | `apps` |
-| `ValueListSet` | Festwertlisten | `value_lists` |
-| `ValueSet` | Werte einer Festwertliste | `value_lists[].values` |
+| `PackageSet` | Pakete | `packages[]` |
+| `EntitySet` | Entitäten und Entitätsoptionen | `entities[]` |
+| `FieldSet` | Atom- und Measure-Felder | `entities[].fields[]` |
+| `RelationSet` | Beziehungen und Lookups | `relationships[]` |
+| `AppSet` | Launchpad-Kacheln | `apps[]` |
+| `ValueListSet`, `ValueSet` | Festwertlisten und ihre Werte | `value_lists[]`, `value_lists[].values[]` |
+| `ComponentSet`, `ComponentUseSet`, `ComponentUseRoleSet` | Komponentendefinitionen und ihre Verwendung/Rollen | `components[]`, `component_uses[]` |
+| `EntityListViewSet`, `EntityListColumnSet` | Listenansichten und Spalten | `entities[].list_views[]` |
+| `EntityFilterDefaultSet` | Standardwerte der Filterleiste | `entities[].filter_defaults` |
+| `EntitySelectionFieldSet` | Filterfelder | `entities[].selection_fields[]` |
+| `EntityFacetSet`, `EntityFacetFieldSet` | Facetten und ihre Felder | `entities[].facets[]` |
+| `EntityHiddenFieldSet`, `EntityHiddenFacetSet` | Ausgeblendete Felder und Facetten | `entities[].ui.hidden_fields[]`, `entities[].ui.hide_facets[]` |
+| `EntityUiSectionSet`, `EntityUiListColumnSet`, `EntityUiListTemplateSet` | Eigene Object-Page-Abschnitte, Listenspalten und Listentabs | `entities[].ui.sections[]`, `entities[].ui.list_columns[]`, `entities[].ui.list_templates[]` |
+| `FieldSideEffectSet` | Side-Effect-Ziele eines Feldes | `entities[].fields[].side_effects[]` |
+| `ValueHelpFilterSet` | Kontextfilter einer `EntityRef`-Wertehilfe | `entities[].fields[].value_list.EntityRef.filters[]` |
+| `AppModuleSet`, `AppControllerExtensionSet` | App-Module und Controller-Erweiterungen | `apps[].ui.modules[]`, `apps[].ui.controller_extensions[]` |
+| `EntitySeedSet`, `EntitySeedValueSet` | Seed-Datensätze und ihre Feldwerte | `entities[].seed[]` |
 
-Andere Sets sind nur flüchtig im Speicher.
+Die festen Katalog-Sets (z. B. EDM-Typen, Prioritäten und Platzierungen) werden für die Designer-Oberfläche erzeugt und nicht in `ddic.json` gespeichert.
+
+`ValueHelpFilterSet` bezieht sich auf Filter in `AtomValueList::EntityRef`. Die ebenfalls unterstützte Eigenschaft `Relationship.value_list_filters` wird am Relationship im Dictionary konfiguriert; dafür gibt es kein eigenes Designer-Set.
 
 **Regeln**
 
@@ -153,7 +167,7 @@ Der Austausch läuft über das gemeinsame Volume `export`. Der Runtime-Container
 ## Auffälligkeiten
 
 1. **Designer-Datei wird beim Schreiben neu formatiert**: Schlüssel werden alphabetisch sortiert, Formatierung ist Standard-JSON. Der Inhalt bleibt semantisch gleich.
-2. **Listenansichten (`ListView`) werden nicht aus dem Store geladen.** `ddic_loader.rs` kennt kein `ListViewSet`. Listenansichten kommen aktuell nur aus Rust-Code bzw. einer `ddic.json`, nicht aus der Designer-Oberfläche.
+2. **Nicht alle Dictionary-Eigenschaften haben ein eigenes Designer-Set.** Die persistierten Sets oben beschreiben den Pflegeumfang; nicht abgebildete Eigenschaften bleiben beim Schreiben aus dem Basis-JSON erhalten, sind aber nicht zwingend über die Designer-Oberfläche änderbar.
 3. **Store nur bei sauberem Stopp persistiert** (siehe Abschnitt 3).
 4. **Runtime lädt Modelländerungen nicht live nach.** Neustart nötig.
 
@@ -161,54 +175,65 @@ Der Austausch läuft über das gemeinsame Volume `export`. Der Runtime-Container
 
 ## Anhang A: Startparameter
 
-| Flag | Env | Default Designer | Default Runtime | Beschreibung |
-|---|---|---|---|---|
-| `--port` | `PORT` | 3033 | 3034 | HTTP-Port |
-| `--bind` | `BIND` | 0.0.0.0 | 0.0.0.0 | Lauschadresse |
-| `--designer` | `DESIGNER` | aus | aus | Designer-Modus: schreibt `ddic.json` |
-| `--data-dir` | `DATA_DIR` | `rel-data` | `rel-data` | Verzeichnis für `data.sqlite` |
-| `--web-root` | `WEB_ROOT` | `web` | `web` | Statische UI5-Assets |
-| `--ddic` | `DDIC` | keiner | `ddic.json` | Dictionary-Datei (Runtime Pflicht) |
-| `--schema` | `SCHEMA` | abgeleitet | abgeleitet | Feste Schemadatei (JSON) |
-| `--scripts-dir` | `SCRIPTS_DIR` | – | – | Rhai-Skripte pro Set (Hooks) |
-| `--auth-user-header` | `AUTH_USER_HEADER` | `X-Forwarded-User` | `X-Forwarded-User` | Header des Auth-Proxys |
-| `--auth-required` | `AUTH_REQUIRED` | aus | aus | Ohne Header: 401 |
-| `--store-pg-url` | `STORE_PG_URL` | – (SQLite) | – (SQLite) | PostgreSQL-Verbindung |
+Jede Option kann als CLI-Flag oder über die angegebene Umgebungsvariable gesetzt werden. Ein CLI-Flag hat Vorrang vor der Umgebungsvariable.
+
+| Flag | Env | Default | Beschreibung |
+|---|---|---|---|
+| `--port` | `PORT` | `3034` | HTTP-Port |
+| `--bind` | `BIND` | `0.0.0.0` | Lauschadresse des HTTP-Servers |
+| `--data-dir` | `DATA_DIR` | `rel-data` | Verzeichnis des SQLite-Stores und der Laufzeitdateien |
+| `--web-root` | `WEB_ROOT` | `web` | Statische UI5-Assets, sofern kein `FIORI_ROOT` gesetzt ist |
+| `--ddic` | `DDIC` | `ddic.json` | Dictionary-Datei |
+| `--ddic-overlay` | `DDIC_OVERLAY` | – | Optionales Overlay; nur im Laufzeitmodus |
+| `--schema` | `SCHEMA` | abgeleitet | Optionale feste Schemadatei (JSON) |
+| `--designer` | `DESIGNER` | aus | Designer-Modus: schreibt Änderungen in `ddic.json` |
+| `--auth-user-header` | `AUTH_USER_HEADER` | `X-Forwarded-User` | Benutzer-Header des Auth-Proxys |
+| `--auth-required` | `AUTH_REQUIRED` | aus | Ohne Benutzer-Header mit 401 antworten |
+| `--store-pg-url` | `STORE_PG_URL` | – (SQLite) | PostgreSQL-Verbindung |
+| `--term3270-port` | `TERM3270_PORT` | deaktiviert | Port der optionalen 3270-Statusschnittstelle |
+| `--term3270-bind` | `TERM3270_BIND` | `127.0.0.1` | Lauschadresse der 3270-Schnittstelle |
+| `--scripts-dir` | `SCRIPTS_DIR` | – | Rhai-Skripte pro Set (Hooks) |
+| `--ext-dir` | `EXT_DIR` | – | App-Assets, ausgeliefert unter `/ext/<app>/` |
+| `--fiori-root` | `FIORI_ROOT` | `WEB_ROOT` | Quelle der Web-Assets (`file://` oder `zip://`) |
+| `--model-root` | `MODEL_ROOT` | – | Gemeinsame Quelle für Modell, Skripte und Extensions (`file://` oder `zip://`) |
+| `--designer-root` | `DESIGNER_ROOT` | – | Designer-Dateiquelle (`file://`) |
+
+`--designer` aktiviert den Designer, ändert aber nicht den Standardport. Für einen separaten Designer-Port muss `--port` bzw. `PORT` gesetzt werden.
 
 
-## Anhang B: Modell-Sets im Designer-Store
+## Anhang B: Zentrale Designer-Record-Felder
 
-Die Felder, die der Loader liest (`ddic_loader.rs`):
+Die vollständigen Sets und ihre Abbildung in `ddic.json` stehen in Abschnitt 2a. Hier sind die wichtigsten Felder der Kern-Sets zusammengefasst:
 
-**PackageSet**: `name`, `title`, `description`
+**PackageSet**: `name`
 
-**EntitySet**: `name`, `plural` (Standard: `<name>s`), `package_ID`
+Das Designer-Metamodell enthält zusätzlich `title` und `description`. Der aktuelle `DdicStore` übernimmt beim Schreiben jedoch nur `name`; Änderungen an diesen beiden Feldern werden nicht ins Dictionary zurückgeschrieben.
 
-**FieldSet**: `entity_ID`, `name`, `label`, `type` (Edm-Typ, Standard `Edm.String`), `role`, `max_length`, `precision`, `scale`, `computed`, `immutable`
-- Felder mit Suffix `_ID` oder mit Rolle `lookup`, `association`, `composition`, `navigation` werden als Relation behandelt und nicht als Atom übernommen.
+**EntitySet**: `name`, `plural`, `type_name`, `draft_enabled`, `audited`, `package_ID`. Im Dictionary entspricht `plural` dem `type_name_plural`.
 
-**RelationSet**: `name`, `one_ID`, `many_ID`, `source_field`, `target_field`, `source_cardinality`, `target_cardinality`, `owned`
-- Kardinalität mit `N`, `n`, `*`, `many`, `0..*`, `1..*`, `0..n`, `1..n` gilt als Mehrfach-Seite.
+**FieldSet**: `entity_ID`, `name`, `label`, `kind` (`Atom` oder `Measure`), `type` (EDM-Typ), `package`, `max_length`, `precision`, `scale`, `computed`, `immutable`, `multiline`, `link`, `display_format` sowie Wertehilfe-Einstellungen. Side Effects und `EntityRef`-Filter werden in Kind-Sets gespeichert.
 
-**AppSet**: `name`, `title`, `subtitle`, `icon`, `main_entity_ID`, `package_ID`
-- Die Apps erscheinen als Kacheln im Launchpad (`flp.rs`, Route `/flp/`). Icons im Format `sap-icon://...`.
+**RelationSet**: `name`, `one_ID`, `many_ID`, `source_field`, `target_field`, `owned`, `package`, `one_label`, `many_label`.
 
-**ValueListSet**: `name` (Festwertliste, ID ist die Listen-UUID)
+**AppSet**: `name`, `title`, `subtitle`, `icon`, `main_entity_ID`, `package_ID`. Die Apps erscheinen als Kacheln im Launchpad (`flp.rs`, Route `/flp/`); Icons haben das Format `sap-icon://...`.
+
+**ValueListSet**: `name`, `code_key` (Festwertliste, ID ist die Listen-UUID)
 
 **ValueSet**: `value` (Code), `label`, `sort`, `list_ID`
 
-**FieldSet** zusätzlich: `value_list_ID` (Zuordnung zu einer Festwertliste)
+`FieldSet.value_list_ID` ordnet ein Atom einer Festwertliste zu. Weitere UI-, Listen-, Seed- und Komponenten-Sets sind in der Tabelle in Abschnitt 2a aufgeführt.
 
 Der frühere Hook `EntityDefaultsHook`, der beim Anlegen einer Entität `name` und `title` erzeugte, ist entfernt. Felder werden nur noch explizit angelegt.
 
 ## Anhang C: Dictionary-Eigenschaften
 
-Nicht alles davon ist im Designer-Store abbildbar (siehe Auffälligkeit 2).
+Die hier genannten Entitäts- und UI-Eigenschaften werden über die in Abschnitt 2a aufgeführten Sets abgebildet. Nicht jede Dictionary-Eigenschaft ist ein eigenes Designer-Feld; insbesondere hat `Relationship.value_list_filters` derzeit kein separates Set.
 
 **Entity (`EntitySpec`)**
-- `name`, `package`, `type_name_plural`
+- `name`, `package`, `type_name`, `type_name_plural`, `draft_enabled`, `audited`
 - `fields`: Liste von `FieldSpec`
-- `list_views`: Liste von `ListView` (nur aus Code/ddic.json)
+- `list_views`: Liste von `ListView` (Designer oder `ddic.json`)
+- `filter_defaults`, `selection_fields`, `facets`, `seed`
 
 **FieldSpec**
 - `Atom`: `name`, `label`, `edm_type`, `package`, `max_length`, `precision`, `scale`, `computed` (nicht editierbar), `immutable` (nach Anlage schreibgeschützt), `value_list`
@@ -229,7 +254,28 @@ Nicht alles davon ist im Designer-Store abbildbar (siehe Auffälligkeit 2).
 
 **Relationship**
 - `name`, `one`, `one_field`, `many`, `many_property`, `owned` (Komposition mit Draft-Mitnahme, sonst Assoziation), `package`
+- `value_list_filters`: optionale Kontextfilter für die Wertehilfe der Einzelnavigation (`many_property`). Jeder Filter ordnet `local_property` einer Property im Ziel (`target_property`) zu.
+- Die Designer-`RelationSet`-Oberfläche hat kein eigenes Feldset für `value_list_filters`; die Eigenschaft kann direkt im Dictionary gepflegt werden.
 - Optional `ConditionalRef` mit `Condition::SubsetOf`: beschränkt die Auswahl auf die Sammlung einer anderen Beziehung
+
+Beispiel: Beim Auswählen eines Ansprechpartners für eine Rechnung nur Ansprechpartner derselben Firma anbieten:
+
+```json
+{
+  "name": "invoice_contacts",
+  "package": "crm",
+  "one": "Contact",
+  "one_field": "_Invoices",
+  "many": "Invoice",
+  "many_property": "contact",
+  "value_list_filters": [
+    { "local_property": "company", "target_property": "company" }
+  ]
+}
+```
+
+`company` ist dabei jeweils eine einwertige Lookup-Navigation; der Server löst sie auf die zugehörige Fremdschlüssel-Property auf (z. B. `company_ID`). Alternativ können die Fremdschlüssel-Properties direkt angegeben werden.
+Voraussetzung ist, dass `Invoice` und `Contact` jeweils ein entsprechendes `company`-Lookup besitzen.
 
 **App (`App`)**
 - `name`, `title`, `main_entity`, `subtitle`, `icon`, `package`

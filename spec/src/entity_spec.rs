@@ -762,6 +762,14 @@ pub struct TableFacetSpec {
 }
 
 impl ValueListFilter {
+    /// Creates a context filter from a local property to a value-help property.
+    pub fn new(local_property: impl Into<String>, target_property: impl Into<String>) -> Self {
+        Self {
+            local_property: local_property.into(),
+            target_property: target_property.into(),
+        }
+    }
+
     /// Feld der Wertehilfe, das lokal (in der Entitaet) gefiltert wird.
     pub fn local_property(&self) -> &str {
         &self.local_property

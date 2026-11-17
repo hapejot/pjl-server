@@ -5,6 +5,11 @@ Datumsnormalisierung. Die Vorschläge sind nach Priorität sortiert. Jeder Punkt
 bzw. Beleg im Code, den Vorschlag und eine grobe Aufwandsschätzung (S = unter einem Tag,
 M = ein bis zwei Tage, L = mehr).
 
+**Historischer Vorschlagsstand:** Diese Datei ist kein aktueller Aufgaben- oder
+Implementierungsstatus. Befunde, Prioritäten und Aufwandsschätzungen wurden nicht
+vollständig gegen den heutigen Code geprüft; vor einer Umsetzung jeden Punkt erneut
+verifizieren.
+
 ---
 
 ## 1. Sicherheit
@@ -207,30 +212,21 @@ für Schreibzugriffe übernehmen.
 
 ## 6. Repository und Pflege
 
-### 6.1 Uncommittete Änderungen aus früheren Arbeiten (Priorität hoch, Aufwand S)
-
-- **Beleg**: `git status` zeigt viele geänderte Dateien in `fiori-server`, `spec`,
-  `sqlite-relational-store` und `video-store`, die nicht aus den hier beschriebenen Änderungen
-  stammen. Die neuen Dateien (`extension.rs`, `thumbnails.rs`, `video-runtime.rs`, Fragmente,
-  i18n, Dokumente) sind ebenfalls noch nicht committet.
-- **Vorschlag**: Aufteilen in thematische Commits (Extension-Interface, video-store-Erweiterung,
-  Datumsnormalisierung, Dokumentation). Vorher prüfen, welche fremden Änderungen gewollt sind.
-
-### 6.2 Dokumentation als Single Source of Truth (Priorität mittel, Aufwand S)
+### 6.1 Dokumentation als Single Source of Truth (Priorität mittel, Aufwand S)
 
 - **Beleg**: `fiori-elements-de.md` ist groß und enthält sowohl Ist-Zustand als auch Anleitung.
-  Einige Abschnitte (8.x) beschreiben noch die Lage vor dem Extension-Interface.
-- **Vorschlag**: Ist-Zustand, Anleitung und Verbesserungen trennen (diese Datei für Letzteres).
-  Abschnitt 8 kürzen und auf Abschnitt 10 verweisen.
+  Diese Datei ist eine Vorschlagsliste und kein verlässlicher Umsetzungsstatus.
+- **Vorschlag**: Änderungen am aktuellen Ist-Zustand in `fiori-elements-de.md` dokumentieren;
+  Vorschläge hier nur mit erneut geprüftem Beleg und klar gekennzeichnetem Status führen.
 
-### 6.3 Docker-Build lädt alles bei jeder Änderung (Priorität niedrig, Aufwand S)
+### 6.2 Docker-Build lädt alles bei jeder Änderung (Priorität niedrig, Aufwand S)
 
 - **Beleg**: `COPY . .` im Dockerfile des video-store. Jede Dokumentationsänderung invalidiert
   den Build-Cache.
 - **Vorschlag**: `.dockerignore` anlegen (ohne `target/`, `docs/`, `*.md`), damit nur relevante
   Änderungen den Build auslösen.
 
-### 6.4 `Cargo.lock`-Änderungen durch neue Abhängigkeiten (Priorität niedrig, Aufwand S)
+### 6.3 `Cargo.lock`-Änderungen durch neue Abhängigkeiten (Priorität niedrig, Aufwand S)
 
 - `reqwest` (rustls) und `axum` wurden neu in `video-store` aufgenommen. Die Lock-Datei sollte
   bewusst committet und die Auswahl der TLS-Implementierung dokumentiert werden.
@@ -243,7 +239,6 @@ für Schreibzugriffe übernehmen.
 2. Tests für Proxy und Fragmente (2.5) und Verifikation der i18n-Auflösung (4.1).
 3. Fragmente zur Laufzeit laden (2.1), damit Oberflächenanpassungen ohne Rebuild gehen.
 4. Upstream-Fehler differenzieren und Timeout setzen (2.3, 2.4).
-5. Commit-Aufteilung (6.1), damit der Stand nachvollziehbar ist.
-6. Erstes Bild im Store verankern (3.1).
+5. Erstes Bild im Store verankern (3.1).
 
 Die übrigen Punkte sind Qualitätsverbesserungen, die bei Bedarf eingeplant werden können.

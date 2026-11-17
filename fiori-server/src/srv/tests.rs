@@ -1,4 +1,5 @@
 use super::*;
+use spec::{AtomValueList, MeasureKind, ValueListFilter};
 
 #[test]
 fn entity_type_from_entity_maps_field_variants() {
@@ -14,6 +15,140 @@ fn entity_type_from_entity_maps_field_variants() {
             .iter()
             .any(|property| property.name == "name" && property.type_ == "Edm.String")
     );
+}
+
+#[test]
+fn annotations_use_custom_primary_key_instead_of_synthetic_id() {
+    let mut ddic = DataDictionary::empty();
+    ddic.add_package(Package::new("core"));
+    ddic.add_entity(
+        EntitySpec::new("Currency", "core", "Currencies")
+            .field(FieldSpec::Atom {
+                name: "code".into(),
+                label: "Code".into(),
+                edm_type: "Edm.String".into(),
+                package: None,
+                max_length: Some(3),
+                precision: None,
+                scale: None,
+                computed: false,
+                immutable: false,
+                value_list: None,
+                unit_scale_field: Some("digits".into()),
+                code_list: Some("Currency".into()),
+                link: false,
+                multiline: false,
+                side_effects: Vec::new(),
+                ui: None,
+            })
+            .with_primary_key("code"),
+    );
+    ddic.activate();
+    let entity = ddic.active_entity("Currency").unwrap();
+
+    let entity_type = EntityType::from_entity(&ddic, entity);
+    assert!(
+        entity_type
+            .properties
+            .iter()
+            .all(|property| property.name != "ID"),
+        "custom-key entity must not expose a synthetic ID property"
+    );
+
+    let annotations = Annotations::from_entity(&ddic, entity, &[], &[]);
+    assert!(
+        annotations
+            .iter()
+            .all(|block| block.target != "Service.Currency/ID"),
+        "field annotations must not target an absent ID property"
+    );
+
+    let code_list = code_list_annotations(entity).concat();
+    assert!(code_list.contains(r#"Target="Service.Currency/code""#));
+
+    let capabilities = capability_annotations_for_entity(&ddic, entity).concat();
+    assert!(!capabilities.contains(r#"Target="Service.Currency/ID""#));
+    assert!(!capabilities.contains("<PropertyPath>ID</PropertyPath>"));
+}
+
+#[test]
+fn relationship_lookup_value_help_uses_context_filters() {
+    let mut ddic = DataDictionary::empty();
+    ddic.add_package(Package::new("core"));
+    for name in ["Company", "Contact", "Invoice"] {
+        ddic.add_entity(
+            EntitySpec::new(name, "core", name)
+                .without_drafts()
+                .field(FieldSpec::string("name", "Name", 80)),
+        );
+    }
+
+    ddic.add_relationship(
+        Relationship::new("company_contacts", "core")
+            .with_one("Company", "_Contacts")
+            .with_many("Contact", "company"),
+    );
+    ddic.add_relationship(
+        Relationship::new("company_invoices", "core")
+            .with_one("Company", "_Invoices")
+            .with_many("Invoice", "company"),
+    );
+    let contact_relationship = Relationship::new("invoice_contacts", "core")
+        .with_one("Contact", "_Invoices")
+        .with_many("Invoice", "contact")
+        .with_value_list_filter(ValueListFilter::new("company", "company"));
+    let contact_relationship: Relationship = serde_json::from_value(
+        serde_json::to_value(contact_relationship).expect("serialize relationship"),
+    )
+    .expect("deserialize relationship filters");
+    ddic.add_relationship(contact_relationship);
+    ddic.activate();
+
+    let invoice = ddic.active_entity("Invoice").unwrap();
+    let annotations = Annotations::from_entity(&ddic, invoice, &[], &[]);
+    let value_list = annotations
+        .iter()
+        .find(|block| block.target == "Service.Invoice/contact_ID")
+        .and_then(|block| {
+            block
+                .annotations
+                .iter()
+                .find(|annotation| annotation.term == "Common.ValueList")
+        })
+        .expect("contact value help");
+    let parameters = value_list
+        .record
+        .as_ref()
+        .unwrap()
+        .property_values
+        .iter()
+        .find(|property| property.property == "Parameters")
+        .and_then(|property| property.collection.as_ref())
+        .unwrap();
+    let filter = parameters
+        .records
+        .iter()
+        .find(|record| record.type_.as_deref() == Some("Common.ValueListParameterIn"))
+        .expect("context filter");
+    let parameter = |name: &str| {
+        filter
+            .property_values
+            .iter()
+            .find(|property| property.property == name)
+            .unwrap()
+    };
+    assert_eq!(
+        parameter("LocalDataProperty").property_path.as_deref(),
+        Some("company_ID")
+    );
+    assert_eq!(
+        parameter("ValueListProperty").string.as_deref(),
+        Some("company_ID")
+    );
+    let xml = quick_xml::se::to_string(value_list).unwrap();
+    assert!(xml.contains(r#"Type="Common.ValueListParameterIn""#));
+    assert!(xml.contains(r#"Property="LocalDataProperty" PropertyPath="company_ID""#));
+    assert!(xml.contains(r#"Property="ValueListProperty" String="company_ID""#));
 }
 
 #[test]

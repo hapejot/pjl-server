@@ -7,47 +7,37 @@ nur die konkrete Implementierung (`YamlStore`) wird ausgetauscht.
 
 ## Voraussetzungen
 
-- Rust (getestet mit 1.75, sollte mit neueren Versionen ebenfalls laufen)
+- Rust; das Crate verwendet Edition 2021 (siehe `Cargo.toml`).
 
-**Hinweis zu Abhängigkeitsversionen:** In `Cargo.toml` sind `indexmap`,
-`hashbrown` und `tempfile` bewusst auf ältere Versionen gepinnt
-(`=2.2.6` / `=0.14.5` / `=3.10.1`). Neuere Versionen dieser Crates
-verlangen Rust Edition 2024, was ältere Toolchains (< 1.85 bzw. ohne
-aktiviertes Edition-2024-Feature) nicht unterstützen. Falls du eine
-aktuelle Rust-Toolchain (via `rustup`) nutzt, kannst du diese Pins
-entfernen oder lockern.
+**Hinweis zu Abhängigkeitsversionen:** `Cargo.toml` pinnt `indexmap`,
+`hashbrown` und `tempfile` auf konkrete Versionen. Vor einer Änderung dieser
+Pins die Toolchain-Kompatibilität und `Cargo.lock` prüfen.
 
 ## Struktur
 
 ```
 src/
-  error.rs        StoreError
-  key.rs          EntityKey (inkl. RAP-Draft-Dimension)
-  filter_eval.rs  Auswertung von FilterExpr gegen serde_json::Value
-  datastore.rs    DataStore-Trait (+ DataStoreDebugExt), DataRecord-Datenmodell, Navigation
-  yaml_store.rs   YamlStore: Datei-basierte Implementierung von DataStore
-  lib.rs          Re-Exports + DraftDataStore-Trait + Tests
+  lib.rs          Re-Exports aus data-store und YamlStore
+  yaml_store.rs   Datei-basierte Implementierung; Navigation und Draft-Bäume
+  tests.rs        Unit- und Integrationsnahe Tests
+tests/
+  basic.rs        CRUD- und Basisverhalten
+  conformance.rs  DataStore-Conformance-Tests
 examples/
-  demo.rs          Lauffähiges Beispiel (CRUD, Filter, Expand, Draft-Workflow)
+  demo.rs         Lauffähiges Beispiel (CRUD, Filter, Expand, Draft-Workflow)
 ```
 
-**Hinweis zum Query-AST:** Der Query-Builder (`ODataQuery`,
-`FilterExpr`, `ExpandItem`, `Navigation`, …) wird **nicht** in diesem Crate
-lokal definiert — er stammt aus der externen `odata`-Abhängigkeit
-(`odata::query`). Die frühere `query.rs` entfällt deshalb; die
-Query-Struktur ist vollständig bei `odata::query::*`, womit der
-`DataStore`-Trait von der konkreten Query-Implementierung losgekoppelt
-ist. `lib.rs` re-exportet öffentlich: `DataStore`, den
-`DraftDataStore`-Trait (`draft_edit` / `draft_activate` /
-`draft_prepare`), `DataStoreDebugExt`, `EntityKey`, `YamlStore` und
-`StoreError`. Die Datentypen `DraftAction`, `DraftAdministrativeData`
-und `DraftMessage` gehören in `datastore.rs`.
+`DataRecord`, `DataStore`, Draft-Typen, `EntityKey`, `Navigation` und
+`StoreError` stammen aus dem Workspace-Crate `data-store` und werden von
+`odata-yaml-store` re-exportiert. Der Query-AST (`ODataQuery`, Filter und
+Expand) kommt aus `odata::query`; die gemeinsame Filter-, Sortier- und
+Paging-Auswertung liegt ebenfalls in `data-store`, nicht in diesem Crate.
 
 ## Verwenden
 
 ```bash
 cargo build
-cargo test --features debug-tools
+cargo test
 cargo run --example demo
 ```
 
@@ -73,8 +63,8 @@ Geschäftsfelder (`CustomerName`, `Status`, …) im selben flachen Mapping:
 
 ```yaml
 ID: "00000000-0000-0000-0000-000000000001"
-IsActiveEntity: "true"
-HasActiveEntity: "true"
+IsActiveEntity: true
+HasActiveEntity: true
 CustomerName: "Müller GmbH"
 Status: "Released"
 ```
@@ -99,33 +89,26 @@ let store = YamlStore::open("./data")?;
   Disk. `commit()` ist aktuell ein No-Op. Für einen Prototyp ohne
   Performance-Anspruch ausreichend und weniger fehleranfällig als ein
   Dirty-Tracking über Transaktionsgrenzen.
-- **`any`/`all` im Filter:** Das Predicate wird direkt gegen den
-  Collection-Item-Wert ausgewertet; `lambda_var` wird aktuell nicht als
-  echter Variablenkontext verwaltet. Reicht für den Standardfall
-  (`Items/any(i:i/Qty gt 10)`), nicht für verschachtelte `any`/`all` mit
-  mehreren unterschiedlichen Lambda-Variablen im selben Ausdruck.
 - **`$apply` (Aggregation/GroupBy, OData V4 Analytics)** ist nicht
-  abgebildet – falls benötigt, müsste `ApplyTransformation` (siehe
-  Konversationsverlauf) ergänzt werden.
+  Teil des aktuellen `ODataQuery`-Umfangs und wird vom Store daher nicht
+  ausgeführt.
 - **`draft_prepare`:** Reines Platzhalterverhalten (gibt aktuellen
   Draft/Active-Stand zurück). Hier wäre der Ansatzpunkt für echte
   Validierungen/Determinations analog zu RAP.
 - **Kein Parser für rohe OData-URI-Strings.** `ODataQuery` muss von
   aufrufendem Code (z.B. deinem bestehenden URI-Parsing) befüllt werden.
-- **Nicht implementierte Stellen (aktuell `todo!()`):**
-  - `DataStore::read_sibling_entity` ist **nicht implementiert**.
-  - `YamlStore::expand_single_row` liefert für eine **Single-Referenz mit
-    mehr als einem Child** (`match subrows { [v] => …, _ => todo!() }`,
-    line ~148) `todo!()`. Die **Sammlungsnavigation** hingegen liefert
-    stets die volle Trefferliste (`row[from_field] = subrows`) und trifft
-    hier nicht auf den Fallback.
-  - In `filter_eval.rs` sind alle relationalen Vergleichsoperatoren
-    (`Gt`, `Ge`, `Lt`, `Le`) sowie `evaluate_operand` und
-    `FunctionCall` (`Expr::FunctionCall`) **`todo!()`**.
+- **Navigationen:** `$expand` für Sammlungsnavigationen liefert alle Treffer.
+  Eine einwertige Navigation liefert `null` bei keinem Treffer und den
+  Datensatz bei genau einem Treffer; mehrere Treffer führen zu einem
+  `Conflict`-Fehler.
+- **Kompositions-Drafts:** Edit und Activate propagieren rekursiv über die
+  registrierten Kompositions-Kinder. Die Aktualisierung eines ganzen Baums
+  ist jedoch nicht transaktional; ein Fehler kann nach bereits geschriebenen
+  Kinddatensätzen auftreten.
 
 ## Migration nach Postgres
 
-Der Trait `DataStore` (in `datastore.rs`) ist bewusst so geschnitten,
+Der Trait `DataStore` (im Crate `data-store`) ist bewusst so geschnitten,
 dass er 1:1 gegen eine `sqlx`- oder `diesel`-basierte Implementierung
 austauschbar ist, ohne Aufrufer-Code anzufassen:
 
@@ -137,7 +120,6 @@ impl DataStore for PostgresStore {
 }
 ```
 
-`EntityKey`, `ODataQuery` und `FilterExpr` bleiben dabei unverändert
-wiederverwendbar – die `FilterExpr`-AST müsste dann in eine
-`WHERE`-Klausel statt in In-Memory-Vergleiche übersetzt werden
-(`filter_eval.rs` durch einen SQL-Query-Builder ersetzen).
+`EntityKey` und `ODataQuery` bleiben dabei wiederverwendbar. Ein
+relationales Backend kann die gemeinsame Filterauswertung in
+`data-store` durch eine SQL-Übersetzung ergänzen oder ersetzen.

@@ -1,4 +1,5 @@
 use super::*;
+use spec::AtomValueList;
 
 /// Konstante Werte muessen als `String="..."` ausgegeben werden; `Constant="..."`
 /// ist kein gueltiges CSDL und laesst die Oberflaeche die Wertehilfe verwerfen.

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::entity_spec::ValueListFilter;
+
 /// Eine Seite einer Beziehung: identifiziert die Entitaet und den Namen der Navigationsproperty.
 #[derive(Debug, Clone)]
 pub struct Side {
@@ -130,6 +132,9 @@ pub struct Relationship {
     /// Lesbarer Titel der Einzelnavigation auf der "many"-Seite (z. B. "Video").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) many_label: Option<String>,
+    /// Kontextfilter fuer die Wertehilfe der Einzelnavigation auf der "many"-Seite.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) value_list_filters: Vec<ValueListFilter>,
 }
 
 impl Relationship {
@@ -145,6 +150,7 @@ impl Relationship {
             owned: false,
             one_label: None,
             many_label: None,
+            value_list_filters: Vec::new(),
         }
     }
 
@@ -160,6 +166,17 @@ impl Relationship {
         self.many = Some(entity.into());
         self.many_property = Some(property.into());
         self
+    }
+
+    /// Filtert die Wertehilfe dieser Einzelnavigation anhand lokaler Properties.
+    pub fn with_value_list_filter(mut self, filter: ValueListFilter) -> Self {
+        self.value_list_filters.push(filter);
+        self
+    }
+
+    /// Kontextfilter der Wertehilfe dieser Einzelnavigation.
+    pub fn value_list_filters(&self) -> &[ValueListFilter] {
+        &self.value_list_filters
     }
 
     /// Mark this relationship as a composition: the many side lives inside the one side's draft.

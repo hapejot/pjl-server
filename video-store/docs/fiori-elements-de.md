@@ -170,25 +170,27 @@ als Kaskade, Eindeutigkeit bei zusammengesetzten Schlüsseln.
 
 Die Oberfläche besteht aus drei Schichten, die alle aus dem DDIC generiert werden.
 
-### 6.1 OData-Service und Annotationen (`fiori-server/src/srv/mod.rs`)
+### 6.1 OData-Service und Annotationen
 
-`$metadata` wird als EDMX erzeugt. Für jede Entität gibt es:
+`$metadata` wird als EDMX zusammengesetzt: `srv/metadata.rs` serialisiert Service und Annotationen; die Generatoren liegen unter `srv/annotations/`. Die konkreten Annotationen hängen von DDIC und Overlay ab. Wichtige Regeln:
 
 | Annotation | Quelle / Inhalt |
 |---|---|
-| `UI.HeaderInfo` | `TypeName` = Entität, `TypeNamePlural` = Set, `Title` = Feld `name` |
-| `UI.LineItem` (Liste) | **nur** die Spalte `name` (siehe Abschnitt 7) |
-| `UI.Facets` | Abschnitt "General" (-> `FieldGroup#Main`) + je ein `ReferenceFacet` pro Sammelnavigation (`{nav}/@UI.LineItem`) |
-| `UI.FieldGroup#Main` | `UI.DataField` für jedes Feld; FK-Felder als `{nav}_ID` |
-| `Common.Label` | pro Feld `label` = Spaltenname (z. B. `file_name`) |
-| `Common.SemanticKey` | `ID` |
-| `Common.Messages` | `DraftMessages` |
-| `Common.DraftRoot` / `Common.DraftNode` | Draft-Root für Entitäten ohne Parent, sonst `DraftNode` |
-| `Org.OData.Core.V1.Computed` | `ID`, `IsActiveEntity`, `HasActiveEntity`, `HasDraftEntity` |
-| `Org.OData.Capabilities.V1.*` | Insert/Update/Delete-Restriktionen, `NavigationRestrictions` |
-| `Common.Text` + `UI.TextArrangement` | bei Fremdschlüsseln mit Anzeigewert |
-| `Measures.ISOCurrency` / `Unit` | bei `FieldSpec::Measure` |
-| `Common.ValueList` | nur bei `AtomValueList` gesetzt (im Video-Modell nicht gesetzt) |
+| `UI.HeaderInfo` | Typname und Pluralname aus der Entität; Titel ist das Feld `name` |
+| `UI.LineItem` | Spalten aus `list_views`; ohne Ansichten eine Fallback-Spalte (bevorzugt `name`) |
+| `UI.PresentationVariant` | je Listenansicht, verweist auf deren `UI.LineItem` |
+| `UI.Facets` / `UI.FieldGroup` | Object-Page-Abschnitte und Feldgruppen aus DDIC und Overlay |
+| `UI.SelectionFields` | nur, wenn `selection_fields` konfiguriert sind; Lookups werden auf ihre Fremdschlüssel-Property abgebildet |
+| `Common.FilterDefaultValue` | für konfigurierte `filter_defaults` |
+| `Common.Label` | i18n-Schlüssel pro Feld (`<Entität>.<Feld>`) |
+| `Common.SemanticKey` | Primärschlüssel der Hauptentitäten von Apps |
+| `Common.DraftRoot` / `Common.DraftNode` | abhängig vom Draft-Modus und der Kompositionsstruktur |
+| `Org.OData.Core.V1.Computed` | für generierte bzw. berechnete Schlüssel- und Draft-Properties |
+| `Org.OData.Capabilities.V1.*` | Insert/Update/Delete-Restriktionen und Navigationseinschränkungen |
+| `Common.Text` + `UI.TextArrangement` | für einwertige Lookups mit Anzeigewert |
+| `Org.OData.Measures.V1.ISOCurrency` / `.Unit` | für `FieldSpec::Measure` und das zugehörige Einheitenfeld |
+| `Common.ValueList` | für konfigurierte Atom-Wertehilfen und einwertige Lookups; optionale Kontextfilter werden als `Common.ValueListParameterIn` ausgegeben |
+| `Common.Messages` | wird nicht erzeugt: `DraftMessages` ist keine Property im OData-Metadatenmodell |
 
 Die Draft-Handhabung (`draftActivate`, `draftEdit`, `draftPrepare`) und die Schema-Vokabulare
 sind in `docs/draft-de.md` beschrieben.
@@ -232,7 +234,7 @@ Die Spalten der Liste sind explizit und benannt an der Entität definiert:
 * `default` ist die Standardansicht (unqualifiziertes `UI.LineItem`). Jede weitere Ansicht
   erzeugt `UI.LineItem#<name>` und `UI.PresentationVariant#<name>`.
 * Mehr als eine Ansicht: ListReport zeigt eine View-Leiste (`options.settings.views.paths`).
-* Ohne Ansichten bleibt das frühere Verhalten (nur `name`).
+* Ohne Ansichten wird `name` verwendet, sofern es darstellbar ist; andernfalls das erste darstellbare Atom- oder einwertige Lookup-Feld.
 * Validierung: `DataDictionary::validate_list_views()`, beim Laden von `ddic.json` im
   Runtime-Server (nach Anwendung des Overlays).
 * Pflege für den Video-Store im Overlay (Abschnitt 6.5), nicht in `map.rs`.
@@ -305,14 +307,12 @@ Stellen, an denen die Erzeugung nicht so weit geht wie die Typdefinitionen vermu
 
 | # | Befund | Beleg |
 |---|---|---|
-| L1 | ~~Die Listenansicht zeigt nur die Spalte `name`.~~ **Behoben:** explizite Listenansichten (`EntitySpec.list_views`, Pflege im Overlay `ddic.overlay.json`). Siehe Abschnitte 6.4 und 6.5. | `spec/src/entity_spec.rs` `ListView`, `srv/mod.rs` `line_item_annotations` |
+| L1 | ~~Die Listenansicht zeigt nur die Spalte `name`.~~ **Behoben:** explizite Listenansichten (`EntitySpec.list_views`, Pflege im Overlay `ddic.overlay.json`). Ohne Ansicht greift ein Fallback auf `name` bzw. das erste darstellbare Feld. Siehe Abschnitte 6.4 und 6.5. | `spec/src/entity_spec.rs` `ListView`, `fiori-server/src/srv/annotations/list.rs` |
 | L2 | ~~`PresentationOverrides` wurde nicht ausgewertet.~~ **Entfernt:** das Konstrukt `PresentationOverrides` samt Feld `presentation` an Atomen und Measures ist abgeschafft. Listenspalten werden über `EntitySpec.list_views` gesteuert (Abschnitt 6.4). | `spec/src/entity_spec.rs` |
 | L3 | Labels sind die rohen Spaltennamen (`file_name`, `agent_id`), keine lesbaren Texte. | `map.rs` `atom_field()`: `label: atom.name` |
 | L4 | `_`-Präfix soll laut Doku die TableFacet-Generierung unterdrücken. Der Code in `flp.rs` prüft das nicht; alle to-many Navigationen bekommen eine Kind-Route. | `spec/src/relationship.rs:9` vs. `flp.rs` ca. Zeile 303-308 |
 | L5 | `FacetSectionSpec` und `TableFacetSpec` existieren als Typen, werden aber in `fiori-server` nicht verwendet. | `spec/src/entity_spec.rs:408-420` |
-| L6 | `video-store` setzt für keine Spalte eine `AtomValueList`. Wertehilfen entstehen nur über Fremdschlüssel (Lookups). | `map.rs` `atom_field()`: `value_list: None` |
-| L7 | Die Annotation-Erzeugung für `FieldSpec::Measure` ist mit `todo!()` in `prepare_field_group` markiert. Im Video-Modell gibt es keine Measures, daher kein Laufzeitfehler. | `srv/mod.rs` `prepare_field_group` |
-| L8 | `sample.rs` enthält ein XML-Annotations-Beispiel; es wird nicht aufgerufen (auskommentiert in `srv/mod.rs` ca. Zeile 2125). | `srv/sample.rs`, `srv/mod.rs:2125` |
+| L6 | Das Video-DDIC verwendet keine feldbasierten `AtomValueList`-Wertehilfen. Einwertige Lookups erzeugen dennoch automatisch `Common.ValueList`; weitere `EntityRef`- oder Festwertlisten können im DDIC konfiguriert werden. | `map.rs` `atom_field()`, `fiori-server/src/srv/annotations/entity.rs` |
 
 Der Designer-Modus (`--designer`) schreibt Änderungen direkt in `ddic.json`; einen Publish-Schritt gibt es nicht mehr.
 
@@ -352,29 +352,33 @@ Diese Konstanten sind die direkten Stellschrauben:
 * **Listenansichten** (`ListView`): Spalten und Reihenfolge je Ansicht, siehe 6.4.
   Suche, Sortierung und Gruppen sind noch nicht modelliert; künftige Metadaten
   gehören als eigene, explizite Konstrukte an die Entität, nicht als Feld-Overrides.
-* **Wertehilfen** (`AtomValueList::EntityRef`, `FieldValueList`): erzeugen `Common.ValueList`.
-  Video-Modell setzt sie nicht; die Erweiterung wäre eine Zuordnung in `atom_field()`.
+* **Wertehilfen** (`AtomValueList::EntityRef`, `FieldValueList`) erzeugen `Common.ValueList`.
+  Einwertige `Lookup`-Felder erhalten ebenfalls eine Wertehilfe. Kontextfilter für Lookups
+  werden über `Relationship.value_list_filters` konfiguriert und als `ValueListParameterIn`
+  ausgegeben.
 
-### 8.3 Annotations-Ebene (`fiori-server/src/srv/mod.rs`)
+### 8.3 Annotations-Ebene (`fiori-server/src/srv/annotations/`)
 
-Hier liegt die größte Gestaltungsfreiheit für die UI:
+Die Generatoren sind nach Annotationstypen aufgeteilt; `srv/metadata.rs` baut daraus das EDMX.
+Bereits unterstützt sind unter anderem:
 
-* `UI.LineItem` für Listenspalten (heute nur `name`),
-* `UI.SelectionFields` für Filterfelder (heute nicht erzeugt),
-* `UI.SortOrder` über ein neues Modellkonstrukt für Standardsortierung,
+* `UI.LineItem` und `UI.PresentationVariant` aus `list_views`,
+* `UI.SelectionFields` aus `selection_fields`,
 * `UI.Facets` und `UI.FieldGroup` für die Object-Page-Struktur,
-* `UI.DataFieldForAction` für gebundene Aktionen (Draft-Aktionen sind bereits vorhanden),
-* `UI.Criticality` (Statusfarben), sobald ein Modellkonstrukt dafür existiert,
-* `Common.Label` für lesbare Beschriftungen (L3).
+* Wertehilfen aus Lookups und `AtomValueList`, einschließlich Kontextfiltern,
+* Measures mit Währungs- bzw. Einheitenannotation.
 
-Der Einstieg ist jeweils `Annotations::from_entity` bzw. `from_field`.
+Mögliche Erweiterungen sind beispielsweise `UI.SortOrder`, `UI.Criticality` und zusätzliche
+Darstellungen für Actions. Einstiegspunkte sind die passenden Generatoren unter
+`srv/annotations/`; die EDMX-Zusammenstellung liegt in `srv/metadata.rs`.
 
 ### 8.4 Manifest-Ebene (`fiori-server/src/flp.rs`)
 
 * `app_manifest_handler`: Routen, Targets, Modelleinstellungen (`autoExpandSelect`,
   `earlyRequests`, `operationMode`), `variantManagement`, `initialLoad`.
-* `list_control_configuration`: Toolbar-Aktionen und Controls der Liste über
-  `controlConfiguration` (heute ohne Eintrag, Erweiterungen liefern die Controls).
+* `list_control_configuration`: Die Basis-Konfiguration ist leer. Spaltenbreiten aus
+  `list_views` und Listenspalten aus Erweiterungen werden anschließend in die
+  `controlConfiguration` eingemischt.
 * `Component.js`: Komponenten-Erweiterungen. Die Datei wird serverseitig erzeugt.
 
 ### 8.5 Laufzeit- und Daten-Ebene (`fiori-server/src/hook.rs`)
@@ -428,7 +432,7 @@ Vollständiges Beispiel: Abschnitt 10.
 | `spec/src/relationship.rs` | Beziehungen, Komposition |
 | `spec/src/app.rs` | App-Definition |
 | `spec-schema` | Speicherschema aus dem DDIC |
-| `fiori-server/src/srv/mod.rs` | EDMX, Annotationen, OData-Service |
+| `fiori-server/src/srv/metadata.rs` und `fiori-server/src/srv/annotations/` | EDMX-Zusammenstellung und Annotation-Generatoren |
 | `fiori-server/src/flp.rs` | Manifest, Routen, Launchpad, Component |
 | `fiori-server/src/hook.rs` | Hooks für Laufzeitlogik |
 | `fiori-server/src/server.rs` | Routing und Start, `run_with(config, extensions)` |
@@ -549,7 +553,8 @@ fn object_page_content(&self, entity: &str) -> Option<Value> {
 ```
 
    * Der Schlüssel der Standard-Facet ist `<Navigation>Section` mit dem Navigationsnamen,
-     z. B. `_VideoThumbnailsSection`. Konvention aus `srv/mod.rs` (`list_facet_records`).
+     z. B. `_VideoThumbnailsSection`. Die Referenz-Facetten werden in
+     `srv/annotations/facets.rs` erzeugt.
    * `position.anchor` verweist auf die ID einer bestehenden Section, hier `GeneralSection`.
 
 2. **Modulpfad registrieren** (`ui5_paths`):

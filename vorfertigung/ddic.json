@@ -66,6 +66,11 @@
             "zeichnung"
           ],
           "title": "Auftrag"
+        },
+        {
+          "facet": "Default",
+          "fields": [],
+          "title": "Standardfelder"
         }
       ],
       "fields": [

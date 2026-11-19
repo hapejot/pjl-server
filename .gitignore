@@ -23,3 +23,5 @@ tmp.json
 tmp.sql
 video-store.zip
 *.pyc
+fiori-server/testdata
+data.sqlite

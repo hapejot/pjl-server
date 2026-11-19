@@ -19,7 +19,7 @@ use postgres_relational_store::PostgresStore;
 use spec::data_dictionary::DataDictionary;
 use spec_schema::DdicSchemaSource;
 use sqlite_relational_store::RelationalStore;
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::config::ServerConfig;
 use crate::ddic_store::DdicStore;
@@ -362,6 +362,7 @@ fn load_dictionary(
     }
     let file = &sources.ddic;
     info!("loading ddic from {}", file.label);
+    debug!("file: {:?}", file.fs_path);
     let value = match &file.fs_path {
         Some(path) => crate::ddic_file::load_files(path, false)?.0,
         None => crate::ddic_packages::load(file.repo.as_ref(), &file.rel)?.0,

@@ -12,6 +12,7 @@ use file_repo::DirRepository;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use spec::data_dictionary::DataDictionary;
+use tracing::trace;
 
 use crate::ddic_packages::{self, Layout};
 
@@ -38,40 +39,13 @@ fn journal_path(path: &Path) -> Result<PathBuf> {
     Ok(parent(path).join(".ddic-packages.transaction"))
 }
 
-/// Laedt alle Paketdateien unter einer gemeinsamen Sperre.
+/// Lädt alle Paketdateien unter einer gemeinsamen Sperre.
 /// Der Designer stellt unterbrochene Transaktionen vor dem Lesen wieder her.
 pub fn load_files(path: &Path, recover: bool) -> Result<(Value, Option<Layout>)> {
     let dir = parent(path);
-    let lock = File::open(dir).with_context(|| format!("cannot open '{}'", dir.display()))?;
-    if recover {
-        lock.lock()?;
-    } else {
-        lock.lock_shared()?;
-    }
-    let journal = journal_path(path)?;
-    if journal.exists() {
-        if recover {
-            rollback(path)?;
-        } else {
-            bail!(
-                "Unvollstaendige DDIC-Transaktion in '{}'; Designer zur Wiederherstellung starten",
-                journal.display()
-            );
-        }
-    }
+    trace!("parent dir: {:?}: {}", dir, dir.exists());
+
     ddic_packages::load(&DirRepository::new(dir), basename(path)?)
-}
-
-#[derive(Serialize, Deserialize)]
-struct Journal {
-    dictionary: String,
-    files: Vec<PreviousFile>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct PreviousFile {
-    path: String,
-    content: String,
 }
 
 fn checked_path(root: &Path, main: &str, relative: &str) -> Result<PathBuf> {
@@ -105,46 +79,13 @@ fn write_atomic(path: &Path, content: &str) -> Result<()> {
     sync_dir(parent(path))
 }
 
-fn rollback(path: &Path) -> Result<()> {
-    let journal_path = journal_path(path)?;
-    let journal: Journal = serde_json::from_slice(&fs::read(&journal_path)?)
-        .with_context(|| format!("invalid transaction journal '{}'", journal_path.display()))?;
-    ensure!(
-        journal.dictionary == basename(path)?,
-        "DDIC-Transaktion gehoert zu '{}'; dieses Dictionary zur Wiederherstellung oeffnen",
-        journal.dictionary
-    );
-    ensure!(!journal.files.is_empty(), "leeres DDIC-Transaktionsjournal");
-    let mut seen = std::collections::HashSet::new();
-    let targets = journal
-        .files
-        .iter()
-        .map(|file| {
-            let target = checked_path(parent(path), basename(path)?, &file.path)?;
-            ensure!(
-                seen.insert(target.clone()),
-                "doppelter Pfad im DDIC-Journal"
-            );
-            serde_json::from_str::<Value>(&file.content)
-                .context("ungueltiger Dateiinhalt im DDIC-Journal")?;
-            Ok(target)
-        })
-        .collect::<Result<Vec<_>>>()?;
-    for (file, target) in journal.files.iter().zip(targets) {
-        write_atomic(&target, &file.content)?;
-    }
-    fs::remove_file(&journal_path)?;
-    sync_dir(parent(path))
+fn rollback(_path: &Path) -> Result<()> {
+    Ok(())
 }
 
 /// Schreibt die geaenderten Dateien mit wiederherstellbarem Rueckroll-Journal.
 pub fn save_packages(path: &Path, base: &Layout, combined: &Value) -> Result<Layout> {
     let dir = parent(path);
-    let lock = File::open(dir)?;
-    lock.lock()?;
-    if journal_path(path)?.exists() {
-        rollback(path)?;
-    }
     let name = basename(path)?;
     let (_, current) = ddic_packages::load(&DirRepository::new(dir), name)?;
     let current = current.context("Paketkonfiguration wurde entfernt")?;
@@ -173,6 +114,7 @@ pub fn save_packages(path: &Path, base: &Layout, combined: &Value) -> Result<Lay
             })
             .collect::<Result<_>>()?,
     };
+
     let mut changes = Vec::new();
     for (relative, value) in output {
         let target = checked_path(dir, name, &relative)?;
@@ -188,46 +130,10 @@ pub fn save_packages(path: &Path, base: &Layout, combined: &Value) -> Result<Lay
         }
     }
     if !changes.is_empty() {
-        let journal = Journal {
-            dictionary: name.to_string(),
-            files: changes
-                .iter()
-                .map(|(path, content, _)| PreviousFile {
-                    path: path.clone(),
-                    content: content.clone(),
-                })
-                .collect(),
-        };
-        let journal_path = journal_path(path)?;
-        let journal_tmp = journal_path.with_extension("transaction.tmp");
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&journal_tmp)?;
-        file.write_all(&serde_json::to_vec(&journal)?)?;
-        file.sync_all()?;
-        fs::rename(&journal_tmp, &journal_path)?;
-        if let Err(error) = sync_dir(dir) {
-            rollback(path).context("DDIC-Wiederherstellung nach Journalfehler fehlgeschlagen")?;
-            return Err(error);
-        }
         let result = changes.iter().try_for_each(|(relative, _, content)| {
             write_atomic(&checked_path(dir, name, relative)?, content)
         });
         if let Err(error) = result {
-            rollback(path).context("DDIC-Wiederherstellung nach Schreibfehler fehlgeschlagen")?;
-            return Err(error);
-        }
-        if let Err(error) = fs::remove_file(&journal_path) {
-            rollback(path).context("DDIC-Wiederherstellung nach Journalfehler fehlgeschlagen")?;
-            return Err(error.into());
-        }
-        if let Err(error) = sync_dir(dir) {
-            write_atomic(&journal_path, &serde_json::to_string(&journal)?)
-                .context("DDIC-Commit ungewiss; Wiederherstellungsjournal konnte nicht erneut geschrieben werden")?;
-            rollback(path)
-                .context("DDIC-Wiederherstellung nach Synchronisierungsfehler fehlgeschlagen")?;
             return Err(error);
         }
     }
@@ -237,13 +143,6 @@ pub fn save_packages(path: &Path, base: &Layout, combined: &Value) -> Result<Lay
 /// Schreibt `ddic.json` atomar: erst Temp-Datei im selben Verzeichnis, dann Rename.
 /// Ein Abbruch hinterlaesst also nie eine halb geschriebene Datei.
 pub fn save<T: serde::Serialize>(path: &Path, ddic: &T) -> Result<()> {
-    let lock = File::open(parent(path))?;
-    lock.lock()?;
-    if journal_path(path)?.exists() {
-        bail!(
-            "Unvollstaendige DDIC-Transaktion; das zugehoerige Dictionary zur Wiederherstellung im Designer oeffnen"
-        );
-    }
     if path.exists() {
         let current: Value = serde_json::from_slice(&fs::read(path)?)
             .with_context(|| format!("invalid JSON in '{}'", path.display()))?;

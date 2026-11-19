@@ -936,11 +936,8 @@ impl DataStore for RelationalStore {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
 
-        // Ein Draft verdeckt seinen aktiven Zwilling. Die Regel haengt am
-        // Translator, nicht mehr an einer korrelierten Unterabfrage: der
-        // Sibling-Join hat den Zustand des Zwillings bereits in der Zeile.
-        // Sie ist wortgleich mit dem Draft-Filter, den Fiori Elements selbst
-        // schickt, und damit idempotent.
+        // Ein Draft verdeckt seinen aktiven Zwilling, ausser bei einem
+        // ausdruecklichen Filter auf aktive Saetze (siehe Translator).
         let mut sql = Translator::new(set, self.dialect())
             .with_schema(&schema)
             .shadow_drafts();

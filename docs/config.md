@@ -313,7 +313,8 @@ Die hier genannten Entitäts- und UI-Eigenschaften werden über die in Abschnitt
 **Relationship**
 - `name`, `one`, `one_field`, `many`, `many_property`, `owned` (Komposition mit Draft-Mitnahme, sonst Assoziation), `package`
 - `value_list_filters`: optionale Kontextfilter für die Wertehilfe der Einzelnavigation (`many_property`). Jeder Filter ordnet `local_property` einer Property im Ziel (`target_property`) zu.
-- Die Designer-`RelationSet`-Oberfläche hat kein eigenes Feldset für `value_list_filters`; die Eigenschaft kann direkt im Dictionary gepflegt werden.
+- `value_list_source`: alternative Quelle `{ "entity": "...", "key_property": "..." }` für die Wertehilfe. Der Schlüsselwert aus der Quelle wird in das Lookup-Feld geschrieben; Filterziele beziehen sich auf die Quellen-Entity. `use_local_draft: true` verwendet deren zum lokalen Datensatz passenden Draft-Stand.
+- Die Designer-`RelationSet`-Oberfläche hat keine eigenen Felder für `value_list_filters` oder `value_list_source`; beide Eigenschaften können direkt im Dictionary gepflegt werden.
 - Optional `ConditionalRef` mit `Condition::SubsetOf`: beschränkt die Auswahl auf die Sammlung einer anderen Beziehung
 
 Beispiel: Beim Auswählen eines Ansprechpartners für eine Rechnung nur Ansprechpartner derselben Firma anbieten:
@@ -334,6 +335,31 @@ Beispiel: Beim Auswählen eines Ansprechpartners für eine Rechnung nur Ansprech
 
 `company` ist dabei jeweils eine einwertige Lookup-Navigation; der Server löst sie auf die zugehörige Fremdschlüssel-Property auf (z. B. `company_ID`). Alternativ können die Fremdschlüssel-Properties direkt angegeben werden.
 Voraussetzung ist, dass `Invoice` und `Contact` jeweils ein entsprechendes `company`-Lookup besitzen.
+
+Mitglieder als Auswahlquelle eines Projekt-Lookups:
+
+```json
+{
+  "name": "contact_prim_projects",
+  "package": "workbench",
+  "one": "Contact",
+  "one_field": "_Projects",
+  "many": "Project",
+  "many_property": "primary_contact",
+  "value_list_source": {
+    "entity": "ProjectMember",
+    "key_property": "contact",
+    "use_local_draft": true
+  },
+  "value_list_filters": [
+    { "local_property": "ID", "target_property": "project" }
+  ]
+}
+```
+
+`key_property` und Filterziele dürfen einwertige Lookups sein; der Server löst sie auf ihre Fremdschlüssel-Properties auf. Die Quellen-Entity benötigt ein String-Feld `name`; der Schlüsseltyp und die Typen der Filter müssen zu den jeweiligen lokalen Properties passen. Bei `use_local_draft` müssen beide Entities Drafts unterstützen; das ist insbesondere für eine Komposition wie die Projektmitglieder geeignet.
+
+Der Server stellt für die Wertehilfe eine schreibgeschützte Sicht bereit und verlangt alle konfigurierten Kontextfilter. Einträge ohne Schlüsselwert werden ausgeblendet. Bei einer passenden Komposition wird die Wertehilfe nach Änderungen an den Kindern automatisch aktualisiert. Ohne `use_local_draft` werden bei Draft-fähigen Quellen aktive Einträge verwendet. Die Einschränkung gilt für die Wertehilfe, nicht als serverseitige Validierung direkter Schreibzugriffe.
 
 **App (`App`)**
 - `name`, `title`, `main_entity`, `subtitle`, `icon`, `package`

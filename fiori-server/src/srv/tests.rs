@@ -1,5 +1,5 @@
 use super::*;
-use spec::{AtomValueList, MeasureKind, ValueListFilter};
+use spec::{AtomValueList, MeasureKind, ValueListFilter, ValueListSource};
 
 #[test]
 fn entity_type_from_entity_maps_field_variants() {
@@ -149,6 +149,165 @@ fn relationship_lookup_value_help_uses_context_filters() {
     assert!(xml.contains(r#"Type="Common.ValueListParameterIn""#));
     assert!(xml.contains(r#"Property="LocalDataProperty" PropertyPath="company_ID""#));
     assert!(xml.contains(r#"Property="ValueListProperty" String="company_ID""#));
+}
+
+#[test]
+fn selected_lookup_keys_keep_null_for_empty_values() {
+    let mut ddic = DataDictionary::empty();
+    ddic.add_package(Package::new("core"));
+    ddic.add_entity(EntitySpec::new("Contact", "core", "Contacts"));
+    ddic.add_entity(EntitySpec::new("Project", "core", "Projects"));
+    ddic.add_relationship(
+        Relationship::new("primary_contact", "core")
+            .with_one("Contact", "_Projects")
+            .with_many("Project", "primary_contact"),
+    );
+    ddic.activate();
+    let project = ddic.active_entity("Project").unwrap();
+    let mut value = json!({"primary_contact_ID": null, "name": null});
+    let query = ODataQuery {
+        select: vec!["primary_contact_ID".into(), "name".into()],
+        ..Default::default()
+    };
+
+    touch_selected_fields(&ddic, project, &mut value, &query);
+
+    assert_eq!(value["primary_contact_ID"], Value::Null);
+    assert_eq!(value["name"], "");
+}
+
+#[test]
+fn relationship_value_help_can_use_an_alternate_entity_and_lookup_key() {
+    let mut ddic = DataDictionary::empty();
+    ddic.add_package(Package::new("core"));
+    for name in ["Contact", "Project", "ProjectMember"] {
+        ddic.add_entity(
+            EntitySpec::new(name, "core", name)
+                .without_drafts()
+                .field(FieldSpec::string("name", "Name", 80)),
+        );
+    }
+
+    ddic.add_relationship(
+        Relationship::new("project_members", "core")
+            .with_one("Project", "_Members")
+            .with_many("ProjectMember", "project"),
+    );
+    ddic.add_relationship(
+        Relationship::new("contact_memberships", "core")
+            .with_one("Contact", "_Memberships")
+            .with_many("ProjectMember", "contact"),
+    );
+    let primary_contact = Relationship::new("project_primary_contact", "core")
+        .with_one("Contact", "_PrimaryProjects")
+        .with_many("Project", "primary_contact")
+        .with_value_list_source(ValueListSource::new("ProjectMember", "contact"))
+        .with_value_list_filter(ValueListFilter::new("ID", "project"));
+    let primary_contact: Relationship = serde_json::from_value(
+        serde_json::to_value(primary_contact).expect("serialize relationship"),
+    )
+    .expect("deserialize relationship value-help source");
+    ddic.add_relationship(primary_contact);
+    ddic.activate();
+
+    let project = ddic.active_entity("Project").unwrap();
+    let annotations = Annotations::from_entity(&ddic, project, &[], &[]);
+    let value_list = annotations
+        .iter()
+        .find(|block| block.target == "Service.Project/primary_contact_ID")
+        .and_then(|block| {
+            block
+                .annotations
+                .iter()
+                .find(|annotation| annotation.term == "Common.ValueList")
+        })
+        .expect("primary contact value help");
+    let record = value_list.record.as_ref().unwrap();
+    let collection_path = record
+        .property_values
+        .iter()
+        .find(|property| property.property == "CollectionPath")
+        .and_then(|property| property.string.as_deref());
+    assert_eq!(
+        collection_path,
+        Some("Project_primary_contact_ValueHelpSet")
+    );
+
+    let parameters = record
+        .property_values
+        .iter()
+        .find(|property| property.property == "Parameters")
+        .and_then(|property| property.collection.as_ref())
+        .unwrap();
+    let output = parameters
+        .records
+        .iter()
+        .find(|record| record.type_.as_deref() == Some("Common.ValueListParameterInOut"))
+        .expect("key output");
+    fn parameter<'a>(record: &'a Record, name: &str) -> &'a PropertyValue {
+        record
+            .property_values
+            .iter()
+            .find(|property| property.property == name)
+            .unwrap()
+    }
+    assert_eq!(
+        parameter(output, "LocalDataProperty")
+            .property_path
+            .as_deref(),
+        Some("primary_contact_ID")
+    );
+    assert_eq!(
+        parameter(output, "ValueListProperty").string.as_deref(),
+        Some("contact_ID")
+    );
+
+    let filter = parameters
+        .records
+        .iter()
+        .find(|record| record.type_.as_deref() == Some("Common.ValueListParameterIn"))
+        .expect("project membership filter");
+    assert_eq!(
+        parameter(filter, "LocalDataProperty")
+            .property_path
+            .as_deref(),
+        Some("ID")
+    );
+    assert_eq!(
+        parameter(filter, "ValueListProperty").string.as_deref(),
+        Some("project_ID")
+    );
+}
+
+#[test]
+fn workbench_primary_contact_value_help_uses_project_members() {
+    let mut ddic: DataDictionary =
+        serde_json::from_str(include_str!("../../../workbench/ddic.json"))
+            .expect("workbench dictionary");
+    ddic.activate();
+
+    let project = ddic.active_entity("Project").unwrap();
+    let annotations = Annotations::from_entity(&ddic, project, &[], &[]);
+    let value_list = annotations
+        .iter()
+        .find(|block| block.target == "Service.Project/primary_contact_ID")
+        .and_then(|block| {
+            block
+                .annotations
+                .iter()
+                .find(|annotation| annotation.term == "Common.ValueList")
+        })
+        .expect("primary contact value help");
+    let xml = quick_xml::se::to_string(value_list).unwrap();
+    assert!(
+        xml.contains(r#"Property="CollectionPath" String="Project_primary_contact_ValueHelpSet""#)
+    );
+    assert!(xml.contains(r#"Type="Common.ValueListParameterInOut""#));
+    assert!(xml.contains(r#"Property="LocalDataProperty" PropertyPath="primary_contact_ID""#));
+    assert!(xml.contains(r#"Property="ValueListProperty" String="contact_ID""#));
+    assert!(xml.contains(r#"Property="ValueListProperty" String="project_ID""#));
+    assert!(xml.contains(r#"Property="LocalDataProperty" PropertyPath="IsActiveEntity""#));
+    assert!(xml.contains(r#"Property="ValueListProperty" String="IsActiveEntity""#));
 }
 
 #[test]

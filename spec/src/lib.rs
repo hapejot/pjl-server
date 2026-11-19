@@ -46,5 +46,5 @@ pub use entity_spec::{
     Priority, TableFacetSpec, UiListColumn, UiListTemplate, UiSection, ValueListFilter,
 };
 pub use package::Package;
-pub use relationship::{Condition, ConditionalRef, Relationship, Side};
+pub use relationship::{Condition, ConditionalRef, Relationship, Side, ValueListSource};
 pub use value_list::{ValueEntry, ValueList};

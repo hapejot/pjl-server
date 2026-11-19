@@ -137,18 +137,67 @@ async fn untranslatable_function_fails_loudly() {
 }
 
 #[tokio::test]
-async fn path_expressions_in_filter_are_rejected() {
+async fn collection_paths_without_lambda_are_rejected() {
     let store = seeded().await;
-    let query = ODataQuery::new().filter(bin(
-        BinOp::Eq,
-        Expr::Identifier("Customer/Name".into()),
-        Expr::String("x".into()),
-    ));
+    let query = lambda_query("_Items/Material eq 'M-100'");
     assert!(store.get_collection(ORDERS, &query).await.is_err());
 }
 
 fn lambda_query(filter: &str) -> ODataQuery {
     ODataQuery::new().filter(Expr::parse(filter).expect("parst"))
+}
+
+#[tokio::test]
+async fn to_one_filter_uses_the_visible_associated_record() {
+    let store = seeded().await;
+    let customer = lambda_query("Customer/Name eq 'Mueller GmbH'");
+    assert_eq!(
+        store.get_collection(ORDERS, &customer).await.unwrap().len(),
+        1
+    );
+
+    store.draft_edit(ORDERS, &active(1)).await.unwrap();
+    assert_eq!(
+        store.get_collection(ORDERS, &customer).await.unwrap().len(),
+        1
+    );
+
+    store.draft_edit("CustomerSet", &active(100)).await.unwrap();
+    store
+        .patch_entity(
+            "CustomerSet",
+            &draft(100),
+            &json!({"Name": "Changed customer"}),
+        )
+        .await
+        .unwrap();
+    assert!(store
+        .get_collection(ORDERS, &customer)
+        .await
+        .unwrap()
+        .is_empty());
+    let changed = lambda_query("Customer/Name eq 'Changed customer'");
+    assert_eq!(
+        store.get_collection(ORDERS, &changed).await.unwrap().len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn explicit_active_filter_can_read_a_record_with_a_draft() {
+    let store = seeded().await;
+    store.draft_edit(ORDERS, &active(1)).await.unwrap();
+
+    let active_only = lambda_query("IsActiveEntity eq true and Amount eq 150");
+    let rows = store.get_collection(ORDERS, &active_only).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].is_active_entity());
+    assert_eq!(store.count(ORDERS, &active_only).await, 1);
+
+    let default = lambda_query("Amount eq 150");
+    let rows = store.get_collection(ORDERS, &default).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(!rows[0].is_active_entity());
 }
 
 #[tokio::test]

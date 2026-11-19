@@ -1048,7 +1048,8 @@ impl DataStore for PostgresStore {
         let schema = self.entity_set(set_name)?;
         let set = schema.set(set_name).expect("geprueft");
 
-        // Ein Draft verdeckt seinen aktiven Zwilling (siehe Translator).
+        // Ein Draft verdeckt seinen aktiven Zwilling, ausser bei einem
+        // ausdruecklichen Filter auf aktive Saetze (siehe Translator).
         let mut sql = Translator::new(set, self.dialect())
             .with_schema(&schema)
             .shadow_drafts();

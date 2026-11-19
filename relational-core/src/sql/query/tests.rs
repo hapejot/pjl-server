@@ -1,7 +1,7 @@
 use data_store::{Column, DataType, EntitySet};
 use odata::query::Expr;
 
-use crate::dialect::SQLITE;
+use crate::dialect::{POSTGRES, SQLITE};
 use crate::sql::query::Translator;
 
 fn order_set() -> EntitySet {
@@ -67,6 +67,53 @@ fn shadow_matches_the_fiori_draft_filter() -> anyhow::Result<()> {
         implicit.text
     );
     assert!(explicit
+        .text
+        .contains(r#""SiblingEntity/IsActiveEntity" IS NULL"#));
+    Ok(())
+}
+
+#[test]
+fn an_explicit_active_filter_disables_shadowing_only_for_conjunctions() -> anyhow::Result<()> {
+    let set = order_set();
+    for (filter, shadowed) in [
+        ("IsActiveEntity eq true", false),
+        ("name eq 'x' and true eq IsActiveEntity", false),
+        ("IsActiveEntity eq false", true),
+        ("IsActiveEntity eq true or name eq 'x'", true),
+    ] {
+        let statement = Translator::new(&set, &SQLITE)
+            .shadow_drafts()
+            .filter(&Expr::parse(filter).expect("parst"))
+            .build()?;
+        assert_eq!(
+            statement
+                .text
+                .contains(r#"("IsActiveEntity" = 0 OR "SiblingEntity/IsActiveEntity" IS NULL)"#),
+            shadowed,
+            "{filter}: {}",
+            statement.text
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn navigation_filters_use_postgres_boolean_and_placeholder_syntax() -> anyhow::Result<()> {
+    let schema = data_store::conformance::schema();
+    let set = schema.set("OrderSet")?;
+    let statement = Translator::new(set, &POSTGRES)
+        .with_schema(&schema)
+        .shadow_drafts()
+        .filter(
+            &Expr::parse("Customer/Name eq 'Mueller GmbH' and IsActiveEntity eq true")
+                .expect("parst"),
+        )
+        .build()?;
+    assert!(statement.text.contains(r#""root"."Customer_ID""#));
+    assert!(statement.text.contains(r#"NOT "l1"."IsActiveEntity""#));
+    assert!(statement.text.contains("$1"));
+    assert!(statement.text.contains("$2"));
+    assert!(!statement
         .text
         .contains(r#""SiblingEntity/IsActiveEntity" IS NULL"#));
     Ok(())

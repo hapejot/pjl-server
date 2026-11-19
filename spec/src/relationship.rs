@@ -2,6 +2,50 @@ use serde::{Deserialize, Serialize};
 
 use crate::entity_spec::ValueListFilter;
 
+/// Alternate entity and key field used by a relationship's value help.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValueListSource {
+    /// Entity whose set provides the value-help rows.
+    pub(crate) entity: String,
+    /// Property on that entity that supplies the relationship's target key.
+    pub(crate) key_property: String,
+    /// Read the source version corresponding to the local draft state.
+    #[serde(default, skip_serializing_if = "crate::entity_spec::is_false")]
+    pub(crate) use_local_draft: bool,
+}
+
+impl ValueListSource {
+    /// Creates an alternate value-help source.
+    pub fn new(entity: impl Into<String>, key_property: impl Into<String>) -> Self {
+        Self {
+            entity: entity.into(),
+            key_property: key_property.into(),
+            use_local_draft: false,
+        }
+    }
+
+    /// Entity whose set provides the value-help rows.
+    pub fn entity(&self) -> &str {
+        &self.entity
+    }
+
+    /// Property on that entity that supplies the relationship's target key.
+    pub fn key_property(&self) -> &str {
+        &self.key_property
+    }
+
+    /// Uses the local entity's draft state when reading the source.
+    pub fn with_local_draft(mut self) -> Self {
+        self.use_local_draft = true;
+        self
+    }
+
+    /// Whether the source is scoped to the local entity's draft state.
+    pub fn use_local_draft(&self) -> bool {
+        self.use_local_draft
+    }
+}
+
 /// Eine Seite einer Beziehung: identifiziert die Entitaet und den Namen der Navigationsproperty.
 #[derive(Debug, Clone)]
 pub struct Side {
@@ -135,6 +179,9 @@ pub struct Relationship {
     /// Kontextfilter fuer die Wertehilfe der Einzelnavigation auf der "many"-Seite.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) value_list_filters: Vec<ValueListFilter>,
+    /// Alternative Entity und Schluessel-Property fuer die Wertehilfe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) value_list_source: Option<ValueListSource>,
 }
 
 impl Relationship {
@@ -151,6 +198,7 @@ impl Relationship {
             one_label: None,
             many_label: None,
             value_list_filters: Vec::new(),
+            value_list_source: None,
         }
     }
 
@@ -177,6 +225,17 @@ impl Relationship {
     /// Kontextfilter der Wertehilfe dieser Einzelnavigation.
     pub fn value_list_filters(&self) -> &[ValueListFilter] {
         &self.value_list_filters
+    }
+
+    /// Setzt eine alternative Entity und Schluessel-Property fuer die Wertehilfe.
+    pub fn with_value_list_source(mut self, source: ValueListSource) -> Self {
+        self.value_list_source = Some(source);
+        self
+    }
+
+    /// Alternative Entity und Schluessel-Property fuer die Wertehilfe.
+    pub fn value_list_source(&self) -> Option<&ValueListSource> {
+        self.value_list_source.as_ref()
     }
 
     /// Mark this relationship as a composition: the many side lives inside the one side's draft.

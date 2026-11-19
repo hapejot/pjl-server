@@ -27,6 +27,7 @@ mod metadata;
 use metadata::metadata;
 
 mod annotations;
+mod value_help;
 pub use annotations::{Annotation, Annotations, Collection, PropertyValue, Record};
 pub use annotations::{DEFAULT_FACET, GENERAL_FACET};
 #[cfg(test)]
@@ -740,6 +741,14 @@ struct ODataError {
 }
 
 impl ODataError {
+    fn internal(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "InternalError",
+            message: message.into(),
+        }
+    }
+
     fn bad_request(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
@@ -872,6 +881,9 @@ async fn resolve_get_path(
     query: &ODataQuery,
     segments: &[PathSegment],
 ) -> Result<GetResult, ODataError> {
+    if let Some(result) = value_help::resolve_get(state, query, segments).await? {
+        return Ok(result);
+    }
     let resolved = resolve_path(state, query, segments).await?;
     materialize(
         state,
@@ -979,7 +991,7 @@ fn materialize(
         ))),
         (Cursor::Entity { spec, record, .. }, None) => {
             let mut value = entity_json(state, &spec, json!(record));
-            touch_selected_fields(&mut value, query);
+            touch_selected_fields(&state.ddic(), &spec, &mut value, query);
             value["@odata.context"] = json!(format!("{context}/$entity"));
             Ok(GetResult::Json(value))
         }
@@ -1352,7 +1364,12 @@ fn entity_key(spec: &EntitySpec, segment: &PathSegment) -> Result<EntityKey, ODa
     ))
 }
 
-fn touch_selected_fields(value: &mut Value, query: &ODataQuery) {
+fn touch_selected_fields(
+    ddic: &DataDictionary,
+    spec: &EntitySpec,
+    value: &mut Value,
+    query: &ODataQuery,
+) {
     for field in query.select.iter() {
         if field == "*"
             || query
@@ -1363,7 +1380,18 @@ fn touch_selected_fields(value: &mut Value, query: &ODataQuery) {
             continue;
         }
         if value[field].is_null() {
-            value[field] = json!(format!(""));
+            let is_lookup_key = spec.fields().any(|candidate| {
+                matches!(
+                    candidate,
+                    FieldSpec::Lookup { name, entity, collection: false, .. }
+                        if ddic.fk_column(entity, name) == *field
+                )
+            });
+            value[field] = if is_lookup_key {
+                Value::Null
+            } else {
+                json!("")
+            };
         }
     }
 }
@@ -2068,14 +2096,22 @@ async fn index(State(state): State<AppState>) -> Response {
     // eine feste Liste (`EntityConfigs`, `EntityFields`, ...) an, die seit dem
     // Umstieg auf das Data Dictionary keine Entsprechung mehr hat - im
     // Laufzeitserver waeren das Eintraege eines fremden Modells.
-    let value: Vec<Value> = state
-        .ddic()
+    let ddic = state.ddic();
+    let projections = match value_help::projections(&ddic) {
+        Ok(projections) => projections,
+        Err(error) => return ODataError::internal(error).into_response(),
+    };
+    let mut value: Vec<Value> = ddic
         .active_entities()
         .map(|e| {
             let set = e.setname();
             json!({"name": set, "url": set})
         })
         .collect();
+    value.extend(projections.iter().map(|projection| {
+        let set = projection.set_name();
+        json!({"name": set, "url": set})
+    }));
     Json(json!({
       "@odata.context": "/Service/$metadata",
       "value": value

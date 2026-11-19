@@ -90,6 +90,13 @@ pub struct Collection {
     pub property_paths: Vec<String>,
 
     #[serde(
+        rename = "NavigationPropertyPath",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub navigation_property_paths: Vec<String>,
+
+    #[serde(
         rename = "AnnotationPath",
         default,
         skip_serializing_if = "Vec::is_empty"
@@ -104,6 +111,7 @@ impl Collection {
     pub fn new() -> Self {
         Self {
             property_paths: Vec::new(),
+            navigation_property_paths: Vec::new(),
             annotation_paths: Vec::new(),
             records: Vec::new(),
         }
@@ -116,6 +124,11 @@ impl Collection {
 
     pub fn add_property_path(mut self, path: impl Into<String>) -> Self {
         self.property_paths.push(path.into());
+        self
+    }
+
+    pub fn add_navigation_property_path(mut self, path: impl Into<String>) -> Self {
+        self.navigation_property_paths.push(path.into());
         self
     }
 

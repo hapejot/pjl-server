@@ -75,8 +75,8 @@ pub mod query {
         set: &'a EntitySet,
     }
 
-    /// Sichtbarkeitsregel des Draft-Modells: ein Draft verdeckt seinen aktiven
-    /// Zwilling.
+    /// Sichtbarkeitsregel des Draft-Modells: ein Draft verdeckt normalerweise
+    /// seinen aktiven Zwilling.
     ///
     /// Formuliert als Praedikat auf der Sibling-Sicht, nicht als korrelierte
     /// Unterabfrage - die Information steht durch den Join bereits in der
@@ -111,6 +111,29 @@ pub mod query {
         }
     }
 
+    fn explicitly_active(expr: &Expr) -> bool {
+        fn active_column(expr: &Expr) -> bool {
+            matches!(expr, Expr::Identifier(name) if name == IS_ACTIVE_COLUMN)
+                || matches!(expr, Expr::Path(parts) if parts.len() == 1 && parts[0] == IS_ACTIVE_COLUMN)
+        }
+        match expr {
+            Expr::BinaryOp {
+                op: BinOp::And,
+                left,
+                right,
+            } => explicitly_active(left) || explicitly_active(right),
+            Expr::BinaryOp {
+                op: BinOp::Eq,
+                left,
+                right,
+            } => {
+                (active_column(left) && matches!(right.as_ref(), Expr::Bool(true)))
+                    || (active_column(right) && matches!(left.as_ref(), Expr::Bool(true)))
+            }
+            _ => false,
+        }
+    }
+
     /// Wahr, wenn das Prädikat nur Pfade auf die Lambda-Variable `var` nutzt.
     /// Bare Identifier beziehen sich in einem Lambda auf die Wurzelzeile und
     /// gelten daher als nicht rein.
@@ -139,6 +162,7 @@ pub mod query {
         params: Vec<SqlParam>,
         filter: Vec<Expr>,
         raw_filters: Vec<String>,
+        shadow_drafts: bool,
         select: Vec<String>,
         /// Innerhalb eines Lambda-Ausdrucks gesetzt.
         scope: Option<LambdaScope<'a>>,
@@ -158,6 +182,7 @@ pub mod query {
                 params: vec![],
                 filter: vec![],
                 raw_filters: vec![],
+                shadow_drafts: false,
                 select: vec![],
                 scope: None,
                 lambda_joins: None,
@@ -186,6 +211,7 @@ pub mod query {
             // Reihenfolge: erst die Ausdrucksfilter (sie binden Parameter),
             // dann die bereits umnummerierten Rohfilter.
             let exprs = std::mem::take(&mut self.filter);
+            let shadow = self.shadow_drafts && !exprs.iter().any(explicitly_active);
             let mut conditions: Vec<String> = Vec::with_capacity(exprs.len());
             let mut joins: Vec<String> = Vec::new();
             for expr in &exprs {
@@ -197,6 +223,9 @@ pub mod query {
                 }
             }
             conditions.extend(self.raw_filters.iter().cloned());
+            if shadow {
+                conditions.push(shadow_predicate(self.dialect));
+            }
             let condition_sql = conditions.join(" AND ");
             if !joins.is_empty() {
                 self.root_referenced = true;
@@ -352,13 +381,12 @@ pub mod query {
             self
         }
 
-        /// Blendet aktive Saetze aus, zu denen ein Draft existiert.
+        /// Blendet aktive Saetze aus, zu denen ein Draft existiert, ausser
+        /// wenn der Filter ausdruecklich nur aktive Saetze anfordert.
         ///
         /// Fuer Sets ohne Draft-Unterstuetzung wirkungslos.
         pub fn shadow_drafts(mut self) -> Self {
-            if self.set.draft_enabled {
-                self.raw_filters.push(shadow_predicate(self.dialect));
-            }
+            self.shadow_drafts = self.set.draft_enabled;
             self
         }
 
@@ -397,15 +425,81 @@ pub mod query {
                     }
                 }
             }
-            let plain = match parts {
+            let column = match parts {
                 [name] => self.column(name)?,
-                _ => self.sibling_column(parts)?,
+                [name, ..] if name == "SiblingEntity" => self.sibling_column(parts)?,
+                _ => {
+                    self.root_referenced = true;
+                    return self.navigation_value(ROOT_ALIAS, self.set, parts);
+                }
             };
             if self.scope.is_some() {
                 self.root_referenced = true;
-                return Ok(format!("{}.{}", quote(ROOT_ALIAS), plain));
+                Ok(format!("{}.{}", quote(ROOT_ALIAS), column))
+            } else {
+                Ok(column)
             }
-            Ok(plain)
+        }
+
+        fn navigation_value(
+            &mut self,
+            alias: &str,
+            set: &'a EntitySet,
+            path: &[String],
+        ) -> Result<String, StoreError> {
+            let (head, rest) = path
+                .split_first()
+                .ok_or_else(|| unsupported("Leerer Navigationspfad"))?;
+            if rest.is_empty() {
+                set.get_column(head)
+                    .map_err(|e| StoreError::Metadata(e.to_string()))?;
+                return Ok(format!("{}.{}", quote(alias), quote(head)));
+            }
+            let assoc = set
+                .get_association(head)
+                .map_err(|e| StoreError::Metadata(e.to_string()))?;
+            if assoc.cardinality != Cardinality::ToOne {
+                return Err(unsupported(format!("Pfad ueber Collection {head}")));
+            }
+            let ForeignKeySide::Here { column } = &assoc.foreign_key else {
+                return Err(unsupported(format!(
+                    "Navigation {head} ohne lokalen Fremdschluessel"
+                )));
+            };
+            let target = self
+                .require_schema()?
+                .set(&assoc.target_set)
+                .map_err(|e| StoreError::Metadata(e.to_string()))?;
+            let target_alias = self.fresh_alias();
+            let mut join = format!(
+                "{}.{} = {}.{}",
+                quote(&target_alias),
+                quote(ID_COLUMN),
+                quote(alias),
+                quote(column)
+            );
+            if target.draft_enabled {
+                let draft_alias = self.fresh_alias();
+                let target_active = format!("{}.{}", quote(&target_alias), quote(IS_ACTIVE_COLUMN));
+                let draft_active = format!("{}.{}", quote(&draft_alias), quote(IS_ACTIVE_COLUMN));
+                join.push_str(&format!(
+                    " AND ({} OR NOT EXISTS (SELECT 1 FROM {} AS {} WHERE {}.{} = {}.{} AND {}))",
+                    self.dialect.bool_predicate(&target_active, false),
+                    quote(&target.name),
+                    quote(&draft_alias),
+                    quote(&draft_alias),
+                    quote(ID_COLUMN),
+                    quote(&target_alias),
+                    quote(ID_COLUMN),
+                    self.dialect.bool_predicate(&draft_active, false),
+                ));
+            }
+            let value = self.navigation_value(&target_alias, target, rest)?;
+            Ok(format!(
+                "(SELECT {value} FROM {} AS {} WHERE {join})",
+                quote(&target.name),
+                quote(&target_alias)
+            ))
         }
 
         /// Wert eines Lambda-Elements entlang eines Pfads. Jede to-one-Navigation

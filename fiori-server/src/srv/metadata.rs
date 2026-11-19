@@ -6,8 +6,8 @@ use axum::{
 use serde_json::Value;
 
 use super::{
-    Annotations, EntitySet, EntityType, app_entity_names, capability_annotations_for_entity,
-    code_list_annotations,
+    Annotations, EntitySet, EntityType, ODataError, app_entity_names,
+    capability_annotations_for_entity, code_list_annotations, value_help,
 };
 use crate::AppState;
 
@@ -17,16 +17,22 @@ pub(crate) async fn metadata(State(state): State<AppState>) -> Response {
         Err(response) => return response,
     };
     let ddic = state.ddic();
-    let entity_lst: Vec<EntityType> = ddic
+    let projections = match value_help::projections(&ddic) {
+        Ok(projections) => projections,
+        Err(error) => return ODataError::internal(error).into_response(),
+    };
+    let mut entity_lst: Vec<EntityType> = ddic
         .active_entities()
         .map(|x| EntityType::from_entity(&ddic, x))
         .collect();
-    let entity_set_lst: Vec<EntitySet> = ddic
+    entity_lst.extend(projections.iter().map(|p| p.entity_type(&ddic)));
+    let mut entity_set_lst: Vec<EntitySet> = ddic
         .active_entities()
         .map(|x| EntitySet::from_entity(&ddic, x))
         .collect();
+    entity_set_lst.extend(projections.iter().map(|p| p.entity_set(&ddic)));
     let app_entities = app_entity_names(&ddic);
-    let annotation_lst: Vec<Annotations> = ddic
+    let mut annotation_lst: Vec<Annotations> = ddic
         .active_entities()
         .map(|x| {
             Annotations::from_entity(
@@ -38,6 +44,15 @@ pub(crate) async fn metadata(State(state): State<AppState>) -> Response {
         })
         .flatten()
         .collect();
+    for projection in &projections {
+        if let Some((owner, side_effect)) = projection.owner_side_effect() {
+            let block = annotation_lst
+                .iter_mut()
+                .find(|block| block.target == format!("Service.{owner}"))
+                .expect("value-help owner has an annotation block");
+            block.annotations.push(side_effect);
+        }
+    }
 
     let meta = edmx_template(ddic.active_entities().any(|e| e.draft_enabled()));
     let mut type_defs = vec![];
@@ -51,6 +66,11 @@ pub(crate) async fn metadata(State(state): State<AppState>) -> Response {
     let mut annotations = vec![];
     for x in annotation_lst {
         annotations.push(quick_xml::se::to_string(&x).unwrap());
+    }
+    for projection in &projections {
+        for block in projection.annotations(&ddic, &[], &app_entities) {
+            annotations.push(quick_xml::se::to_string(&block).unwrap());
+        }
     }
     for x in ddic.active_entities() {
         annotations.extend(capability_annotations_for_entity(&ddic, x));

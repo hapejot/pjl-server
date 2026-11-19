@@ -246,30 +246,64 @@ impl Annotations {
                             ),
                     );
 
-                    let mut parameters = Collection::new().add_record(
-                        Record::new("Common.ValueListParameterOut")
-                            .add(PropertyValue::new("LocalDataProperty").property_path(name))
-                            .add(
-                                PropertyValue::new("ValueListProperty")
-                                    .string(target_key_of(ddic, entity).0),
-                            ),
-                    );
-                    if let Some(relationship) = ddic.relationships().find(|relationship| {
+                    let relationship = ddic.relationships().find(|relationship| {
                         relationship.many_opt() == Some(entity_name)
                             && relationship.many_property_opt() == Some(f.name())
-                    }) {
+                    });
+                    let value_list_source = relationship.and_then(|relationship| {
+                        relationship
+                            .value_list_source()
+                            .map(|source| (source.entity(), source.key_property()))
+                    });
+                    let value_list_entity = value_list_source
+                        .map(|(entity, _)| entity)
+                        .unwrap_or(entity);
+                    let value_list_key = value_list_source
+                        .map(|(_, key)| lookup_value_list_property(ddic, value_list_entity, key))
+                        .unwrap_or_else(|| target_key_of(ddic, entity).0);
+
+                    let mut parameters = Collection::new().add_record(
+                        Record::new(if value_list_source.is_some() {
+                            "Common.ValueListParameterInOut"
+                        } else {
+                            "Common.ValueListParameterOut"
+                        })
+                        .add(PropertyValue::new("LocalDataProperty").property_path(name))
+                        .add(PropertyValue::new("ValueListProperty").string(value_list_key)),
+                    );
+                    if let Some(relationship) = relationship {
                         for filter in relationship.value_list_filters() {
                             let local_property = lookup_value_list_property(
                                 ddic,
                                 entity_name,
                                 filter.local_property(),
                             );
-                            let target_property =
-                                lookup_value_list_property(ddic, entity, filter.target_property());
+                            let target_property = lookup_value_list_property(
+                                ddic,
+                                value_list_entity,
+                                filter.target_property(),
+                            );
                             parameters = parameters.add_record(value_list_parameter_in(
                                 &local_property,
                                 &target_property,
                             ));
+                        }
+                    }
+                    if let Some(source) = relationship.and_then(|r| r.value_list_source()) {
+                        if ddic
+                            .active_entity(source.entity())
+                            .is_some_and(EntitySpec::draft_enabled)
+                        {
+                            parameters = parameters.add_record(if source.use_local_draft() {
+                                value_list_parameter_in("IsActiveEntity", "IsActiveEntity")
+                            } else {
+                                Record::new("Common.ValueListParameterConstant")
+                                    .add(
+                                        PropertyValue::new("ValueListProperty")
+                                            .string("IsActiveEntity"),
+                                    )
+                                    .add(PropertyValue::new("Constant").boolean(true))
+                            });
                         }
                     }
                     parameters = parameters.add_record(
@@ -277,7 +311,11 @@ impl Annotations {
                             .add(PropertyValue::new("ValueListProperty").string("name")),
                     );
                     annotations.push(value_list_annotation(
-                        format!("{entity}Set"),
+                        if value_list_source.is_some() {
+                            crate::srv::value_help::set_name(entity_name, f.name())
+                        } else {
+                            format!("{value_list_entity}Set")
+                        },
                         false,
                         parameters,
                     ));

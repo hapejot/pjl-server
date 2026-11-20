@@ -82,7 +82,7 @@ impl DdicStore {
     pub fn open(path: impl Into<PathBuf>) -> anyhow::Result<Self> {
         let path = path.into();
         let (base, layout) = if path.exists() {
-            ddic_file::load_files(&path, true)?
+            ddic_file::load_files(&path)?
         } else {
             (
                 json!({"packages": [], "entities": [], "relationships": [], "apps": []}),
@@ -193,6 +193,7 @@ fn save_dictionary(
     layout: Option<&crate::ddic_packages::Layout>,
     json: &Value,
 ) -> Result<Option<crate::ddic_packages::Layout>, StoreError> {
+    info!("save dictionary");
     match layout {
         Some(layout) => ddic_file::save_packages(path, layout, json).map(Some),
         None => ddic_file::save(path, json).map(|()| None),

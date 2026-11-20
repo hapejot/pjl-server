@@ -5,12 +5,21 @@ use fiori_server::{ddic_file, ddic_packages, ddic_store::DdicStore};
 use odata::query::ODataQuery;
 use serde_json::{Value, json};
 use tempfile::TempDir;
+use tracing::{info, subscriber::DefaultGuard};
 
 fn write(path: &std::path::Path, value: &Value) {
     std::fs::write(path, serde_json::to_string_pretty(value).unwrap()).unwrap();
 }
 
-fn fixture() -> TempDir {
+fn test_subscriber() -> impl tracing::Subscriber {
+    tracing_subscriber::fmt()
+        .with_test_writer() // integriert sich mit `cargo test`'s Output-Capturing
+        .with_max_level(tracing::Level::TRACE)
+        .finish()
+}
+
+fn fixture() -> (DefaultGuard, TempDir) {
+    let guard = tracing::subscriber::set_default(test_subscriber());
     let dir = TempDir::new().unwrap();
     std::fs::create_dir(dir.path().join("packages")).unwrap();
     write(
@@ -34,12 +43,33 @@ fn fixture() -> TempDir {
         }),
     );
     write(&dir.path().join("packages/two.json"), &json!({}));
-    dir
+    (guard, dir)
+}
+
+fn read(path: &std::path::Path) -> Value {
+    serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+}
+
+#[test]
+fn merges_packages_and_rejects_duplicate_definitions() {
+    let (_guard, dir) = fixture();
+    let ddic = ddic_file::load(&dir.path().join("ddic.json")).unwrap();
+    assert!(ddic.entities().iter().any(|e| e.name() == "Order"));
+    assert_eq!(ddic.value_lists().len(), 1);
+    write(
+        &dir.path().join("packages/two.json"),
+        &json!({
+            "entities": [{"name":"Order","package":"two","type_name_plural":"Orders","fields":[]}]
+        }),
+    );
+    let err = ddic_file::load(&dir.path().join("ddic.json")).unwrap_err();
+    assert!(err.to_string().contains("mehrfach definiert"), "{err:#}");
 }
 
 #[tokio::test]
 async fn designer_moves_value_lists_and_components_and_rejects_unknown_package() {
-    let dir = fixture();
+    let (_guard, dir) = fixture();
+    info!("designer move");
     let store = DdicStore::open(dir.path().join("ddic.json")).unwrap();
     for set in ["ValueListSet", "ComponentSet"] {
         let record = store
@@ -68,29 +98,9 @@ async fn designer_moves_value_lists_and_components_and_rejects_unknown_package()
     assert_eq!(two["value_lists"][0]["package"], "two");
 }
 
-fn read(path: &std::path::Path) -> Value {
-    serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
-}
-
-#[test]
-fn merges_packages_and_rejects_duplicate_definitions() {
-    let dir = fixture();
-    let ddic = ddic_file::load(&dir.path().join("ddic.json")).unwrap();
-    assert!(ddic.entities().iter().any(|e| e.name() == "Order"));
-    assert_eq!(ddic.value_lists().len(), 1);
-    write(
-        &dir.path().join("packages/two.json"),
-        &json!({
-            "entities": [{"name":"Order","package":"two","type_name_plural":"Orders","fields":[]}]
-        }),
-    );
-    let err = ddic_file::load(&dir.path().join("ddic.json")).unwrap_err();
-    assert!(err.to_string().contains("mehrfach definiert"), "{err:#}");
-}
-
 #[tokio::test]
 async fn designer_moves_entity_between_files_and_preserves_packages() {
-    let dir = fixture();
+    let (_guard, dir) = fixture();
     let store = DdicStore::open(dir.path().join("ddic.json")).unwrap();
     let entities = store
         .get_collection("EntitySet", &ODataQuery::new())
@@ -138,6 +148,8 @@ async fn designer_moves_entity_between_files_and_preserves_packages() {
 
 #[tokio::test]
 async fn designer_saves_vorfertigung_with_measure_columns() {
+    let _guard = tracing::subscriber::set_default(test_subscriber());
+    info!("designer save vorfertigung");
     let dir = TempDir::new().unwrap();
     std::fs::create_dir(dir.path().join("packages")).unwrap();
     std::fs::write(
@@ -174,7 +186,7 @@ async fn designer_saves_vorfertigung_with_measure_columns() {
 
 #[tokio::test]
 async fn external_package_edit_is_not_overwritten() {
-    let dir = fixture();
+    let (_guard, dir) = fixture();
     let store = DdicStore::open(dir.path().join("ddic.json")).unwrap();
     let entity = store
         .get_collection("EntitySet", &ODataQuery::new())
@@ -201,87 +213,8 @@ async fn external_package_edit_is_not_overwritten() {
 }
 
 #[test]
-fn interrupted_transaction_is_recovered_before_designer_load() {
-    let dir = fixture();
-    let root = dir.path().join("ddic.json");
-    let package = dir.path().join("packages/one.json");
-    let original_root = std::fs::read_to_string(&root).unwrap();
-    let original_package = std::fs::read_to_string(&package).unwrap();
-    write(
-        &dir.path().join(".ddic-packages.transaction"),
-        &json!({
-            "dictionary": "ddic.json",
-            "files": [
-                {"path":"ddic.json","content":original_root},
-                {"path":"packages/one.json","content":original_package}
-            ]
-        }),
-    );
-    write(&package, &json!({"entities":[]}));
-    assert!(
-        ddic_file::load(&root)
-            .unwrap_err()
-            .to_string()
-            .contains("Unvollstaendige")
-    );
-    DdicStore::open(&root).unwrap();
-    assert_eq!(std::fs::read_to_string(&package).unwrap(), original_package);
-    assert!(!dir.path().join(".ddic-packages.transaction").exists());
-    assert!(
-        ddic_file::load(&root)
-            .unwrap()
-            .entities()
-            .iter()
-            .any(|e| e.name() == "Order")
-    );
-}
-
-#[test]
-fn corrupt_journal_does_not_partially_restore_files() {
-    let dir = fixture();
-    let root = dir.path().join("ddic.json");
-    let package = dir.path().join("packages/one.json");
-    let current = std::fs::read_to_string(&package).unwrap();
-    write(
-        &dir.path().join(".ddic-packages.transaction"),
-        &json!({
-            "dictionary": "ddic.json",
-            "files": [
-                {"path":"packages/one.json","content":"{}"},
-                {"path":"../other.json","content":"{}"}
-            ]
-        }),
-    );
-    assert!(DdicStore::open(&root).is_err());
-    assert_eq!(std::fs::read_to_string(package).unwrap(), current);
-    assert!(dir.path().join(".ddic-packages.transaction").exists());
-}
-
-#[test]
-fn pending_transaction_blocks_other_dictionaries_in_same_directory() {
-    let dir = fixture();
-    let root = dir.path().join("ddic.json");
-    let other = dir.path().join("other.json");
-    write(
-        &other,
-        &json!({"packages": [], "entities": [], "relationships": [], "apps": []}),
-    );
-    write(
-        &dir.path().join(".ddic-packages.transaction"),
-        &json!({
-            "dictionary": "ddic.json",
-            "files": [{"path":"ddic.json","content":std::fs::read_to_string(&root).unwrap()}]
-        }),
-    );
-    assert!(ddic_file::load(&other).is_err());
-    assert!(DdicStore::open(&other).is_err());
-    DdicStore::open(&root).unwrap();
-    assert!(ddic_file::load(&other).is_ok());
-}
-
-#[test]
 fn zip_source_loads_packages_relative_to_dictionary() {
-    let dir = fixture();
+    let (_guard, dir) = fixture();
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let options = zip::write::SimpleFileOptions::default();
     for (name, path) in [

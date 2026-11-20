@@ -364,7 +364,7 @@ fn load_dictionary(
     info!("loading ddic from {}", file.label);
     debug!("file: {:?}", file.fs_path);
     let value = match &file.fs_path {
-        Some(path) => crate::ddic_file::load_files(path, false)?.0,
+        Some(path) => crate::ddic_file::load_files(path)?.0,
         None => crate::ddic_packages::load(file.repo.as_ref(), &file.rel)?.0,
     };
     let mut ddic: DataDictionary = serde_json::from_value(value)

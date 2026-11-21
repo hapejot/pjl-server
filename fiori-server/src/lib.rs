@@ -22,6 +22,7 @@ pub mod hook;
 pub mod overlay;
 pub mod repo_serve;
 pub mod script;
+pub mod smalltalk;
 pub mod server;
 pub mod sources;
 pub mod srv;

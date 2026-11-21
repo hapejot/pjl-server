@@ -6,7 +6,7 @@
 #   Launchpad  -> http://localhost:8090/   (App-Manifest: /apps/<Entitaet>/manifest.json, z. B. Account)
 #   Daten neu  -> docker compose -f poc-crm/compose.yaml down -v
 #   Testdaten  -> python3 poc-crm/seed-testdata.py   (OData, Standard: http://localhost:8090/Service)
-#   Scripting  -> poc-crm/scripts/AccountSet.rhai; Log-Ausgabe mit docker compose -f poc-crm/compose.yaml logs -f runtime
+#   Scripting  -> poc-crm/scripts/AccountSet.st (Smalltalk); Komponenten können weiterhin als Rhai-Dateien vorliegen.
 #
 # Store: PostgreSQL (Dienst db). Das Schema wird beim Start aus poc-crm/ddic.json angelegt.
 # Modell und Skripte liegen in poc-crm/ddic.json und poc-crm/scripts/ (read-only eingebunden).

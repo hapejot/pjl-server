@@ -50,7 +50,7 @@ impl From<HookError> for StoreError {
     fn from(e: HookError) -> Self {
         match e {
             HookError::Store(s) => s,
-            HookError::Hook(msg) => StoreError::Conflict(format!("Audit: {msg}")),
+            HookError::Hook(msg) => StoreError::Conflict(msg),
         }
     }
 }

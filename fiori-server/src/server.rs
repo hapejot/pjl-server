@@ -60,23 +60,56 @@ pub async fn run_with(
 
     // Skripte zuletzt registriert: ihre Hooks liegen aussen und sehen jeden Request zuerst.
     if let Some(dir) = &sources.scripts {
-        let hooks = match &dir.fs_dir {
-            Some(path) => script_hooks::ScriptHooks::load(path),
-            None => script_hooks::ScriptHooks::load_from(dir.repo.clone(), dir.label.clone()),
+        let has_smalltalk = dir.fs_dir.as_ref().is_some_and(|path| {
+            std::fs::read_dir(path).is_ok_and(|entries| {
+                entries.filter_map(|entry| entry.ok()).any(|entry| {
+                    entry.path().extension().is_some_and(|ext| ext == "st")
+                })
+            })
+        });
+        if has_smalltalk {
+            let path = dir.fs_dir.as_ref().expect("Smalltalk scripts require a filesystem source");
+            let hooks = smalltalk_hooks::SmalltalkHooks::load(path)
+                .with_context(|| format!("cannot load Smalltalk scripts '{}'", dir.label))?;
+            let smalltalk_extension =
+                crate::smalltalk::SmalltalkExtension::new(hooks).with_actions(&base)?;
+            for action in smalltalk_extension.actions() {
+                anyhow::ensure!(
+                    crate::extension::find_action(&extensions, &action.set, &action.name).is_none(),
+                    "{}: Aktion '{}' ist bereits registriert",
+                    action.set,
+                    action.name
+                );
+            }
+            extensions.push(Arc::new(smalltalk_extension));
         }
-        .with_context(|| format!("cannot load scripts '{}'", dir.label))?;
-        crate::script::bind_components(&hooks, &base)
-            .with_context(|| format!("components in '{}'", dir.label))?;
-        let script_extension = crate::script::ScriptExtension::new(hooks).with_actions(&base)?;
-        for action in script_extension.actions() {
-            anyhow::ensure!(
-                crate::extension::find_action(&extensions, &action.set, &action.name).is_none(),
-                "{}: Aktion '{}' ist bereits registriert",
-                action.set,
-                action.name
-            );
+        let has_rhai = dir.fs_dir.as_ref().is_some_and(|path| {
+            std::fs::read_dir(path).is_ok_and(|entries| {
+                entries.filter_map(|entry| entry.ok()).any(|entry| {
+                    entry.path().extension().is_some_and(|ext| ext == "rhai")
+                        || entry.path().join("components").is_dir()
+                })
+            })
+        });
+        if has_rhai {
+            let hooks = match &dir.fs_dir {
+                Some(path) => script_hooks::ScriptHooks::load(path),
+                None => script_hooks::ScriptHooks::load_from(dir.repo.clone(), dir.label.clone()),
+            }
+            .with_context(|| format!("cannot load scripts '{}'", dir.label))?;
+            crate::script::bind_components(&hooks, &base)
+                .with_context(|| format!("components in '{}'", dir.label))?;
+            let script_extension = crate::script::ScriptExtension::new(hooks).with_actions(&base)?;
+            for action in script_extension.actions() {
+                anyhow::ensure!(
+                    crate::extension::find_action(&extensions, &action.set, &action.name).is_none(),
+                    "{}: Aktion '{}' ist bereits registriert",
+                    action.set,
+                    action.name
+                );
+            }
+            extensions.push(Arc::new(script_extension));
         }
-        extensions.push(Arc::new(script_extension));
     } else if base
         .entities()
         .iter()

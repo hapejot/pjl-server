@@ -87,6 +87,43 @@ async fn example_hook() -> anyhow::Result<()> {
     Ok(())
 }
 
+struct RejectDraftPrepare;
+
+#[async_trait::async_trait]
+impl Hook for RejectDraftPrepare {
+    async fn before_with_current(
+        &self,
+        _store: &Extender,
+        _set_name: &str,
+        op: Operation,
+        _key: Option<&EntityKey>,
+        _value: &mut Value,
+        _current: &CurrentRecords,
+    ) -> Result<(), HookError> {
+        if op == Operation::DraftActivate {
+            return Err(HookError::Hook("Stadt ist nicht Hannover".to_string()));
+        }
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn draft_activate_rejects_invalid_draft() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let inner = Arc::new(YamlStore::open(dir.path())?);
+    let store = Extender::new(inner, Arc::new(RejectDraftPrepare))?;
+    let id = uuid::Uuid::new_v4();
+    let key = EntityKey::new(id, false);
+
+    let error = store.draft_activate("ItemSet", &key).await.unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Conflict: Stadt ist nicht Hannover",
+        "{error}"
+    );
+    Ok(())
+}
+
 #[derive(Default)]
 struct CurrentRecordsHook {
     seen: Mutex<Vec<(Operation, bool, bool)>>,

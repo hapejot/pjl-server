@@ -18,6 +18,7 @@ percent-encoding = "2"
 multer = "3.1.0"
 odata = { version = "0.1.0", path = "../odata" }
 script-hooks = { version = "0.1.0", path = "../script-hooks" }
+smalltalk-hooks = { version = "0.1.0", path = "../smalltalk-hooks" }
 odata_yaml_store = { version = "0.1.0", path = "../odata-yaml-store" }
 postgres-relational-store = { version = "0.1.0", path = "../postgres-relational-store" }
 quick-xml = { version = "0.42.0", features = ["serde", "serialize"] }

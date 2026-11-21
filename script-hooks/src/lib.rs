@@ -32,7 +32,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use file_repo::{DirRepository, FileRepository};
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use odata::query::ODataQuery;
 use rhai::{AST, Dynamic, Engine, EvalAltResult, Scope};
 use serde_json::{Value, json};
@@ -114,11 +114,15 @@ impl ScriptHooks {
         let mut watcher =
             notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
                 if let Ok(event) = res {
+                    let data_change = matches!(
+                        event.kind,
+                        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+                    );
                     let relevant = event
                         .paths
                         .iter()
                         .any(|p| p.extension().is_some_and(|e| e == "rhai"));
-                    if relevant {
+                    if data_change && relevant {
                         let _ = tx.send(());
                     }
                 }

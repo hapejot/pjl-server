@@ -1,0 +1,17 @@
+[package]
+name = "smalltalk-hooks"
+version = "0.1.0"
+edition = "2024"
+description = "Smalltalk entity classes and methods as server hooks."
+
+[dependencies]
+anyhow = "1"
+include_dir = "0.7"
+notify = "8"
+serde = "1"
+serde_json = "1"
+st = { git = "https://github.com/hapejot/pjl-st.git", rev = "b2cfb50c092f7ea3c748cb504061220ad6fef0d1" }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
